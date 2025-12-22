@@ -212,6 +212,8 @@ func (mlo *MultiLayerOrchestrator) executeStep(ctx context.Context, step *models
 }
 
 // executeInfrastructureStep executes infrastructure layer remediation
+//
+//nolint:unparam // ctx kept for API consistency and future use
 func (mlo *MultiLayerOrchestrator) executeInfrastructureStep(ctx context.Context, step *models.RemediationStep) error {
 	mlo.log.WithFields(logrus.Fields{
 		"action": step.ActionType,
@@ -234,6 +236,8 @@ func (mlo *MultiLayerOrchestrator) executeInfrastructureStep(ctx context.Context
 }
 
 // executePlatformStep executes platform layer remediation
+//
+//nolint:unparam // ctx kept for API consistency and future use
 func (mlo *MultiLayerOrchestrator) executePlatformStep(ctx context.Context, step *models.RemediationStep) error {
 	mlo.log.WithFields(logrus.Fields{
 		"action": step.ActionType,
@@ -436,6 +440,8 @@ func (mlo *MultiLayerOrchestrator) executeRollback(ctx context.Context, step *mo
 }
 
 // rollbackApplicationStep rolls back application layer changes
+//
+//nolint:unparam // ctx kept for API consistency and future use
 func (mlo *MultiLayerOrchestrator) rollbackApplicationStep(ctx context.Context, step *models.RemediationStep) error {
 	mlo.log.WithFields(logrus.Fields{
 		"action": step.ActionType,
