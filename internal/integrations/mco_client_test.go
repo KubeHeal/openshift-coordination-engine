@@ -82,11 +82,11 @@ func TestNewMCOClient(t *testing.T) {
 
 func TestMCOClient_GetPoolStatus(t *testing.T) {
 	tests := []struct {
-		name             string
-		pool             *unstructured.Unstructured
-		expectedStatus   *MachineConfigPoolStatus
-		expectError      bool
-		errorContains    string
+		name           string
+		pool           *unstructured.Unstructured
+		expectedStatus *MachineConfigPoolStatus
+		expectError    bool
+		errorContains  string
 	}{
 		{
 			name: "stable pool",

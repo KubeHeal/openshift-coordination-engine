@@ -84,47 +84,84 @@ func (mc *MCOClient) parsePoolStatus(pool *unstructured.Unstructured) (*MachineC
 		return nil, fmt.Errorf("status not found in MachineConfigPool")
 	}
 
-	// Machine counts
-	if count, found, _ := unstructured.NestedInt64(statusMap, "machineCount"); found {
-		status.MachineCount = int32(count)
-	}
-	if count, found, _ := unstructured.NestedInt64(statusMap, "updatedMachineCount"); found {
-		status.UpdatedMachineCount = int32(count)
-	}
-	if count, found, _ := unstructured.NestedInt64(statusMap, "readyMachineCount"); found {
-		status.ReadyMachineCount = int32(count)
-	}
-	if count, found, _ := unstructured.NestedInt64(statusMap, "degradedMachineCount"); found {
-		status.DegradedMachineCount = int32(count)
-	}
+	// Parse machine counts
+	mc.parseMachineCounts(statusMap, status)
 
-	// Current configuration
-	if config, found, _ := unstructured.NestedString(statusMap, "configuration", "name"); found {
-		status.CurrentConfiguration = config
-	}
+	// Parse current configuration
+	mc.parseConfiguration(statusMap, status)
 
 	// Parse conditions
-	conditions, found, err := unstructured.NestedSlice(statusMap, "conditions")
-	if err == nil && found {
-		for _, cond := range conditions {
-			condMap, ok := cond.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			condType, _, _ := unstructured.NestedString(condMap, "type")
-			condStatus, _, _ := unstructured.NestedString(condMap, "status")
-
-			if condType == "Updating" && condStatus == "True" {
-				status.Updating = true
-			}
-			if condType == "Degraded" && condStatus == "True" {
-				status.Degraded = true
-			}
-		}
-	}
+	mc.parseConditions(statusMap, status)
 
 	return status, nil
+}
+
+// parseMachineCounts extracts machine count fields from status
+func (mc *MCOClient) parseMachineCounts(statusMap map[string]interface{}, status *MachineConfigPoolStatus) {
+	if count, found, err := unstructured.NestedInt64(statusMap, "machineCount"); err == nil && found {
+		status.MachineCount = mc.safeInt32Convert(count)
+	}
+	if count, found, err := unstructured.NestedInt64(statusMap, "updatedMachineCount"); err == nil && found {
+		status.UpdatedMachineCount = mc.safeInt32Convert(count)
+	}
+	if count, found, err := unstructured.NestedInt64(statusMap, "readyMachineCount"); err == nil && found {
+		status.ReadyMachineCount = mc.safeInt32Convert(count)
+	}
+	if count, found, err := unstructured.NestedInt64(statusMap, "degradedMachineCount"); err == nil && found {
+		status.DegradedMachineCount = mc.safeInt32Convert(count)
+	}
+}
+
+// safeInt32Convert safely converts int64 to int32, clamping to int32 limits
+func (mc *MCOClient) safeInt32Convert(val int64) int32 {
+	const maxInt32 = 2147483647
+	const minInt32 = -2147483648
+
+	if val > maxInt32 {
+		mc.log.WithField("value", val).Warn("Machine count exceeds int32 max, clamping to max")
+		return maxInt32
+	}
+	if val < minInt32 {
+		mc.log.WithField("value", val).Warn("Machine count below int32 min, clamping to min")
+		return minInt32
+	}
+	return int32(val)
+}
+
+// parseConfiguration extracts current configuration name from status
+func (mc *MCOClient) parseConfiguration(statusMap map[string]interface{}, status *MachineConfigPoolStatus) {
+	if config, found, err := unstructured.NestedString(statusMap, "configuration", "name"); err == nil && found {
+		status.CurrentConfiguration = config
+	}
+}
+
+// parseConditions extracts updating and degraded flags from conditions
+func (mc *MCOClient) parseConditions(statusMap map[string]interface{}, status *MachineConfigPoolStatus) {
+	conditions, found, err := unstructured.NestedSlice(statusMap, "conditions")
+	if err != nil || !found {
+		return
+	}
+
+	for _, cond := range conditions {
+		condMap, ok := cond.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		condType, typeFound, typeErr := unstructured.NestedString(condMap, "type")
+		condStatus, statusFound, statusErr := unstructured.NestedString(condMap, "status")
+
+		if typeErr != nil || !typeFound || statusErr != nil || !statusFound {
+			continue
+		}
+
+		if condType == "Updating" && condStatus == "True" {
+			status.Updating = true
+		}
+		if condType == "Degraded" && condStatus == "True" {
+			status.Degraded = true
+		}
+	}
 }
 
 // IsPoolStable returns true if pool is not updating and not degraded
@@ -203,7 +240,7 @@ func (mc *MCOClient) ListMachineConfigPools(ctx context.Context) ([]string, erro
 		return nil, fmt.Errorf("failed to list MachineConfigPools: %w", err)
 	}
 
-	var poolNames []string
+	poolNames := make([]string, 0, len(pools.Items))
 	for _, pool := range pools.Items {
 		poolNames = append(poolNames, pool.GetName())
 	}
