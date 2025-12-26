@@ -1,7 +1,7 @@
 # Dockerfile for OpenShift Coordination Engine (Go)
 
 # Stage 1: Build the Go binary
-FROM registry.access.redhat.com/ubi9/go-toolset:1.22 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:9.7 AS builder
 
 WORKDIR /workspace
 
