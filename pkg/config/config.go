@@ -39,7 +39,7 @@ type Config struct {
 	KubernetesBurst int     `json:"kubernetes_burst"`
 }
 
-// KServeConfig holds configuration for KServe integration (ADR-039)
+// KServeConfig holds configuration for KServe integration (ADR-039, ADR-040)
 type KServeConfig struct {
 	// Enabled enables KServe integration (replaces ML_SERVICE_URL)
 	Enabled bool `json:"enabled"`
@@ -48,13 +48,18 @@ type KServeConfig struct {
 	Namespace string `json:"namespace"`
 
 	// Services maps service types to KServe InferenceService names
+	// Legacy hardcoded services for backward compatibility
 	Services KServeServices `json:"services"`
+
+	// DynamicServices maps model names to KServe InferenceService names
+	// Discovered from KSERVE_*_SERVICE environment variables (ADR-040)
+	DynamicServices map[string]string `json:"dynamic_services,omitempty"`
 
 	// Timeout for KServe API calls
 	Timeout time.Duration `json:"timeout"`
 }
 
-// KServeServices holds the names of KServe InferenceServices
+// KServeServices holds the names of KServe InferenceServices (legacy, for backward compatibility)
 type KServeServices struct {
 	// AnomalyDetector is the KServe service for anomaly detection
 	AnomalyDetector string `json:"anomaly_detector"`
@@ -77,6 +82,36 @@ func (k *KServeConfig) GetPredictiveAnalyticsURL() string {
 		return ""
 	}
 	return fmt.Sprintf("http://%s.%s.svc.cluster.local", k.Services.PredictiveAnalytics, k.Namespace)
+}
+
+// GetAllServices returns all registered KServe services (legacy + dynamic)
+func (k *KServeConfig) GetAllServices() map[string]string {
+	services := make(map[string]string)
+
+	// Add legacy services if configured
+	if k.Services.AnomalyDetector != "" {
+		services["anomaly-detector"] = k.Services.AnomalyDetector
+	}
+	if k.Services.PredictiveAnalytics != "" {
+		services["predictive-analytics"] = k.Services.PredictiveAnalytics
+	}
+
+	// Add dynamic services
+	for name, svc := range k.DynamicServices {
+		services[name] = svc
+	}
+
+	return services
+}
+
+// HasServices returns true if any KServe services are configured
+func (k *KServeConfig) HasServices() bool {
+	return len(k.GetAllServices()) > 0
+}
+
+// ServiceCount returns the number of configured KServe services
+func (k *KServeConfig) ServiceCount() int {
+	return len(k.GetAllServices())
 }
 
 // Default configuration values
@@ -123,7 +158,7 @@ func Load() (*Config, error) {
 		KubernetesQPS:   getEnvAsFloat32("KUBERNETES_QPS", DefaultKubernetesQPS),
 		KubernetesBurst: getEnvAsInt("KUBERNETES_BURST", DefaultKubernetesBurst),
 
-		// KServe configuration (ADR-039)
+		// KServe configuration (ADR-039, ADR-040)
 		KServe: KServeConfig{
 			Enabled:   getEnvAsBool("ENABLE_KSERVE_INTEGRATION", DefaultKServeEnabled),
 			Namespace: getEnv("KSERVE_NAMESPACE", DefaultKServeNamespace),
@@ -131,7 +166,8 @@ func Load() (*Config, error) {
 				AnomalyDetector:     getEnv("KSERVE_ANOMALY_DETECTOR_SERVICE", ""),
 				PredictiveAnalytics: getEnv("KSERVE_PREDICTIVE_ANALYTICS_SERVICE", ""),
 			},
-			Timeout: getEnvAsDuration("KSERVE_TIMEOUT", DefaultKServeTimeout),
+			DynamicServices: discoverKServeServicesFromEnv(),
+			Timeout:         getEnvAsDuration("KSERVE_TIMEOUT", DefaultKServeTimeout),
 		},
 	}
 
@@ -172,13 +208,13 @@ func (c *Config) Validate() error {
 
 	// Validate ML integration: either KServe or legacy ML_SERVICE_URL must be configured
 	if c.KServe.Enabled {
-		// Validate KServe configuration (ADR-039)
+		// Validate KServe configuration (ADR-039, ADR-040)
 		if c.KServe.Namespace == "" {
 			errors = append(errors, "kserve.namespace cannot be empty when KServe is enabled")
 		}
-		// At least one service must be configured
-		if c.KServe.Services.AnomalyDetector == "" && c.KServe.Services.PredictiveAnalytics == "" {
-			errors = append(errors, "at least one KServe service must be configured (KSERVE_ANOMALY_DETECTOR_SERVICE or KSERVE_PREDICTIVE_ANALYTICS_SERVICE)")
+		// At least one service must be configured (legacy or dynamic)
+		if !c.KServe.HasServices() {
+			errors = append(errors, "at least one KServe service must be configured via KSERVE_*_SERVICE environment variables")
 		}
 		if c.KServe.Timeout < 1*time.Second {
 			errors = append(errors, fmt.Sprintf("kserve.timeout too short: %s (must be >= 1s)", c.KServe.Timeout))
@@ -316,4 +352,49 @@ func getEnvAsSlice(key string, defaultVal []string) []string {
 		return defaultVal
 	}
 	return result
+}
+
+// discoverKServeServicesFromEnv discovers KServe services from environment variables.
+// Pattern: KSERVE_<MODEL_NAME>_SERVICE = service-name
+// Example: KSERVE_DISK_FAILURE_PREDICTOR_SERVICE = disk-failure-predictor-predictor
+// This enables users to add custom models via values-hub.yaml without code changes (ADR-040).
+func discoverKServeServicesFromEnv() map[string]string {
+	services := make(map[string]string)
+
+	for _, env := range os.Environ() {
+		// Skip non-KServe environment variables
+		if !strings.HasPrefix(env, "KSERVE_") {
+			continue
+		}
+
+		// Skip known configuration variables
+		if strings.HasPrefix(env, "KSERVE_NAMESPACE") ||
+			strings.HasPrefix(env, "KSERVE_TIMEOUT") ||
+			strings.HasPrefix(env, "KSERVE_ANOMALY_DETECTOR_SERVICE") ||
+			strings.HasPrefix(env, "KSERVE_PREDICTIVE_ANALYTICS_SERVICE") {
+			continue
+		}
+
+		// Check for _SERVICE suffix
+		if !strings.Contains(env, "_SERVICE=") {
+			continue
+		}
+
+		parts := strings.SplitN(env, "=", 2)
+		if len(parts) != 2 || parts[1] == "" {
+			continue
+		}
+
+		envKey := parts[0]
+		serviceName := parts[1]
+
+		// Convert KSERVE_DISK_FAILURE_PREDICTOR_SERVICE → disk-failure-predictor
+		modelName := strings.TrimPrefix(envKey, "KSERVE_")
+		modelName = strings.TrimSuffix(modelName, "_SERVICE")
+		modelName = strings.ToLower(strings.ReplaceAll(modelName, "_", "-"))
+
+		services[modelName] = serviceName
+	}
+
+	return services
 }

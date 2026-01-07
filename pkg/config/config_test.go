@@ -782,3 +782,199 @@ func TestConfig_HasMLIntegration(t *testing.T) {
 		})
 	}
 }
+
+// TestDiscoverKServeServicesFromEnv tests dynamic service discovery (ADR-040)
+func TestDiscoverKServeServicesFromEnv(t *testing.T) {
+	clearEnv(t)
+
+	// Set up environment variables for dynamic discovery
+	os.Setenv("KSERVE_DISK_FAILURE_PREDICTOR_SERVICE", "disk-failure-predictor-predictor")
+	os.Setenv("KSERVE_NETWORK_ANOMALY_SERVICE", "network-anomaly-predictor")
+	os.Setenv("KSERVE_CUSTOM_MODEL_SERVICE", "custom-model-predictor")
+	// These should be ignored (already handled by legacy config)
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	os.Setenv("KSERVE_PREDICTIVE_ANALYTICS_SERVICE", "predictive-analytics-predictor")
+	// These should be ignored (configuration variables)
+	os.Setenv("KSERVE_NAMESPACE", "self-healing-platform")
+	os.Setenv("KSERVE_TIMEOUT", "10s")
+	defer func() {
+		os.Unsetenv("KSERVE_DISK_FAILURE_PREDICTOR_SERVICE")
+		os.Unsetenv("KSERVE_NETWORK_ANOMALY_SERVICE")
+		os.Unsetenv("KSERVE_CUSTOM_MODEL_SERVICE")
+		os.Unsetenv("KSERVE_ANOMALY_DETECTOR_SERVICE")
+		os.Unsetenv("KSERVE_PREDICTIVE_ANALYTICS_SERVICE")
+		os.Unsetenv("KSERVE_NAMESPACE")
+		os.Unsetenv("KSERVE_TIMEOUT")
+	}()
+
+	services := discoverKServeServicesFromEnv()
+
+	// Should have 3 dynamic services (legacy ones are filtered out)
+	assert.Len(t, services, 3)
+	assert.Equal(t, "disk-failure-predictor-predictor", services["disk-failure-predictor"])
+	assert.Equal(t, "network-anomaly-predictor", services["network-anomaly"])
+	assert.Equal(t, "custom-model-predictor", services["custom-model"])
+
+	// Legacy services should not be in dynamic services
+	_, hasLegacyAnomaly := services["anomaly-detector"]
+	assert.False(t, hasLegacyAnomaly, "anomaly-detector should not be in dynamic services")
+	_, hasLegacyPredictive := services["predictive-analytics"]
+	assert.False(t, hasLegacyPredictive, "predictive-analytics should not be in dynamic services")
+}
+
+func TestKServeConfig_GetAllServices(t *testing.T) {
+	kserve := KServeConfig{
+		Enabled:   true,
+		Namespace: "self-healing-platform",
+		Services: KServeServices{
+			AnomalyDetector:     "anomaly-detector-predictor",
+			PredictiveAnalytics: "predictive-analytics-predictor",
+		},
+		DynamicServices: map[string]string{
+			"disk-failure-predictor": "disk-failure-predictor-predictor",
+			"network-anomaly":        "network-anomaly-predictor",
+		},
+	}
+
+	services := kserve.GetAllServices()
+
+	assert.Len(t, services, 4)
+	assert.Equal(t, "anomaly-detector-predictor", services["anomaly-detector"])
+	assert.Equal(t, "predictive-analytics-predictor", services["predictive-analytics"])
+	assert.Equal(t, "disk-failure-predictor-predictor", services["disk-failure-predictor"])
+	assert.Equal(t, "network-anomaly-predictor", services["network-anomaly"])
+}
+
+func TestKServeConfig_HasServices(t *testing.T) {
+	tests := []struct {
+		name     string
+		kserve   KServeConfig
+		expected bool
+	}{
+		{
+			name: "has legacy services",
+			kserve: KServeConfig{
+				Services: KServeServices{AnomalyDetector: "anomaly-detector"},
+			},
+			expected: true,
+		},
+		{
+			name: "has dynamic services",
+			kserve: KServeConfig{
+				DynamicServices: map[string]string{"custom-model": "custom-model-predictor"},
+			},
+			expected: true,
+		},
+		{
+			name: "has both",
+			kserve: KServeConfig{
+				Services:        KServeServices{AnomalyDetector: "anomaly-detector"},
+				DynamicServices: map[string]string{"custom-model": "custom-model-predictor"},
+			},
+			expected: true,
+		},
+		{
+			name:     "no services",
+			kserve:   KServeConfig{},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.kserve.HasServices())
+		})
+	}
+}
+
+func TestKServeConfig_ServiceCount(t *testing.T) {
+	tests := []struct {
+		name     string
+		kserve   KServeConfig
+		expected int
+	}{
+		{
+			name: "legacy only",
+			kserve: KServeConfig{
+				Services: KServeServices{
+					AnomalyDetector:     "anomaly-detector",
+					PredictiveAnalytics: "predictive-analytics",
+				},
+			},
+			expected: 2,
+		},
+		{
+			name: "dynamic only",
+			kserve: KServeConfig{
+				DynamicServices: map[string]string{
+					"model-a": "service-a",
+					"model-b": "service-b",
+					"model-c": "service-c",
+				},
+			},
+			expected: 3,
+		},
+		{
+			name: "both",
+			kserve: KServeConfig{
+				Services:        KServeServices{AnomalyDetector: "anomaly-detector"},
+				DynamicServices: map[string]string{"custom": "custom-svc"},
+			},
+			expected: 2,
+		},
+		{
+			name:     "none",
+			kserve:   KServeConfig{},
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.kserve.ServiceCount())
+		})
+	}
+}
+
+func TestLoad_WithDynamicKServeServices(t *testing.T) {
+	clearEnv(t)
+
+	// Set up a custom model via environment variable
+	os.Setenv("KSERVE_CUSTOM_MODEL_SERVICE", "custom-model-predictor")
+	defer os.Unsetenv("KSERVE_CUSTOM_MODEL_SERVICE")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	// Should have the custom model in dynamic services
+	assert.NotNil(t, cfg.KServe.DynamicServices)
+	assert.Equal(t, "custom-model-predictor", cfg.KServe.DynamicServices["custom-model"])
+
+	// Should be included in GetAllServices
+	allServices := cfg.KServe.GetAllServices()
+	assert.Contains(t, allServices, "custom-model")
+}
+
+func TestValidate_WithDynamicServicesOnly(t *testing.T) {
+	// Test that validation passes with only dynamic services (no legacy services)
+	cfg := &Config{
+		Port:            8080,
+		MetricsPort:     9090,
+		LogLevel:        "info",
+		Namespace:       "default",
+		HTTPTimeout:     30 * time.Second,
+		KubernetesQPS:   50.0,
+		KubernetesBurst: 100,
+		KServe: KServeConfig{
+			Enabled:         true,
+			Namespace:       "self-healing-platform",
+			Services:        KServeServices{}, // No legacy services
+			DynamicServices: map[string]string{"custom-model": "custom-model-predictor"},
+			Timeout:         10 * time.Second,
+		},
+	}
+
+	err := cfg.Validate()
+	assert.NoError(t, err)
+}
