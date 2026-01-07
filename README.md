@@ -66,6 +66,91 @@ make build
 ./bin/coordination-engine
 ```
 
+## Multi-Version Support
+
+This project supports multiple OpenShift versions through version-specific release branches and container images.
+
+### Supported Versions
+
+| OpenShift | Kubernetes | Image Tag | Branch | Status |
+|-----------|-----------|-----------|--------|--------|
+| 4.18 | 1.31 | `ocp-4.18-latest` | `release-4.18` | ✅ Supported |
+| 4.19 | 1.32 | `ocp-4.19-latest` | `release-4.19` | ✅ Supported |
+| 4.20 | 1.33 | `ocp-4.20-latest` | `release-4.20` | ✅ Supported (Current) |
+
+**Support Policy**: Rolling 3-version window. When OpenShift 4.21 is released, support for 4.18 will be dropped.
+
+### Version Selection
+
+#### Check Your Cluster Version
+
+```bash
+oc version
+# Server Version: 4.19.5
+```
+
+#### Pull Version-Specific Image
+
+```bash
+# For OpenShift 4.18
+podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.18-latest
+
+# For OpenShift 4.19
+podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.19-latest
+
+# For OpenShift 4.20
+podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.20-latest
+```
+
+#### Specific Git SHA Tags
+
+For reproducible deployments, use SHA-tagged images:
+
+```bash
+# Example: OpenShift 4.20 with specific commit
+podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.20-a1b2c3d
+```
+
+#### Deploy with Helm
+
+```bash
+# OpenShift 4.18
+helm install coordination-engine ./charts/coordination-engine \
+  --values ./charts/coordination-engine/values-ocp-4.18.yaml \
+  --namespace self-healing-platform
+
+# OpenShift 4.19
+helm install coordination-engine ./charts/coordination-engine \
+  --values ./charts/coordination-engine/values-ocp-4.19.yaml \
+  --namespace self-healing-platform
+
+# OpenShift 4.20 (or use default values.yaml)
+helm install coordination-engine ./charts/coordination-engine \
+  --values ./charts/coordination-engine/values-ocp-4.20.yaml \
+  --namespace self-healing-platform
+```
+
+Or override directly:
+
+```bash
+helm install coordination-engine ./charts/coordination-engine \
+  --set image.tag=ocp-4.19-latest \
+  --namespace self-healing-platform
+```
+
+**⚠️ Important**: Always match container image version to your OpenShift cluster version to avoid Kubernetes API compatibility issues.
+
+### Development Branches
+
+- **main**: Development branch, auto-syncs to `release-4.20`
+- **release-4.18**: Supports OpenShift 4.18 (client-go v0.31.x)
+- **release-4.19**: Supports OpenShift 4.19 (client-go v0.32.x)
+- **release-4.20**: Supports OpenShift 4.20 (client-go v0.33.x)
+
+**Note**: Direct development happens on `main`. Changes are automatically propagated to `release-4.20` and cherry-picked to older versions as needed.
+
+For detailed version strategy documentation, see [VERSION-STRATEGY.md](docs/VERSION-STRATEGY.md).
+
 ## Configuration
 
 ### Environment Variables

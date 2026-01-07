@@ -6,9 +6,19 @@ replicaCount: 1
 
 # Image configuration
 image:
-  repository: image-registry.openshift-image-registry.svc:5000/self-healing-platform/coordination-engine
+  repository: quay.io/takinosh/openshift-coordination-engine
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Default to latest OCP 4.20 version
+  # Override with --set image.tag=ocp-4.18-latest for other versions
+  tag: "ocp-4.20-latest"
+
+# OpenShift version metadata (informational)
+openshiftVersion:
+  # Target OpenShift version for this deployment
+  # Valid values: "4.18", "4.19", "4.20"
+  target: "4.20"
+  # Corresponding Kubernetes version
+  kubernetes: "1.33"
 
 # Image pull secrets
 imagePullSecrets: []
