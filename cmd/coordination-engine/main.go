@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -195,6 +196,21 @@ func main() {
 	// Coordination endpoints (multi-layer remediation)
 	coordinationHandler.RegisterRoutes(router)
 	log.Info("Coordination API endpoints registered")
+
+	// Add simple /health endpoint for backward compatibility with deployments
+	// This provides a lightweight health check for liveness/readiness probes
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		response := map[string]string{
+			"status":  "ok",
+			"version": Version,
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.WithError(err).Error("Failed to encode simple health response")
+		}
+	}).Methods("GET")
+	log.Info("Simple /health endpoint registered for backward compatibility")
 
 	// Metrics server (separate port)
 	metricsRouter := mux.NewRouter()
