@@ -2,9 +2,9 @@ name: Integration Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'release-4.18', 'release-4.19', 'release-4.20' ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, 'release-4.18', 'release-4.19', 'release-4.20' ]
   schedule:
     # Run integration tests daily at 2 AM UTC
     - cron: '0 2 * * *'
@@ -184,5 +184,54 @@ jobs:
           path: |
             test/integration/*.log
             test/e2e/*.log
+            coverage/*.out
+          retention-days: 7
+
+  version-compatibility-test:
+    name: Test OCP Version Compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ocp_version: ['4.18', '4.19', '4.20']
+        include:
+          - ocp_version: '4.18'
+            k8s_version: 'v1.31.10'
+            client_go_version: 'v0.31.3'
+          - ocp_version: '4.19'
+            k8s_version: 'v1.32.0'
+            client_go_version: 'v0.32.0'
+          - ocp_version: '4.20'
+            k8s_version: 'v1.33.0'
+            client_go_version: 'v0.33.0'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: release-${{ matrix.ocp_version }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Display version info
+        run: |
+          echo "Testing OpenShift ${{ matrix.ocp_version }} compatibility"
+          echo "Kubernetes version: ${{ matrix.k8s_version }}"
+          echo "client-go version: ${{ matrix.client_go_version }}"
+
+      - name: Run tests for OCP ${{ matrix.ocp_version }}
+        run: make test
+
+      - name: Build binary
+        run: make build
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-test-results-${{ matrix.ocp_version }}
+          path: |
             coverage/*.out
           retention-days: 7

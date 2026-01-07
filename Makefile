@@ -4,9 +4,20 @@
 BINARY_NAME=coordination-engine
 REGISTRY?=quay.io/tosin2013
 IMAGE_NAME=$(REGISTRY)/openshift-coordination-engine
-VERSION?=latest
 GOOS?=linux
 GOARCH?=amd64
+
+# Extract version from branch name
+BRANCH_NAME ?= $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+ifeq ($(BRANCH_NAME),$(filter $(BRANCH_NAME),release-4.18 release-4.19 release-4.20))
+    OCP_VERSION := $(shell echo $(BRANCH_NAME) | sed 's/release-//')
+    IMAGE_TAG := ocp-$(OCP_VERSION)-$(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "latest")
+    VERSION := $(IMAGE_TAG)
+else
+    OCP_VERSION := dev
+    IMAGE_TAG := dev-$(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "latest")
+    VERSION := latest
+endif
 
 # Build variables
 BUILD_DIR=bin
@@ -21,13 +32,21 @@ COVERAGE_HTML=$(COVERAGE_DIR)/coverage.html
 # Linting
 GOLANGCI_LINT_VERSION=v1.55.2
 
-.PHONY: all build test clean docker-build docker-push lint coverage help
+.PHONY: all build test clean docker-build docker-push lint coverage help show-version
 
 ## help: Display this help message
 help:
 	@echo "OpenShift Coordination Engine - Makefile targets:"
 	@echo ""
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'
+
+## show-version: Display current version information
+show-version:
+	@echo "Branch: $(BRANCH_NAME)"
+	@echo "OpenShift Version: $(OCP_VERSION)"
+	@echo "Image Tag: $(IMAGE_TAG)"
+	@echo "Full Image: $(IMAGE_NAME):$(IMAGE_TAG)"
+	@echo "VERSION: $(VERSION)"
 
 ## all: Build the binary
 all: build

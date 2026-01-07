@@ -2,10 +2,20 @@ name: Build and Push to Quay.io
 
 on:
   push:
-    branches: [ main ]
-    tags:
-      - 'v*'
+    branches:
+      - 'release-4.18'
+      - 'release-4.19'
+      - 'release-4.20'
   workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'Release branch to build (e.g., release-4.18)'
+        required: true
+        type: choice
+        options:
+          - release-4.18
+          - release-4.19
+          - release-4.20
 
 env:
   REGISTRY: quay.io
@@ -14,7 +24,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and Push Container Image
+    name: Build and Push Version-Specific Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,6 +34,28 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Extract OpenShift version from branch
+        id: version
+        run: |
+          # Extract version from branch name (e.g., release-4.18 -> 4.18)
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          if [[ "$BRANCH_NAME" =~ ^release-([0-9]+\.[0-9]+)$ ]]; then
+            OCP_VERSION="${BASH_REMATCH[1]}"
+          else
+            echo "Error: Invalid branch name format. Expected: release-X.Y"
+            exit 1
+          fi
+
+          # Get short git SHA (7 chars)
+          GIT_SHA=$(git rev-parse --short=7 HEAD)
+
+          echo "ocp_version=${OCP_VERSION}" >> $GITHUB_OUTPUT
+          echo "git_sha=${GIT_SHA}" >> $GITHUB_OUTPUT
+          echo "tag_latest=ocp-${OCP_VERSION}-latest" >> $GITHUB_OUTPUT
+          echo "tag_sha=ocp-${OCP_VERSION}-${GIT_SHA}" >> $GITHUB_OUTPUT
+
+          echo "Building for OpenShift ${OCP_VERSION} (SHA: ${GIT_SHA})"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -46,34 +78,31 @@ jobs:
           username: ${{ secrets.QUAY_USERNAME }}
           password: ${{ secrets.QUAY_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: quay.io/takinosh/openshift-coordination-engine
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push container image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_latest }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_sha }}
+          labels: |
+            org.opencontainers.image.title=coordination-engine
+            org.opencontainers.image.description=OpenShift Coordination Engine for OCP ${{ steps.version.outputs.ocp_version }}
+            org.opencontainers.image.version=${{ steps.version.outputs.ocp_version }}
+            io.openshift.version=${{ steps.version.outputs.ocp_version }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.tag_sha }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Scan image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: quay.io/takinosh/openshift-coordination-engine:latest
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_latest }}
           format: 'sarif'
           output: 'trivy-image-results.sarif'
 
@@ -83,8 +112,28 @@ jobs:
         with:
           sarif_file: 'trivy-image-results.sarif'
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
+      - name: Create deployment summary
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## 🚀 Container Image Published
+
+          **OpenShift Version**: ${{ steps.version.outputs.ocp_version }}
+          **Git SHA**: ${{ steps.version.outputs.git_sha }}
+
+          ### Image Tags
+          - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_latest }}\`
+          - \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_sha }}\`
+
+          ### Pull Command
+          \`\`\`bash
+          podman pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag_latest }}
+          \`\`\`
+
+          ### Helm Deployment
+          \`\`\`bash
+          helm install coordination-engine ./charts/coordination-engine \\
+            --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \\
+            --set image.tag=${{ steps.version.outputs.tag_latest }} \\
+            --namespace self-healing-platform
+          \`\`\`
+          EOF
