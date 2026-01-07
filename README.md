@@ -180,9 +180,17 @@ See [RBAC Documentation](docs/RBAC.md) for detailed permissions.
 
 ### Health Check
 
+The coordination engine provides two health endpoints following Kubernetes best practices:
+
 ```bash
+# Lightweight health check (Kubernetes standard)
+curl http://localhost:8080/health
+
+# Detailed health check with dependency monitoring
 curl http://localhost:8080/api/v1/health
 ```
+
+See [API Documentation](docs/API.md) for complete endpoint details.
 
 ### Trigger Remediation
 
@@ -282,7 +290,7 @@ kubectl get pods -n self-healing-platform
 
 # Check health endpoint
 kubectl port-forward svc/coordination-engine 8080:8080 -n self-healing-platform
-curl http://localhost:8080/api/v1/health
+curl http://localhost:8080/health  # Lightweight check
 
 # View logs
 kubectl logs -f deployment/coordination-engine -n self-healing-platform

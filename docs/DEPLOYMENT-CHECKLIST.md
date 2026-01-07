@@ -77,7 +77,13 @@ SERVER_PID=$!
 # Wait for startup
 sleep 3
 
-# Check health
+# Check lightweight health endpoint
+curl http://localhost:8080/health
+
+# Expected output:
+# {"status":"ok","version":"ocp-4.20-abc123"}
+
+# Check detailed health endpoint
 curl http://localhost:8080/api/v1/health | jq
 
 # Expected output:
