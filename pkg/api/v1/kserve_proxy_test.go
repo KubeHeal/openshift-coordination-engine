@@ -17,62 +17,6 @@ import (
 	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
 )
 
-func setupKServeTestHandler(t *testing.T) (*KServeProxyHandler, *httptest.Server) {
-	// Create mock KServe server
-	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/v1/models/test-model:predict" && r.Method == "POST":
-			resp := map[string]interface{}{
-				"predictions":   []int{-1, 1},
-				"model_name":    "test-model",
-				"model_version": "v1",
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
-
-		case r.URL.Path == "/v1/models/test-model" && r.Method == "GET":
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"name": "test-model"})
-
-		case r.URL.Path == "/v1/models/unhealthy-model" && r.Method == "GET":
-			w.WriteHeader(http.StatusServiceUnavailable)
-
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-
-	log := logrus.New()
-	log.SetLevel(logrus.ErrorLevel)
-
-	// Create proxy client
-	cfg := kserve.ProxyConfig{
-		Namespace: "test-ns",
-		Timeout:   30 * time.Second,
-	}
-
-	client, err := kserve.NewProxyClient(cfg, log)
-	require.NoError(t, err)
-
-	// Manually add models pointing to mock server
-	// We need to use an exported method or field - let's use the public interface
-	// Since models is private, we'll set up env vars before creating the client
-	os.Setenv("KSERVE_TEST_MODEL_SERVICE", "test-service")
-	os.Setenv("KSERVE_UNHEALTHY_MODEL_SERVICE", "unhealthy-service")
-	defer func() {
-		os.Unsetenv("KSERVE_TEST_MODEL_SERVICE")
-		os.Unsetenv("KSERVE_UNHEALTHY_MODEL_SERVICE")
-	}()
-
-	// Recreate client with env vars
-	client, err = kserve.NewProxyClient(cfg, log)
-	require.NoError(t, err)
-
-	handler := NewKServeProxyHandler(client, log)
-
-	return handler, mockServer
-}
-
 func TestKServeProxyHandler_HandleDetect(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
@@ -182,7 +126,7 @@ func TestKServeProxyHandler_ListModels(t *testing.T) {
 
 	handler := NewKServeProxyHandler(client, log)
 
-	req := httptest.NewRequest("GET", "/api/v1/models", nil)
+	req := httptest.NewRequest("GET", "/api/v1/models", http.NoBody)
 	w := httptest.NewRecorder()
 
 	handler.ListModels(w, req)
@@ -229,7 +173,7 @@ func TestKServeProxyHandler_CheckModelHealth(t *testing.T) {
 		router := mux.NewRouter()
 		router.HandleFunc("/api/v1/models/{model}/health", handler.CheckModelHealth)
 
-		req := httptest.NewRequest("GET", "/api/v1/models/non-existent/health", nil)
+		req := httptest.NewRequest("GET", "/api/v1/models/non-existent/health", http.NoBody)
 		w := httptest.NewRecorder()
 
 		router.ServeHTTP(w, req)
@@ -239,7 +183,7 @@ func TestKServeProxyHandler_CheckModelHealth(t *testing.T) {
 
 	// Test missing model parameter
 	t.Run("missing model parameter", func(t *testing.T) {
-		req := httptest.NewRequest("GET", "/api/v1/models//health", nil)
+		req := httptest.NewRequest("GET", "/api/v1/models//health", http.NoBody)
 		w := httptest.NewRecorder()
 
 		// Direct call without mux vars
@@ -314,4 +258,3 @@ func TestModelsListResponse_JSON(t *testing.T) {
 	assert.Equal(t, 2, decoded.Count)
 	assert.Len(t, decoded.Models, 2)
 }
-
