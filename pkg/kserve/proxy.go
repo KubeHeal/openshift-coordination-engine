@@ -428,4 +428,3 @@ func (e *ModelUnavailableError) Error() string {
 func (e *ModelUnavailableError) Unwrap() error {
 	return e.Cause
 }
-

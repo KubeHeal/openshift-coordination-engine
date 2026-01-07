@@ -102,12 +102,12 @@ func TestProxyClient_LoadModelsFromEnv(t *testing.T) {
 
 	// Set up environment variables
 	envVars := map[string]string{
-		"KSERVE_ANOMALY_DETECTOR_SERVICE":     "anomaly-detector-predictor",
-		"KSERVE_PREDICTIVE_ANALYTICS_SERVICE": "predictive-analytics-predictor",
+		"KSERVE_ANOMALY_DETECTOR_SERVICE":       "anomaly-detector-predictor",
+		"KSERVE_PREDICTIVE_ANALYTICS_SERVICE":   "predictive-analytics-predictor",
 		"KSERVE_DISK_FAILURE_PREDICTOR_SERVICE": "disk-failure-predictor-predictor",
-		"KSERVE_NAMESPACE":                    "should-be-ignored", // Configuration variable
-		"OTHER_ENV_VAR":                       "should-be-ignored",
-		"KSERVE_EMPTY_SERVICE":                "", // Empty value should be skipped
+		"KSERVE_NAMESPACE":                      "should-be-ignored", // Configuration variable
+		"OTHER_ENV_VAR":                         "should-be-ignored",
+		"KSERVE_EMPTY_SERVICE":                  "", // Empty value should be skipped
 	}
 
 	for key, val := range envVars {
@@ -529,4 +529,3 @@ func TestDetectResponse_JSON(t *testing.T) {
 	assert.Equal(t, "anomaly-detector", resp.ModelName)
 	assert.Equal(t, "v2", resp.ModelVersion)
 }
-
