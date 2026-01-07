@@ -189,6 +189,9 @@ jobs:
 
   version-compatibility-test:
     name: Test OCP Version Compatibility
+    # Only run on main branch to test all release branches
+    # Don't run on release branches themselves (would try to checkout other branches)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     strategy:
       matrix:
