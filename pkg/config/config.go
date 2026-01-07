@@ -20,9 +20,12 @@ type Config struct {
 	Kubeconfig string `json:"kubeconfig,omitempty"`
 	Namespace  string `json:"namespace"`
 
-	// External service URLs
-	MLServiceURL string `json:"ml_service_url"`
+	// External service URLs (deprecated: use KServe configuration instead)
+	MLServiceURL string `json:"ml_service_url,omitempty"` // Deprecated: use KServe integration
 	ArgocdAPIURL string `json:"argocd_api_url,omitempty"` // Optional, auto-detected
+
+	// KServe Integration (ADR-039)
+	KServe KServeConfig `json:"kserve"`
 
 	// HTTP client configuration
 	HTTPTimeout time.Duration `json:"http_timeout"`
@@ -36,17 +39,62 @@ type Config struct {
 	KubernetesBurst int     `json:"kubernetes_burst"`
 }
 
+// KServeConfig holds configuration for KServe integration (ADR-039)
+type KServeConfig struct {
+	// Enabled enables KServe integration (replaces ML_SERVICE_URL)
+	Enabled bool `json:"enabled"`
+
+	// Namespace where KServe InferenceServices are deployed
+	Namespace string `json:"namespace"`
+
+	// Services maps service types to KServe InferenceService names
+	Services KServeServices `json:"services"`
+
+	// Timeout for KServe API calls
+	Timeout time.Duration `json:"timeout"`
+}
+
+// KServeServices holds the names of KServe InferenceServices
+type KServeServices struct {
+	// AnomalyDetector is the KServe service for anomaly detection
+	AnomalyDetector string `json:"anomaly_detector"`
+
+	// PredictiveAnalytics is the KServe service for predictive analytics
+	PredictiveAnalytics string `json:"predictive_analytics"`
+}
+
+// GetAnomalyDetectorURL returns the full URL for the anomaly detector KServe service
+func (k *KServeConfig) GetAnomalyDetectorURL() string {
+	if k.Services.AnomalyDetector == "" {
+		return ""
+	}
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local", k.Services.AnomalyDetector, k.Namespace)
+}
+
+// GetPredictiveAnalyticsURL returns the full URL for the predictive analytics KServe service
+func (k *KServeConfig) GetPredictiveAnalyticsURL() string {
+	if k.Services.PredictiveAnalytics == "" {
+		return ""
+	}
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local", k.Services.PredictiveAnalytics, k.Namespace)
+}
+
 // Default configuration values
 const (
 	DefaultPort            = 8080
 	DefaultMetricsPort     = 9090
 	DefaultLogLevel        = "info"
 	DefaultNamespace       = "self-healing-platform"
-	DefaultMLServiceURL    = "http://aiops-ml-service:8080"
+	DefaultMLServiceURL    = "" // Deprecated: use KServe integration
 	DefaultHTTPTimeout     = 30 * time.Second
 	DefaultKubernetesQPS   = 50.0
 	DefaultKubernetesBurst = 100
 	DefaultEnableCORS      = false
+
+	// KServe defaults (ADR-039)
+	DefaultKServeEnabled   = true
+	DefaultKServeNamespace = "self-healing-platform"
+	DefaultKServeTimeout   = 10 * time.Second
 )
 
 // Valid log levels
@@ -67,13 +115,24 @@ func Load() (*Config, error) {
 		LogLevel:        getEnv("LOG_LEVEL", DefaultLogLevel),
 		Kubeconfig:      getEnv("KUBECONFIG", ""),
 		Namespace:       getEnv("NAMESPACE", DefaultNamespace),
-		MLServiceURL:    getEnv("ML_SERVICE_URL", DefaultMLServiceURL),
+		MLServiceURL:    getEnv("ML_SERVICE_URL", DefaultMLServiceURL), // Deprecated
 		ArgocdAPIURL:    getEnv("ARGOCD_API_URL", ""),
 		HTTPTimeout:     getEnvAsDuration("HTTP_TIMEOUT", DefaultHTTPTimeout),
 		EnableCORS:      getEnvAsBool("ENABLE_CORS", DefaultEnableCORS),
 		CORSAllowOrigin: getEnvAsSlice("CORS_ALLOW_ORIGIN", []string{"*"}),
 		KubernetesQPS:   getEnvAsFloat32("KUBERNETES_QPS", DefaultKubernetesQPS),
 		KubernetesBurst: getEnvAsInt("KUBERNETES_BURST", DefaultKubernetesBurst),
+
+		// KServe configuration (ADR-039)
+		KServe: KServeConfig{
+			Enabled:   getEnvAsBool("ENABLE_KSERVE_INTEGRATION", DefaultKServeEnabled),
+			Namespace: getEnv("KSERVE_NAMESPACE", DefaultKServeNamespace),
+			Services: KServeServices{
+				AnomalyDetector:     getEnv("KSERVE_ANOMALY_DETECTOR_SERVICE", ""),
+				PredictiveAnalytics: getEnv("KSERVE_PREDICTIVE_ANALYTICS_SERVICE", ""),
+			},
+			Timeout: getEnvAsDuration("KSERVE_TIMEOUT", DefaultKServeTimeout),
+		},
 	}
 
 	// Validate configuration
@@ -111,13 +170,29 @@ func (c *Config) Validate() error {
 		errors = append(errors, "namespace cannot be empty")
 	}
 
-	// Validate ML service URL
-	if c.MLServiceURL == "" {
-		errors = append(errors, "ml_service_url cannot be empty")
+	// Validate ML integration: either KServe or legacy ML_SERVICE_URL must be configured
+	if c.KServe.Enabled {
+		// Validate KServe configuration (ADR-039)
+		if c.KServe.Namespace == "" {
+			errors = append(errors, "kserve.namespace cannot be empty when KServe is enabled")
+		}
+		// At least one service must be configured
+		if c.KServe.Services.AnomalyDetector == "" && c.KServe.Services.PredictiveAnalytics == "" {
+			errors = append(errors, "at least one KServe service must be configured (KSERVE_ANOMALY_DETECTOR_SERVICE or KSERVE_PREDICTIVE_ANALYTICS_SERVICE)")
+		}
+		if c.KServe.Timeout < 1*time.Second {
+			errors = append(errors, fmt.Sprintf("kserve.timeout too short: %s (must be >= 1s)", c.KServe.Timeout))
+		}
+		if c.KServe.Timeout > 2*time.Minute {
+			errors = append(errors, fmt.Sprintf("kserve.timeout too long: %s (must be <= 2m)", c.KServe.Timeout))
+		}
+	} else if c.MLServiceURL != "" {
+		// Legacy ML_SERVICE_URL validation (deprecated but still supported)
+		if !strings.HasPrefix(c.MLServiceURL, "http://") && !strings.HasPrefix(c.MLServiceURL, "https://") {
+			errors = append(errors, fmt.Sprintf("ml_service_url must start with http:// or https://: %s", c.MLServiceURL))
+		}
 	}
-	if !strings.HasPrefix(c.MLServiceURL, "http://") && !strings.HasPrefix(c.MLServiceURL, "https://") {
-		errors = append(errors, fmt.Sprintf("ml_service_url must start with http:// or https://: %s", c.MLServiceURL))
-	}
+	// Note: Both KServe and ML_SERVICE_URL can be disabled - ML features will be unavailable
 
 	// Validate ArgoCD URL if provided
 	if c.ArgocdAPIURL != "" {
@@ -147,6 +222,21 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// UseKServe returns true if KServe integration should be used
+func (c *Config) UseKServe() bool {
+	return c.KServe.Enabled && (c.KServe.Services.AnomalyDetector != "" || c.KServe.Services.PredictiveAnalytics != "")
+}
+
+// UseLegacyML returns true if legacy ML_SERVICE_URL should be used
+func (c *Config) UseLegacyML() bool {
+	return !c.KServe.Enabled && c.MLServiceURL != ""
+}
+
+// HasMLIntegration returns true if any ML integration is available
+func (c *Config) HasMLIntegration() bool {
+	return c.UseKServe() || c.UseLegacyML()
 }
 
 // getEnv gets an environment variable or returns a default value
