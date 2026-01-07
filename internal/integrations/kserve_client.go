@@ -23,7 +23,7 @@ type KServeClient struct {
 	log                    *logrus.Logger
 }
 
-// KServeConfig holds configuration for the KServe client
+// KServeClientConfig holds configuration for the KServe client
 type KServeClientConfig struct {
 	AnomalyDetectorURL     string
 	PredictiveAnalyticsURL string
@@ -288,7 +288,10 @@ func (c *KServeClient) GetModelMetadata(ctx context.Context, baseURL, modelName 
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("unexpected status %d (failed to read body: %v)", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
@@ -320,7 +323,10 @@ func (c *KServeClient) ListModels(ctx context.Context, baseURL string) (*KServeM
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := io.ReadAll(resp.Body)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("unexpected status %d (failed to read body: %v)", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 

@@ -237,6 +237,20 @@ func (mld *MLLayerDetector) resourcesToFeatureVectors(resources []models.Resourc
 	return instances
 }
 
+// layerStats holds anomaly statistics for a layer
+type layerStats struct {
+	anomalies int
+	total     int
+}
+
+// rate calculates the anomaly rate for the layer
+func (ls layerStats) rate() float64 {
+	if ls.total == 0 {
+		return 0.0
+	}
+	return float64(ls.anomalies) / float64(ls.total)
+}
+
 // parseKServeResponse converts KServe anomaly detection result to MLLayerPredictions
 func (mld *MLLayerDetector) parseKServeResponse(result *integrations.AnomalyDetectionResult, resources []models.Resource) *models.MLLayerPredictions {
 	predictions := &models.MLLayerPredictions{
@@ -244,98 +258,89 @@ func (mld *MLLayerDetector) parseKServeResponse(result *integrations.AnomalyDete
 		AnalysisType: "kserve_anomaly",
 	}
 
-	// Calculate confidence based on anomaly detection results
+	predictions.Confidence = mld.calculateKServeConfidence(result)
+
+	// Classify resources and count anomalies by layer
+	infra, platform, app := mld.classifyResourceAnomalies(result.Predictions, resources)
+
+	// Build layer predictions
+	predictions.Infrastructure = mld.buildLayerPrediction(infra)
+	predictions.Platform = mld.buildLayerPrediction(platform)
+	predictions.Application = mld.buildLayerPrediction(app)
+
+	// Determine and mark root cause
+	predictions.RootCauseSuggestion = mld.determineMLRootCause(infra.rate(), platform.rate(), app.rate())
+	mld.markRootCause(predictions)
+
+	return predictions
+}
+
+// calculateKServeConfidence calculates confidence based on anomaly detection results
+func (mld *MLLayerDetector) calculateKServeConfidence(result *integrations.AnomalyDetectionResult) float64 {
 	if result.Summary.Total > 0 {
-		// Confidence is higher when more anomalies are detected with clear patterns
-		predictions.Confidence = 0.7 + (result.Summary.AnomalyRate * 0.3)
-	} else {
-		predictions.Confidence = 0.5 // Low confidence when no data
+		return 0.7 + (result.Summary.AnomalyRate * 0.3)
 	}
+	return 0.5 // Low confidence when no data
+}
 
-	// Analyze which layers are affected based on resource types and anomaly predictions
-	infraAnomalies, platformAnomalies, appAnomalies := 0, 0, 0
-	infraTotal, platformTotal, appTotal := 0, 0, 0
-
-	for i, pred := range result.Predictions {
+// classifyResourceAnomalies categorizes resources into layers and counts anomalies
+func (mld *MLLayerDetector) classifyResourceAnomalies(predictions []integrations.AnomalyPrediction, resources []models.Resource) (infra, platform, app layerStats) {
+	for i, pred := range predictions {
 		if i >= len(resources) {
 			break
 		}
-		r := resources[i]
-
-		switch r.Kind {
-		case "Node", "MachineConfig", "MachineConfigPool":
-			infraTotal++
+		layer := mld.getResourceLayer(resources[i].Kind)
+		switch layer {
+		case "infrastructure":
+			infra.total++
 			if pred.IsAnomaly {
-				infraAnomalies++
+				infra.anomalies++
 			}
-		case "ClusterOperator", "NetworkPolicy", "StorageClass":
-			platformTotal++
+		case "platform":
+			platform.total++
 			if pred.IsAnomaly {
-				platformAnomalies++
+				platform.anomalies++
 			}
-		case "Pod", "Deployment", "StatefulSet", "Service":
-			appTotal++
+		case "application":
+			app.total++
 			if pred.IsAnomaly {
-				appAnomalies++
+				app.anomalies++
 			}
 		}
 	}
+	return
+}
 
-	// Calculate probabilities for each layer
-	if infraTotal > 0 {
-		infraProb := float64(infraAnomalies) / float64(infraTotal)
-		if infraProb > 0 {
-			predictions.Infrastructure = &models.LayerPrediction{
-				Affected:    infraProb >= mld.probabilityThreshold,
-				Probability: minFloat64(infraProb+0.3, 1.0), // Boost probability
-				Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", infraAnomalies, infraTotal)},
-				IsRootCause: false,
-			}
-		}
+// getResourceLayer maps a resource kind to its layer
+func (mld *MLLayerDetector) getResourceLayer(kind string) string {
+	switch kind {
+	case "Node", "MachineConfig", "MachineConfigPool":
+		return "infrastructure"
+	case "ClusterOperator", "NetworkPolicy", "StorageClass":
+		return "platform"
+	case "Pod", "Deployment", "StatefulSet", "Service":
+		return "application"
+	default:
+		return ""
 	}
+}
 
-	if platformTotal > 0 {
-		platformProb := float64(platformAnomalies) / float64(platformTotal)
-		if platformProb > 0 {
-			predictions.Platform = &models.LayerPrediction{
-				Affected:    platformProb >= mld.probabilityThreshold,
-				Probability: minFloat64(platformProb+0.3, 1.0),
-				Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", platformAnomalies, platformTotal)},
-				IsRootCause: false,
-			}
-		}
+// buildLayerPrediction creates a LayerPrediction from layer statistics
+func (mld *MLLayerDetector) buildLayerPrediction(stats layerStats) *models.LayerPrediction {
+	if stats.total == 0 || stats.anomalies == 0 {
+		return nil
 	}
-
-	if appTotal > 0 {
-		appProb := float64(appAnomalies) / float64(appTotal)
-		if appProb > 0 {
-			predictions.Application = &models.LayerPrediction{
-				Affected:    appProb >= mld.probabilityThreshold,
-				Probability: minFloat64(appProb+0.3, 1.0),
-				Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", appAnomalies, appTotal)},
-				IsRootCause: false,
-			}
-		}
+	prob := stats.rate()
+	return &models.LayerPrediction{
+		Affected:    prob >= mld.probabilityThreshold,
+		Probability: minFloat64(prob+0.3, 1.0),
+		Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", stats.anomalies, stats.total)},
+		IsRootCause: false,
 	}
+}
 
-	// Determine root cause (highest anomaly rate wins, with infrastructure priority)
-	infraRate := 0.0
-	platformRate := 0.0
-	appRate := 0.0
-
-	if infraTotal > 0 {
-		infraRate = float64(infraAnomalies) / float64(infraTotal)
-	}
-	if platformTotal > 0 {
-		platformRate = float64(platformAnomalies) / float64(platformTotal)
-	}
-	if appTotal > 0 {
-		appRate = float64(appAnomalies) / float64(appTotal)
-	}
-
-	predictions.RootCauseSuggestion = mld.determineMLRootCause(infraRate, platformRate, appRate)
-
-	// Mark root cause layer
+// markRootCause marks the root cause layer in predictions
+func (mld *MLLayerDetector) markRootCause(predictions *models.MLLayerPredictions) {
 	switch predictions.RootCauseSuggestion {
 	case models.LayerInfrastructure:
 		if predictions.Infrastructure != nil {
@@ -350,8 +355,6 @@ func (mld *MLLayerDetector) parseKServeResponse(result *integrations.AnomalyDete
 			predictions.Application.IsRootCause = true
 		}
 	}
-
-	return predictions
 }
 
 // getLegacyMLPredictions calls the legacy ML service for predictions (deprecated)
