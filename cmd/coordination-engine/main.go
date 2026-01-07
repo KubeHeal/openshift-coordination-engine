@@ -26,6 +26,7 @@ import (
 	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
 	v1 "github.com/tosin2013/openshift-coordination-engine/pkg/api/v1"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/config"
+	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/middleware"
 )
 
@@ -169,6 +170,29 @@ func main() {
 	router.Use(middleware.Recovery(log))
 	router.Use(middleware.RequestLogger(log))
 
+	// Initialize KServe proxy client if enabled (ADR-039, ADR-040)
+	var kserveProxyHandler *v1.KServeProxyHandler
+	if cfg.KServe.Enabled {
+		kserveProxyConfig := kserve.ProxyConfig{
+			Namespace: cfg.KServe.Namespace,
+			Timeout:   cfg.KServe.Timeout,
+		}
+
+		kserveProxyClient, err := kserve.NewProxyClient(kserveProxyConfig, log)
+		if err != nil {
+			log.WithError(err).Warn("Failed to initialize KServe proxy client")
+		} else {
+			kserveProxyHandler = v1.NewKServeProxyHandler(kserveProxyClient, log)
+			log.WithFields(logrus.Fields{
+				"models":    kserveProxyClient.ListModels(),
+				"namespace": cfg.KServe.Namespace,
+			}).Info("✅ KServe proxy client initialized")
+			defer kserveProxyClient.Close()
+		}
+	} else {
+		log.Info("KServe integration disabled")
+	}
+
 	// Create API handlers
 	healthHandler := v1.NewHealthHandler(log, k8sClients.Clientset, rbacVerifier, cfg.MLServiceURL, Version, startTime)
 	// TODO: Add MCO health monitoring to health handler in future enhancement
@@ -196,6 +220,12 @@ func main() {
 	// Coordination endpoints (multi-layer remediation)
 	coordinationHandler.RegisterRoutes(router)
 	log.Info("Coordination API endpoints registered")
+
+	// KServe proxy endpoints (ADR-039, ADR-040)
+	if kserveProxyHandler != nil {
+		kserveProxyHandler.RegisterRoutes(router)
+		log.Info("✅ KServe proxy endpoints registered: /api/v1/detect, /api/v1/models")
+	}
 
 	// Add simple /health endpoint for backward compatibility with deployments
 	// This provides a lightweight health check for liveness/readiness probes
