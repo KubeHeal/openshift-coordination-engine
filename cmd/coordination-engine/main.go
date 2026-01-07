@@ -115,43 +115,8 @@ func main() {
 	healthChecker := coordination.NewHealthChecker(k8sClients.Clientset, k8sClients.DynamicClient, log)
 	log.Info("Health checker initialized")
 
-	// Initialize remediation components
-	manualRemediator := remediation.NewManualRemediator(k8sClients.Clientset, log)
-	log.Info("Manual remediator initialized")
-
-	// Initialize Helm remediator
-	helmRemediator := remediation.NewHelmRemediator(log)
-	log.Info("Helm remediator initialized")
-
-	// Initialize Operator remediator
-	operatorRemediator := remediation.NewOperatorRemediator(k8sClients.Clientset, k8sClients.DynamicClient, log)
-	log.Info("Operator remediator initialized")
-
-	// Initialize strategy selector for multi-remediator routing
-	strategySelector := remediation.NewStrategySelector(log)
-	strategySelector.SetFallbackRemediator(manualRemediator)
-
-	// Register Helm remediator
-	strategySelector.RegisterRemediator(helmRemediator)
-
-	// Register Operator remediator
-	strategySelector.RegisterRemediator(operatorRemediator)
-
-	// Initialize ArgoCD client and remediator (if ArgoCD URL configured)
-	if cfg.ArgocdAPIURL != "" {
-		// Get ArgoCD token from environment (should be set via secret mount)
-		argocdToken := os.Getenv("ARGOCD_TOKEN")
-		argocdClient := integrations.NewArgoCDClient(cfg.ArgocdAPIURL, argocdToken, log)
-		argocdRemediator := remediation.NewArgoCDRemediator(argocdClient, log)
-		strategySelector.RegisterRemediator(argocdRemediator)
-		log.WithField("argocd_url", cfg.ArgocdAPIURL).Info("ArgoCD remediator initialized")
-	} else {
-		log.Warn("ARGOCD_API_URL not set, ArgoCD remediation disabled")
-	}
-
-	// Initialize remediation orchestrator with detector and strategy selector
-	orchestrator := remediation.NewOrchestrator(deploymentDetector, strategySelector, log)
-	log.WithField("remediators", strategySelector.GetRegisteredRemediators()).Info("Remediation orchestrator initialized")
+	// Initialize remediation components using helper function
+	orchestrator, strategySelector := initRemediationComponents(cfg, k8sClients, deploymentDetector, log)
 
 	// Initialize multi-layer orchestrator with remediation integration (Phase 4)
 	multiLayerOrchestrator := coordination.NewMultiLayerOrchestrator(
@@ -171,27 +136,7 @@ func main() {
 	router.Use(middleware.RequestLogger(log))
 
 	// Initialize KServe proxy client if enabled (ADR-039, ADR-040)
-	var kserveProxyHandler *v1.KServeProxyHandler
-	if cfg.KServe.Enabled {
-		kserveProxyConfig := kserve.ProxyConfig{
-			Namespace: cfg.KServe.Namespace,
-			Timeout:   cfg.KServe.Timeout,
-		}
-
-		kserveProxyClient, err := kserve.NewProxyClient(kserveProxyConfig, log)
-		if err != nil {
-			log.WithError(err).Warn("Failed to initialize KServe proxy client")
-		} else {
-			kserveProxyHandler = v1.NewKServeProxyHandler(kserveProxyClient, log)
-			log.WithFields(logrus.Fields{
-				"models":    kserveProxyClient.ListModels(),
-				"namespace": cfg.KServe.Namespace,
-			}).Info("✅ KServe proxy client initialized")
-			defer kserveProxyClient.Close()
-		}
-	} else {
-		log.Info("KServe integration disabled")
-	}
+	kserveProxyHandler := initKServeProxy(cfg, log)
 
 	// Create API handlers
 	healthHandler := v1.NewHealthHandler(log, k8sClients.Clientset, rbacVerifier, cfg.MLServiceURL, Version, startTime)
@@ -300,6 +245,74 @@ func main() {
 	}
 
 	log.Info("Servers stopped")
+}
+
+// initKServeProxy initializes the KServe proxy client if enabled (ADR-039, ADR-040)
+func initKServeProxy(cfg *config.Config, log *logrus.Logger) *v1.KServeProxyHandler {
+	if !cfg.KServe.Enabled {
+		log.Info("KServe integration disabled")
+		return nil
+	}
+
+	kserveProxyConfig := kserve.ProxyConfig{
+		Namespace: cfg.KServe.Namespace,
+		Timeout:   cfg.KServe.Timeout,
+	}
+
+	kserveProxyClient, err := kserve.NewProxyClient(kserveProxyConfig, log)
+	if err != nil {
+		log.WithError(err).Warn("Failed to initialize KServe proxy client")
+		return nil
+	}
+
+	handler := v1.NewKServeProxyHandler(kserveProxyClient, log)
+	log.WithFields(logrus.Fields{
+		"models":    kserveProxyClient.ListModels(),
+		"namespace": cfg.KServe.Namespace,
+	}).Info("✅ KServe proxy client initialized")
+
+	return handler
+}
+
+// initRemediationComponents initializes all remediation-related components
+func initRemediationComponents(
+	cfg *config.Config,
+	k8sClients *KubernetesClients,
+	deploymentDetector *detector.DeploymentDetector,
+	log *logrus.Logger,
+) (*remediation.Orchestrator, *remediation.StrategySelector) {
+	// Initialize remediation components
+	manualRemediator := remediation.NewManualRemediator(k8sClients.Clientset, log)
+	log.Info("Manual remediator initialized")
+
+	helmRemediator := remediation.NewHelmRemediator(log)
+	log.Info("Helm remediator initialized")
+
+	operatorRemediator := remediation.NewOperatorRemediator(k8sClients.Clientset, k8sClients.DynamicClient, log)
+	log.Info("Operator remediator initialized")
+
+	// Initialize strategy selector for multi-remediator routing
+	strategySelector := remediation.NewStrategySelector(log)
+	strategySelector.SetFallbackRemediator(manualRemediator)
+	strategySelector.RegisterRemediator(helmRemediator)
+	strategySelector.RegisterRemediator(operatorRemediator)
+
+	// Initialize ArgoCD client and remediator (if ArgoCD URL configured)
+	if cfg.ArgocdAPIURL != "" {
+		argocdToken := os.Getenv("ARGOCD_TOKEN")
+		argocdClient := integrations.NewArgoCDClient(cfg.ArgocdAPIURL, argocdToken, log)
+		argocdRemediator := remediation.NewArgoCDRemediator(argocdClient, log)
+		strategySelector.RegisterRemediator(argocdRemediator)
+		log.WithField("argocd_url", cfg.ArgocdAPIURL).Info("ArgoCD remediator initialized")
+	} else {
+		log.Warn("ARGOCD_API_URL not set, ArgoCD remediation disabled")
+	}
+
+	// Initialize remediation orchestrator
+	orchestrator := remediation.NewOrchestrator(deploymentDetector, strategySelector, log)
+	log.WithField("remediators", strategySelector.GetRegisteredRemediators()).Info("Remediation orchestrator initialized")
+
+	return orchestrator, strategySelector
 }
 
 // initKubernetesClient creates both standard and dynamic Kubernetes clients

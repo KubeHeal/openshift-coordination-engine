@@ -3,6 +3,7 @@ package v1
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -91,10 +92,12 @@ func (h *KServeProxyHandler) HandleDetect(w http.ResponseWriter, r *http.Request
 		h.log.WithError(err).WithField("model", req.Model).Error("KServe prediction failed")
 
 		// Check error type for appropriate HTTP status
-		switch err.(type) {
-		case *kserve.ModelNotFoundError:
+		var notFoundErr *kserve.ModelNotFoundError
+		var unavailableErr *kserve.ModelUnavailableError
+		switch {
+		case errors.As(err, &notFoundErr):
 			h.respondError(w, http.StatusNotFound, err.Error())
-		case *kserve.ModelUnavailableError:
+		case errors.As(err, &unavailableErr):
 			h.respondError(w, http.StatusServiceUnavailable, err.Error())
 		default:
 			h.respondError(w, http.StatusInternalServerError, "Prediction failed: "+err.Error())
@@ -154,8 +157,8 @@ func (h *KServeProxyHandler) CheckModelHealth(w http.ResponseWriter, r *http.Req
 
 	health, err := h.proxyClient.CheckModelHealth(r.Context(), modelName)
 	if err != nil {
-		switch err.(type) {
-		case *kserve.ModelNotFoundError:
+		var notFoundErr *kserve.ModelNotFoundError
+		if errors.As(err, &notFoundErr) {
 			h.respondError(w, http.StatusNotFound, err.Error())
 			return
 		}
@@ -205,4 +208,3 @@ func (h *KServeProxyHandler) respondError(w http.ResponseWriter, statusCode int,
 		h.log.WithError(err).Error("Failed to encode error response")
 	}
 }
-
