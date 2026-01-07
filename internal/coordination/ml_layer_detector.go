@@ -34,8 +34,8 @@ type MLAnomalyResult struct {
 
 // MLLayerDetector enhances layer detection with ML predictions
 type MLLayerDetector struct {
-	baseDetector                 *LayerDetector // Keyword-based detector (fallback)
-	mlClient                     *integrations.MLClient  // Legacy ML client (deprecated)
+	baseDetector                 *LayerDetector             // Keyword-based detector (fallback)
+	mlClient                     *integrations.MLClient     // Legacy ML client (deprecated)
 	kserveClient                 *integrations.KServeClient // KServe client (ADR-039)
 	enableML                     bool
 	useKServe                    bool // True if using KServe, false for legacy ML

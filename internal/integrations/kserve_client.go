@@ -457,4 +457,3 @@ func (c *KServeClient) HasAnomalyDetector() bool {
 func (c *KServeClient) HasPredictiveAnalytics() bool {
 	return c.predictiveAnalyticsURL != ""
 }
-
