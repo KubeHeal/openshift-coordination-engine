@@ -31,11 +31,13 @@ A Go-based coordination engine for multi-layer remediation in OpenShift/Kubernet
 # Pull the latest image
 podman pull quay.io/takinosh/openshift-coordination-engine:latest
 
-# Or run directly
+# Run with KServe integration (recommended - ADR-039)
 podman run -d \
   -p 8080:8080 \
   -p 9090:9090 \
-  -e ML_SERVICE_URL=http://ml-service:8080 \
+  -e ENABLE_KSERVE_INTEGRATION=true \
+  -e KSERVE_NAMESPACE=self-healing-platform \
+  -e KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor \
   quay.io/takinosh/openshift-coordination-engine:latest
 ```
 
@@ -45,9 +47,8 @@ podman run -d \
 # Add Helm repository (if available)
 helm repo add coordination-engine https://github.com/tosin2013/openshift-coordination-engine
 
-# Install
+# Install with KServe integration (recommended)
 helm install coordination-engine ./charts/coordination-engine \
-  --set mlServiceUrl=http://aiops-ml-service:8080 \
   --namespace self-healing-platform \
   --create-namespace
 ```
@@ -155,14 +156,46 @@ For detailed version strategy documentation, see [VERSION-STRATEGY.md](docs/VERS
 
 ### Environment Variables
 
+#### Core Configuration
+
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `ML_SERVICE_URL` | Python ML service endpoint | - | Yes |
 | `PORT` | HTTP server port | 8080 | No |
 | `METRICS_PORT` | Prometheus metrics port | 9090 | No |
 | `LOG_LEVEL` | Logging level | info | No |
+| `NAMESPACE` | Kubernetes namespace | self-healing-platform | No |
 | `ARGOCD_API_URL` | ArgoCD API endpoint | Auto-detect | No |
 | `KUBECONFIG` | Kubernetes config file | In-cluster | No |
+
+#### KServe Integration (ADR-039 - Recommended)
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `ENABLE_KSERVE_INTEGRATION` | Enable KServe integration | true | No |
+| `KSERVE_NAMESPACE` | KServe InferenceService namespace | self-healing-platform | Yes* |
+| `KSERVE_ANOMALY_DETECTOR_SERVICE` | Anomaly detector service name | - | Yes* |
+| `KSERVE_PREDICTIVE_ANALYTICS_SERVICE` | Predictive analytics service name | - | No |
+| `KSERVE_TIMEOUT` | KServe API call timeout | 10s | No |
+
+*Required when `ENABLE_KSERVE_INTEGRATION=true`
+
+**Example KServe configuration:**
+```bash
+export ENABLE_KSERVE_INTEGRATION=true
+export KSERVE_NAMESPACE=self-healing-platform
+export KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
+export KSERVE_PREDICTIVE_ANALYTICS_SERVICE=predictive-analytics-predictor
+```
+
+#### Legacy ML Service (Deprecated)
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `ML_SERVICE_URL` | Python ML service endpoint (deprecated) | - | No* |
+
+*Required only when `ENABLE_KSERVE_INTEGRATION=false`
+
+**⚠️ Note**: `ML_SERVICE_URL` is deprecated. Use KServe integration instead (ADR-039).
 
 ### RBAC Setup
 

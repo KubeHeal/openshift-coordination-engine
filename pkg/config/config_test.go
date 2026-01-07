@@ -13,6 +13,10 @@ func TestLoad_Defaults(t *testing.T) {
 	// Clear all relevant environment variables
 	clearEnv(t)
 
+	// Set minimum required KServe config for validation to pass
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	defer os.Unsetenv("KSERVE_ANOMALY_DETECTOR_SERVICE")
+
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
@@ -22,12 +26,17 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, DefaultMetricsPort, cfg.MetricsPort)
 	assert.Equal(t, DefaultLogLevel, cfg.LogLevel)
 	assert.Equal(t, DefaultNamespace, cfg.Namespace)
-	assert.Equal(t, DefaultMLServiceURL, cfg.MLServiceURL)
+	assert.Equal(t, DefaultMLServiceURL, cfg.MLServiceURL) // Empty by default
 	assert.Equal(t, DefaultHTTPTimeout, cfg.HTTPTimeout)
 	assert.Equal(t, float32(DefaultKubernetesQPS), cfg.KubernetesQPS)
 	assert.Equal(t, DefaultKubernetesBurst, cfg.KubernetesBurst)
 	assert.Equal(t, DefaultEnableCORS, cfg.EnableCORS)
 	assert.Equal(t, []string{"*"}, cfg.CORSAllowOrigin)
+
+	// Verify KServe defaults (ADR-039)
+	assert.True(t, cfg.KServe.Enabled)
+	assert.Equal(t, DefaultKServeNamespace, cfg.KServe.Namespace)
+	assert.Equal(t, DefaultKServeTimeout, cfg.KServe.Timeout)
 }
 
 func TestLoad_FromEnvironment(t *testing.T) {
@@ -38,13 +47,19 @@ func TestLoad_FromEnvironment(t *testing.T) {
 	os.Setenv("METRICS_PORT", "9091")
 	os.Setenv("LOG_LEVEL", "debug")
 	os.Setenv("NAMESPACE", "test-namespace")
-	os.Setenv("ML_SERVICE_URL", "http://test-ml:8080")
 	os.Setenv("ARGOCD_API_URL", "https://argocd:8080")
 	os.Setenv("HTTP_TIMEOUT", "60s")
 	os.Setenv("KUBERNETES_QPS", "100.0")
 	os.Setenv("KUBERNETES_BURST", "200")
 	os.Setenv("ENABLE_CORS", "true")
 	os.Setenv("CORS_ALLOW_ORIGIN", "http://localhost:3000,https://example.com")
+
+	// KServe configuration (ADR-039)
+	os.Setenv("ENABLE_KSERVE_INTEGRATION", "true")
+	os.Setenv("KSERVE_NAMESPACE", "ml-platform")
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	os.Setenv("KSERVE_PREDICTIVE_ANALYTICS_SERVICE", "predictive-analytics-predictor")
+	os.Setenv("KSERVE_TIMEOUT", "15s")
 	defer clearEnv(t)
 
 	cfg, err := Load()
@@ -55,16 +70,63 @@ func TestLoad_FromEnvironment(t *testing.T) {
 	assert.Equal(t, 9091, cfg.MetricsPort)
 	assert.Equal(t, "debug", cfg.LogLevel)
 	assert.Equal(t, "test-namespace", cfg.Namespace)
-	assert.Equal(t, "http://test-ml:8080", cfg.MLServiceURL)
 	assert.Equal(t, "https://argocd:8080", cfg.ArgocdAPIURL)
 	assert.Equal(t, 60*time.Second, cfg.HTTPTimeout)
 	assert.Equal(t, float32(100.0), cfg.KubernetesQPS)
 	assert.Equal(t, 200, cfg.KubernetesBurst)
 	assert.Equal(t, true, cfg.EnableCORS)
 	assert.Equal(t, []string{"http://localhost:3000", "https://example.com"}, cfg.CORSAllowOrigin)
+
+	// Verify KServe configuration (ADR-039)
+	assert.True(t, cfg.KServe.Enabled)
+	assert.Equal(t, "ml-platform", cfg.KServe.Namespace)
+	assert.Equal(t, "anomaly-detector-predictor", cfg.KServe.Services.AnomalyDetector)
+	assert.Equal(t, "predictive-analytics-predictor", cfg.KServe.Services.PredictiveAnalytics)
+	assert.Equal(t, 15*time.Second, cfg.KServe.Timeout)
+}
+
+func TestLoad_FromEnvironment_LegacyML(t *testing.T) {
+	clearEnv(t)
+
+	// Set legacy ML_SERVICE_URL with KServe disabled
+	os.Setenv("ENABLE_KSERVE_INTEGRATION", "false")
+	os.Setenv("ML_SERVICE_URL", "http://test-ml:8080")
+	defer clearEnv(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	assert.False(t, cfg.KServe.Enabled)
+	assert.Equal(t, "http://test-ml:8080", cfg.MLServiceURL)
+	assert.True(t, cfg.UseLegacyML())
+	assert.False(t, cfg.UseKServe())
 }
 
 func TestValidate_ValidConfig(t *testing.T) {
+	cfg := &Config{
+		Port:            8080,
+		MetricsPort:     9090,
+		LogLevel:        "info",
+		Namespace:       "default",
+		HTTPTimeout:     30 * time.Second,
+		KubernetesQPS:   50.0,
+		KubernetesBurst: 100,
+		KServe: KServeConfig{
+			Enabled:   true,
+			Namespace: "self-healing-platform",
+			Services: KServeServices{
+				AnomalyDetector: "anomaly-detector-predictor",
+			},
+			Timeout: 10 * time.Second,
+		},
+	}
+
+	err := cfg.Validate()
+	assert.NoError(t, err)
+}
+
+func TestValidate_ValidConfig_LegacyML(t *testing.T) {
 	cfg := &Config{
 		Port:            8080,
 		MetricsPort:     9090,
@@ -74,6 +136,9 @@ func TestValidate_ValidConfig(t *testing.T) {
 		HTTPTimeout:     30 * time.Second,
 		KubernetesQPS:   50.0,
 		KubernetesBurst: 100,
+		KServe: KServeConfig{
+			Enabled: false, // KServe disabled, using legacy
+		},
 	}
 
 	err := cfg.Validate()
@@ -102,10 +167,15 @@ func TestValidate_InvalidPort(t *testing.T) {
 				MetricsPort:     tt.metricsPort,
 				LogLevel:        "info",
 				Namespace:       "default",
-				MLServiceURL:    "http://ml:8080",
 				HTTPTimeout:     30 * time.Second,
 				KubernetesQPS:   50.0,
 				KubernetesBurst: 100,
+				KServe: KServeConfig{
+					Enabled:   true,
+					Namespace: "default",
+					Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+					Timeout:   10 * time.Second,
+				},
 			}
 			err := cfg.Validate()
 			if tt.wantError {
@@ -123,10 +193,15 @@ func TestValidate_InvalidLogLevel(t *testing.T) {
 		MetricsPort:     9090,
 		LogLevel:        "invalid",
 		Namespace:       "default",
-		MLServiceURL:    "http://ml:8080",
 		HTTPTimeout:     30 * time.Second,
 		KubernetesQPS:   50.0,
 		KubernetesBurst: 100,
+		KServe: KServeConfig{
+			Enabled:   true,
+			Namespace: "default",
+			Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+			Timeout:   10 * time.Second,
+		},
 	}
 
 	err := cfg.Validate()
@@ -140,10 +215,15 @@ func TestValidate_EmptyNamespace(t *testing.T) {
 		MetricsPort:     9090,
 		LogLevel:        "info",
 		Namespace:       "",
-		MLServiceURL:    "http://ml:8080",
 		HTTPTimeout:     30 * time.Second,
 		KubernetesQPS:   50.0,
 		KubernetesBurst: 100,
+		KServe: KServeConfig{
+			Enabled:   true,
+			Namespace: "default",
+			Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+			Timeout:   10 * time.Second,
+		},
 	}
 
 	err := cfg.Validate()
@@ -157,7 +237,7 @@ func TestValidate_InvalidMLServiceURL(t *testing.T) {
 		url       string
 		wantError bool
 	}{
-		{"empty url", "", true},
+		// With KServe disabled, legacy ML_SERVICE_URL is validated
 		{"no protocol", "ml-service:8080", true},
 		{"ftp protocol", "ftp://ml-service:8080", true},
 		{"http valid", "http://ml-service:8080", false},
@@ -175,6 +255,9 @@ func TestValidate_InvalidMLServiceURL(t *testing.T) {
 				HTTPTimeout:     30 * time.Second,
 				KubernetesQPS:   50.0,
 				KubernetesBurst: 100,
+				KServe: KServeConfig{
+					Enabled: false, // Using legacy ML
+				},
 			}
 			err := cfg.Validate()
 			if tt.wantError {
@@ -205,11 +288,16 @@ func TestValidate_InvalidArgocdURL(t *testing.T) {
 				MetricsPort:     9090,
 				LogLevel:        "info",
 				Namespace:       "default",
-				MLServiceURL:    "http://ml:8080",
 				ArgocdAPIURL:    tt.url,
 				HTTPTimeout:     30 * time.Second,
 				KubernetesQPS:   50.0,
 				KubernetesBurst: 100,
+				KServe: KServeConfig{
+					Enabled:   true,
+					Namespace: "default",
+					Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+					Timeout:   10 * time.Second,
+				},
 			}
 			err := cfg.Validate()
 			if tt.wantError {
@@ -241,10 +329,15 @@ func TestValidate_InvalidHTTPTimeout(t *testing.T) {
 				MetricsPort:     9090,
 				LogLevel:        "info",
 				Namespace:       "default",
-				MLServiceURL:    "http://ml:8080",
 				HTTPTimeout:     tt.timeout,
 				KubernetesQPS:   50.0,
 				KubernetesBurst: 100,
+				KServe: KServeConfig{
+					Enabled:   true,
+					Namespace: "default",
+					Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+					Timeout:   10 * time.Second,
+				},
 			}
 			err := cfg.Validate()
 			if tt.wantError {
@@ -277,10 +370,15 @@ func TestValidate_InvalidKubernetesSettings(t *testing.T) {
 				MetricsPort:     9090,
 				LogLevel:        "info",
 				Namespace:       "default",
-				MLServiceURL:    "http://ml:8080",
 				HTTPTimeout:     30 * time.Second,
 				KubernetesQPS:   tt.qps,
 				KubernetesBurst: tt.burst,
+				KServe: KServeConfig{
+					Enabled:   true,
+					Namespace: "default",
+					Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+					Timeout:   10 * time.Second,
+				},
 			}
 			err := cfg.Validate()
 			if tt.wantError {
@@ -403,8 +501,284 @@ func clearEnv(t *testing.T) {
 		"ML_SERVICE_URL", "ARGOCD_API_URL", "HTTP_TIMEOUT",
 		"ENABLE_CORS", "CORS_ALLOW_ORIGIN",
 		"KUBERNETES_QPS", "KUBERNETES_BURST",
+		// KServe environment variables (ADR-039)
+		"ENABLE_KSERVE_INTEGRATION", "KSERVE_NAMESPACE",
+		"KSERVE_ANOMALY_DETECTOR_SERVICE", "KSERVE_PREDICTIVE_ANALYTICS_SERVICE",
+		"KSERVE_TIMEOUT",
 	}
 	for _, key := range envVars {
 		os.Unsetenv(key)
+	}
+}
+
+// TestKServeConfig_Validation tests KServe-specific validation (ADR-039)
+func TestKServeConfig_Validation(t *testing.T) {
+	tests := []struct {
+		name      string
+		kserve    KServeConfig
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name: "valid kserve config with anomaly detector",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "self-healing-platform",
+				Services:  KServeServices{AnomalyDetector: "anomaly-detector-predictor"},
+				Timeout:   10 * time.Second,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid kserve config with predictive analytics",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "ml-platform",
+				Services:  KServeServices{PredictiveAnalytics: "predictive-analytics-predictor"},
+				Timeout:   15 * time.Second,
+			},
+			wantError: false,
+		},
+		{
+			name: "valid kserve config with both services",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "ml-platform",
+				Services: KServeServices{
+					AnomalyDetector:     "anomaly-detector-predictor",
+					PredictiveAnalytics: "predictive-analytics-predictor",
+				},
+				Timeout: 10 * time.Second,
+			},
+			wantError: false,
+		},
+		{
+			name: "kserve disabled - no validation",
+			kserve: KServeConfig{
+				Enabled: false,
+			},
+			wantError: false,
+		},
+		{
+			name: "empty namespace with kserve enabled",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "",
+				Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+				Timeout:   10 * time.Second,
+			},
+			wantError: true,
+			errorMsg:  "kserve.namespace cannot be empty",
+		},
+		{
+			name: "no services configured",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "default",
+				Services:  KServeServices{},
+				Timeout:   10 * time.Second,
+			},
+			wantError: true,
+			errorMsg:  "at least one KServe service must be configured",
+		},
+		{
+			name: "timeout too short",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "default",
+				Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+				Timeout:   500 * time.Millisecond,
+			},
+			wantError: true,
+			errorMsg:  "kserve.timeout too short",
+		},
+		{
+			name: "timeout too long",
+			kserve: KServeConfig{
+				Enabled:   true,
+				Namespace: "default",
+				Services:  KServeServices{AnomalyDetector: "anomaly-detector"},
+				Timeout:   5 * time.Minute,
+			},
+			wantError: true,
+			errorMsg:  "kserve.timeout too long",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Port:            8080,
+				MetricsPort:     9090,
+				LogLevel:        "info",
+				Namespace:       "default",
+				HTTPTimeout:     30 * time.Second,
+				KubernetesQPS:   50.0,
+				KubernetesBurst: 100,
+				KServe:          tt.kserve,
+			}
+			err := cfg.Validate()
+			if tt.wantError {
+				assert.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestKServeConfig_GetURLs(t *testing.T) {
+	kserve := KServeConfig{
+		Enabled:   true,
+		Namespace: "self-healing-platform",
+		Services: KServeServices{
+			AnomalyDetector:     "anomaly-detector-predictor",
+			PredictiveAnalytics: "predictive-analytics-predictor",
+		},
+	}
+
+	anomalyURL := kserve.GetAnomalyDetectorURL()
+	assert.Equal(t, "http://anomaly-detector-predictor.self-healing-platform.svc.cluster.local", anomalyURL)
+
+	predictiveURL := kserve.GetPredictiveAnalyticsURL()
+	assert.Equal(t, "http://predictive-analytics-predictor.self-healing-platform.svc.cluster.local", predictiveURL)
+}
+
+func TestKServeConfig_GetURLs_Empty(t *testing.T) {
+	kserve := KServeConfig{
+		Enabled:   true,
+		Namespace: "default",
+		Services:  KServeServices{},
+	}
+
+	assert.Equal(t, "", kserve.GetAnomalyDetectorURL())
+	assert.Equal(t, "", kserve.GetPredictiveAnalyticsURL())
+}
+
+func TestConfig_UseKServe(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      Config
+		expected bool
+	}{
+		{
+			name: "kserve enabled with service",
+			cfg: Config{
+				KServe: KServeConfig{
+					Enabled:  true,
+					Services: KServeServices{AnomalyDetector: "anomaly-detector"},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "kserve disabled",
+			cfg: Config{
+				KServe: KServeConfig{
+					Enabled:  false,
+					Services: KServeServices{AnomalyDetector: "anomaly-detector"},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "kserve enabled but no services",
+			cfg: Config{
+				KServe: KServeConfig{
+					Enabled:  true,
+					Services: KServeServices{},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.cfg.UseKServe())
+		})
+	}
+}
+
+func TestConfig_UseLegacyML(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      Config
+		expected bool
+	}{
+		{
+			name: "legacy ml with url",
+			cfg: Config{
+				KServe:       KServeConfig{Enabled: false},
+				MLServiceURL: "http://ml-service:8080",
+			},
+			expected: true,
+		},
+		{
+			name: "kserve enabled (legacy disabled)",
+			cfg: Config{
+				KServe:       KServeConfig{Enabled: true},
+				MLServiceURL: "http://ml-service:8080",
+			},
+			expected: false,
+		},
+		{
+			name: "no ml service url",
+			cfg: Config{
+				KServe:       KServeConfig{Enabled: false},
+				MLServiceURL: "",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.cfg.UseLegacyML())
+		})
+	}
+}
+
+func TestConfig_HasMLIntegration(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      Config
+		expected bool
+	}{
+		{
+			name: "has kserve",
+			cfg: Config{
+				KServe: KServeConfig{
+					Enabled:  true,
+					Services: KServeServices{AnomalyDetector: "anomaly-detector"},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "has legacy ml",
+			cfg: Config{
+				KServe:       KServeConfig{Enabled: false},
+				MLServiceURL: "http://ml-service:8080",
+			},
+			expected: true,
+		},
+		{
+			name: "no ml integration",
+			cfg: Config{
+				KServe:       KServeConfig{Enabled: false},
+				MLServiceURL: "",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.cfg.HasMLIntegration())
+		})
 	}
 }

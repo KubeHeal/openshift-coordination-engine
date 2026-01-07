@@ -123,14 +123,156 @@ For details, see:
 - MCP ADR-006: Integration Architecture
 - MCP ADR-014: Go Coordination Engine Integration (to be created)
 
-## 2. Downstream API (Python ML Service)
+## 2. Downstream ML Integration
 
-The Go engine calls the existing Python ML service for anomaly detection and predictions.
+The Go coordination engine supports two ML integration modes:
 
-### Base URL
-- `http://aiops-ml-service:8080`
+### 2.1 KServe Integration (Recommended - ADR-039)
 
-### Endpoints
+The coordination engine calls KServe InferenceServices directly for ML predictions.
+This is the recommended approach for both vanilla Kubernetes and OpenShift deployments.
+
+**Configuration**:
+```yaml
+env:
+  - name: ENABLE_KSERVE_INTEGRATION
+    value: "true"
+  - name: KSERVE_NAMESPACE
+    value: "self-healing-platform"
+  - name: KSERVE_ANOMALY_DETECTOR_SERVICE
+    value: "anomaly-detector-predictor"
+  - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
+    value: "predictive-analytics-predictor"
+```
+
+**KServe Service DNS**:
+```
+http://<service-name>.<namespace>.svc.cluster.local/v1/models/<model>:predict
+```
+
+#### KServe v1 Prediction API
+
+**Required Endpoints**:
+- `GET /v1/models/<model>` - Model metadata
+- `POST /v1/models/<model>:predict` - Inference
+- `GET /v1/models` - List available models
+
+#### `POST /v1/models/anomaly-detector:predict`
+Detect anomalies using KServe InferenceService.
+
+**Request Body** (KServe v1 format):
+```json
+{
+  "instances": [
+    [0.5, 1.2, 0.8],
+    [0.3, 0.9, 1.1]
+  ]
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "predictions": [-1, 1],
+  "model_name": "anomaly-detector",
+  "model_version": "v2"
+}
+```
+
+**Prediction Values**:
+- `-1` = Anomaly detected
+- `1` = Normal (no anomaly)
+
+#### `POST /v1/models/predictive-analytics:predict`
+Predict future issues using KServe InferenceService.
+
+**Request Body**:
+```json
+{
+  "instances": [
+    [0.75, 0.80, 0.02],
+    [0.85, 0.90, 0.05]
+  ]
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "predictions": [-1, -1],
+  "model_name": "predictive-analytics",
+  "model_version": "v1"
+}
+```
+
+#### `GET /v1/models/anomaly-detector`
+Get model metadata.
+
+**Response** (200 OK):
+```json
+{
+  "name": "anomaly-detector",
+  "versions": ["v1", "v2"],
+  "platform": "sklearn"
+}
+```
+
+### Go KServe Client Implementation
+
+```go
+// internal/integrations/kserve_client.go
+package integrations
+
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "time"
+)
+
+type KServeClient struct {
+    anomalyDetectorURL     string
+    predictiveAnalyticsURL string
+    httpClient             *http.Client
+}
+
+type KServeV1Request struct {
+    Instances [][]float64 `json:"instances"`
+}
+
+type KServeV1Response struct {
+    Predictions  []int  `json:"predictions"`
+    ModelName    string `json:"model_name,omitempty"`
+    ModelVersion string `json:"model_version,omitempty"`
+}
+
+// DetectAnomalies calls KServe anomaly detector
+func (c *KServeClient) DetectAnomalies(
+    ctx context.Context,
+    instances [][]float64,
+) (*AnomalyDetectionResult, error) {
+    endpoint := fmt.Sprintf("%s/v1/models/anomaly-detector:predict", 
+        c.anomalyDetectorURL)
+    
+    req := &KServeV1Request{Instances: instances}
+    // ... implementation
+}
+```
+
+### 2.2 Legacy ML Service (Deprecated)
+
+The legacy Python ML service integration is deprecated but still supported for backward compatibility.
+
+**Configuration**:
+```yaml
+env:
+  - name: ENABLE_KSERVE_INTEGRATION
+    value: "false"
+  - name: ML_SERVICE_URL
+    value: "http://aiops-ml-service:8080"
+```
 
 #### `POST /api/v1/anomaly/detect`
 Detect anomalies in metrics data.
@@ -238,86 +380,16 @@ Analyze patterns in historical data.
 }
 ```
 
-### Go Client Implementation
-
-```go
-// internal/integrations/ml_service_client.go
-package integrations
-
-import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "time"
-)
-
-type MLServiceClient struct {
-    baseURL    string
-    httpClient *http.Client
-}
-
-func NewMLServiceClient(baseURL string) *MLServiceClient {
-    return &MLServiceClient{
-        baseURL: baseURL,
-        httpClient: &http.Client{
-            Timeout: 30 * time.Second,
-        },
-    }
-}
-
-// DetectAnomaly calls Python ML service to detect anomalies
-func (c *MLServiceClient) DetectAnomaly(
-    ctx context.Context,
-    req *AnomalyDetectionRequest,
-) (*AnomalyDetectionResponse, error) {
-    url := fmt.Sprintf("%s/api/v1/anomaly/detect", c.baseURL)
-    
-    body, err := json.Marshal(req)
-    if err != nil {
-        return nil, fmt.Errorf("marshal request: %w", err)
-    }
-    
-    httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-    if err != nil {
-        return nil, fmt.Errorf("create request: %w", err)
-    }
-    httpReq.Header.Set("Content-Type", "application/json")
-    
-    resp, err := c.httpClient.Do(httpReq)
-    if err != nil {
-        return nil, fmt.Errorf("send request: %w", err)
-    }
-    defer resp.Body.Close()
-    
-    if resp.StatusCode != http.StatusOK {
-        return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
-    }
-    
-    var result AnomalyDetectionResponse
-    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-        return nil, fmt.Errorf("decode response: %w", err)
-    }
-    
-    return &result, nil
-}
-
-// Predict calls Python ML service for predictions
-func (c *MLServiceClient) Predict(
-    ctx context.Context,
-    req *PredictionRequest,
-) (*PredictionResponse, error) {
-    url := fmt.Sprintf("%s/api/v1/prediction/predict", c.baseURL)
-    // Similar implementation to DetectAnomaly
-    // ...
-}
-```
-
 ## Compatibility Guarantees
 
 - MCP server continues to work unchanged
-- Python ML service interface remains stable
+- KServe integration is the recommended approach (ADR-039)
+- Legacy ML_SERVICE_URL is deprecated but still supported
 - Only the orchestration implementation changes (Python → Go)
+
+## References
+
+- [KServe v1 Protocol](https://kserve.github.io/website/latest/modelserving/data_plane/v1_protocol/)
+- [ADR-039: User-Deployed KServe Models](../docs/adrs/039-user-deployed-kserve-models.md)
 
 

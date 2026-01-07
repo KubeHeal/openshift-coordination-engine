@@ -41,8 +41,12 @@ make fmt
 ```bash
 # Set environment variables
 export KUBECONFIG=~/.kube/config
-export ML_SERVICE_URL=http://localhost:8080
 export LOG_LEVEL=debug
+
+# KServe integration (recommended - ADR-039)
+export ENABLE_KSERVE_INTEGRATION=true
+export KSERVE_NAMESPACE=self-healing-platform
+export KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
 
 # Run the engine
 make run
@@ -77,7 +81,7 @@ make ci
 
 ### Component Responsibilities
 - **Go Engine**: Orchestration, remediation planning, multi-layer coordination
-- **Python ML Service**: Anomaly detection, predictions, pattern recognition (separate deployment)
+- **KServe InferenceServices**: User-deployed ML models for anomaly detection and predictions (ADR-039)
 - **MCP Server**: Natural language interface that calls this Go engine
 
 ### Project Structure
@@ -87,7 +91,7 @@ internal/                           # Private application code
   ├── detector/                     # Deployment method and layer detection (ADR-041, ADR-040)
   ├── coordination/                 # Multi-layer coordination logic (ADR-040)
   ├── remediation/                  # Remediation planning and execution (ADR-039, ADR-038)
-  └── integrations/                 # External service clients (ML service, ArgoCD)
+  └── integrations/                 # External service clients (KServe, ArgoCD, legacy ML)
 pkg/                                # Public API and models
   ├── api/v1/                       # REST API handlers
   └── models/                       # Data structures
@@ -104,21 +108,30 @@ pkg/                                # Public API and models
   - `GET /workflows/{id}` - Get workflow execution details
 - **IMPORTANT**: Must maintain API compatibility with existing Python coordination engine
 
-**Downstream API (Python ML Service):**
-- Base URL: `http://aiops-ml-service:8080`
-- Key endpoints:
-  - `POST /api/v1/anomaly/detect` - Detect anomalies in metrics
-  - `POST /api/v1/prediction/predict` - Predict future issues
-  - `POST /api/v1/pattern/analyze` - Analyze historical patterns
+**Downstream ML Integration (ADR-039):**
+- **KServe (recommended)**: Direct calls to KServe InferenceServices
+  - `POST /v1/models/anomaly-detector:predict` - Anomaly detection
+  - `POST /v1/models/predictive-analytics:predict` - Predictive analytics
+  - See [KServe v1 Protocol](https://kserve.github.io/website/latest/modelserving/data_plane/v1_protocol/)
+- **Legacy ML Service (deprecated)**: `http://aiops-ml-service:8080`
 
 ### Configuration via Environment Variables
 ```bash
+# Core configuration
 KUBECONFIG=/path/to/kubeconfig      # Kubernetes configuration
-ML_SERVICE_URL=http://...           # Python ML service endpoint
 ARGOCD_API_URL=https://...          # ArgoCD API (optional, detected from cluster)
 LOG_LEVEL=info                      # Log level (debug, info, warn, error)
 PORT=8080                           # HTTP server port
 METRICS_PORT=9090                   # Prometheus metrics port
+
+# KServe integration (ADR-039 - recommended)
+ENABLE_KSERVE_INTEGRATION=true
+KSERVE_NAMESPACE=self-healing-platform
+KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
+KSERVE_PREDICTIVE_ANALYTICS_SERVICE=predictive-analytics-predictor
+
+# Legacy ML (deprecated - use KServe instead)
+# ML_SERVICE_URL=http://...
 ```
 
 ## Development Workflow

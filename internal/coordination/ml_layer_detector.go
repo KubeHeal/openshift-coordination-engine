@@ -11,26 +11,92 @@ import (
 	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
 )
 
+// MLProvider defines the interface for ML/KServe integration
+type MLProvider interface {
+	// DetectAnomaliesFromMetrics performs anomaly detection on metric data
+	DetectAnomaliesFromMetrics(ctx context.Context, metrics []integrations.MetricData) (*MLAnomalyResult, error)
+
+	// HealthCheck checks if the ML provider is healthy
+	HealthCheck(ctx context.Context) error
+
+	// Close closes any resources held by the provider
+	Close()
+}
+
+// MLAnomalyResult represents the result of anomaly detection from any provider
+type MLAnomalyResult struct {
+	AnomaliesFound int     `json:"anomalies_found"`
+	Total          int     `json:"total"`
+	Confidence     float64 `json:"confidence"`
+	AnomalyRate    float64 `json:"anomaly_rate"`
+	Provider       string  `json:"provider"` // "kserve" or "legacy_ml"
+}
+
 // MLLayerDetector enhances layer detection with ML predictions
 type MLLayerDetector struct {
 	baseDetector                 *LayerDetector // Keyword-based detector (fallback)
-	mlClient                     *integrations.MLClient
+	mlClient                     *integrations.MLClient  // Legacy ML client (deprecated)
+	kserveClient                 *integrations.KServeClient // KServe client (ADR-039)
 	enableML                     bool
+	useKServe                    bool // True if using KServe, false for legacy ML
 	timeout                      time.Duration
 	probabilityThreshold         float64 // Minimum probability to mark layer as affected
 	rootCauseConfidenceThreshold float64 // Minimum confidence to use ML-suggested root cause
 	log                          *logrus.Logger
 }
 
-// NewMLLayerDetector creates a new ML-enhanced layer detector
+// NewMLLayerDetector creates a new ML-enhanced layer detector with legacy ML client
+// Deprecated: Use NewMLLayerDetectorWithKServe for KServe integration (ADR-039)
 func NewMLLayerDetector(mlClient *integrations.MLClient, log *logrus.Logger) *MLLayerDetector {
 	return &MLLayerDetector{
 		baseDetector:                 NewLayerDetector(log),
 		mlClient:                     mlClient,
+		kserveClient:                 nil,
 		enableML:                     mlClient != nil,
+		useKServe:                    false,
 		timeout:                      5 * time.Second,
 		probabilityThreshold:         0.75, // 75% probability to mark layer as affected
 		rootCauseConfidenceThreshold: 0.85, // 85% confidence to use ML root cause suggestion
+		log:                          log,
+	}
+}
+
+// NewMLLayerDetectorWithKServe creates a new ML-enhanced layer detector with KServe client (ADR-039)
+func NewMLLayerDetectorWithKServe(kserveClient *integrations.KServeClient, log *logrus.Logger) *MLLayerDetector {
+	return &MLLayerDetector{
+		baseDetector:                 NewLayerDetector(log),
+		mlClient:                     nil,
+		kserveClient:                 kserveClient,
+		enableML:                     kserveClient != nil && kserveClient.HasAnomalyDetector(),
+		useKServe:                    true,
+		timeout:                      10 * time.Second, // KServe may need more time
+		probabilityThreshold:         0.75,
+		rootCauseConfidenceThreshold: 0.85,
+		log:                          log,
+	}
+}
+
+// NewMLLayerDetectorDual creates a detector that can use either KServe or legacy ML
+// KServe takes precedence if both are configured
+func NewMLLayerDetectorDual(kserveClient *integrations.KServeClient, mlClient *integrations.MLClient, log *logrus.Logger) *MLLayerDetector {
+	// Prefer KServe over legacy ML
+	if kserveClient != nil && kserveClient.HasAnomalyDetector() {
+		log.Info("Using KServe integration for ML layer detection (ADR-039)")
+		return NewMLLayerDetectorWithKServe(kserveClient, log)
+	}
+
+	if mlClient != nil {
+		log.Warn("Using legacy ML_SERVICE_URL for layer detection (deprecated)")
+		return NewMLLayerDetector(mlClient, log)
+	}
+
+	log.Info("No ML integration configured, using keyword-based detection only")
+	return &MLLayerDetector{
+		baseDetector:                 NewLayerDetector(log),
+		enableML:                     false,
+		timeout:                      5 * time.Second,
+		probabilityThreshold:         0.75,
+		rootCauseConfidenceThreshold: 0.85,
 		log:                          log,
 	}
 }
@@ -97,6 +163,199 @@ func (mld *MLLayerDetector) DetectLayersWithML(ctx context.Context, issueID, iss
 
 // getMLPredictions calls ML service for layer predictions
 func (mld *MLLayerDetector) getMLPredictions(ctx context.Context, description string, resources []models.Resource) (*models.MLLayerPredictions, error) {
+	// Use KServe if configured (ADR-039)
+	if mld.useKServe && mld.kserveClient != nil {
+		return mld.getKServePredictions(ctx, description, resources)
+	}
+
+	// Fall back to legacy ML service
+	return mld.getLegacyMLPredictions(ctx, description, resources)
+}
+
+// getKServePredictions calls KServe InferenceServices for predictions (ADR-039)
+func (mld *MLLayerDetector) getKServePredictions(ctx context.Context, description string, resources []models.Resource) (*models.MLLayerPredictions, error) {
+	mld.log.WithFields(logrus.Fields{
+		"description": description,
+		"resources":   len(resources),
+		"provider":    "kserve",
+	}).Debug("Calling KServe for anomaly detection")
+
+	// Convert resources to feature vectors for KServe
+	instances := mld.resourcesToFeatureVectors(resources)
+	if len(instances) == 0 {
+		// If no resources, create a dummy instance based on description keywords
+		instances = [][]float64{{0.5, 0.5, 0.5}} // Neutral values
+	}
+
+	// Call KServe anomaly detector
+	result, err := mld.kserveClient.DetectAnomalies(ctx, instances)
+	if err != nil {
+		return nil, fmt.Errorf("KServe anomaly detection failed: %w", err)
+	}
+
+	// Convert KServe result to MLLayerPredictions
+	predictions := mld.parseKServeResponse(result, resources)
+
+	mld.log.WithFields(logrus.Fields{
+		"provider":        "kserve",
+		"anomalies_found": result.Summary.AnomaliesFound,
+		"total":           result.Summary.Total,
+		"confidence":      predictions.Confidence,
+		"root_suggestion": predictions.RootCauseSuggestion,
+	}).Debug("KServe predictions parsed")
+
+	return predictions, nil
+}
+
+// resourcesToFeatureVectors converts resources to feature vectors for KServe
+func (mld *MLLayerDetector) resourcesToFeatureVectors(resources []models.Resource) [][]float64 {
+	if len(resources) == 0 {
+		return [][]float64{}
+	}
+
+	instances := make([][]float64, 0, len(resources))
+	for _, r := range resources {
+		// Create feature vector based on resource type and layer
+		// Features: [infrastructure_score, platform_score, application_score]
+		var infraScore, platformScore, appScore float64
+
+		switch r.Kind {
+		case "Node", "MachineConfig", "MachineConfigPool":
+			infraScore = 1.0
+		case "ClusterOperator", "NetworkPolicy", "StorageClass":
+			platformScore = 1.0
+		case "Pod", "Deployment", "StatefulSet", "Service":
+			appScore = 1.0
+		default:
+			// Unknown resource type - assign equal scores
+			infraScore, platformScore, appScore = 0.33, 0.33, 0.34
+		}
+
+		instances = append(instances, []float64{infraScore, platformScore, appScore})
+	}
+
+	return instances
+}
+
+// parseKServeResponse converts KServe anomaly detection result to MLLayerPredictions
+func (mld *MLLayerDetector) parseKServeResponse(result *integrations.AnomalyDetectionResult, resources []models.Resource) *models.MLLayerPredictions {
+	predictions := &models.MLLayerPredictions{
+		PredictedAt:  time.Now(),
+		AnalysisType: "kserve_anomaly",
+	}
+
+	// Calculate confidence based on anomaly detection results
+	if result.Summary.Total > 0 {
+		// Confidence is higher when more anomalies are detected with clear patterns
+		predictions.Confidence = 0.7 + (result.Summary.AnomalyRate * 0.3)
+	} else {
+		predictions.Confidence = 0.5 // Low confidence when no data
+	}
+
+	// Analyze which layers are affected based on resource types and anomaly predictions
+	infraAnomalies, platformAnomalies, appAnomalies := 0, 0, 0
+	infraTotal, platformTotal, appTotal := 0, 0, 0
+
+	for i, pred := range result.Predictions {
+		if i >= len(resources) {
+			break
+		}
+		r := resources[i]
+
+		switch r.Kind {
+		case "Node", "MachineConfig", "MachineConfigPool":
+			infraTotal++
+			if pred.IsAnomaly {
+				infraAnomalies++
+			}
+		case "ClusterOperator", "NetworkPolicy", "StorageClass":
+			platformTotal++
+			if pred.IsAnomaly {
+				platformAnomalies++
+			}
+		case "Pod", "Deployment", "StatefulSet", "Service":
+			appTotal++
+			if pred.IsAnomaly {
+				appAnomalies++
+			}
+		}
+	}
+
+	// Calculate probabilities for each layer
+	if infraTotal > 0 {
+		infraProb := float64(infraAnomalies) / float64(infraTotal)
+		if infraProb > 0 {
+			predictions.Infrastructure = &models.LayerPrediction{
+				Affected:    infraProb >= mld.probabilityThreshold,
+				Probability: minFloat64(infraProb+0.3, 1.0), // Boost probability
+				Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", infraAnomalies, infraTotal)},
+				IsRootCause: false,
+			}
+		}
+	}
+
+	if platformTotal > 0 {
+		platformProb := float64(platformAnomalies) / float64(platformTotal)
+		if platformProb > 0 {
+			predictions.Platform = &models.LayerPrediction{
+				Affected:    platformProb >= mld.probabilityThreshold,
+				Probability: minFloat64(platformProb+0.3, 1.0),
+				Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", platformAnomalies, platformTotal)},
+				IsRootCause: false,
+			}
+		}
+	}
+
+	if appTotal > 0 {
+		appProb := float64(appAnomalies) / float64(appTotal)
+		if appProb > 0 {
+			predictions.Application = &models.LayerPrediction{
+				Affected:    appProb >= mld.probabilityThreshold,
+				Probability: minFloat64(appProb+0.3, 1.0),
+				Evidence:    []string{"kserve_anomaly_detection", fmt.Sprintf("%d/%d anomalies", appAnomalies, appTotal)},
+				IsRootCause: false,
+			}
+		}
+	}
+
+	// Determine root cause (highest anomaly rate wins, with infrastructure priority)
+	infraRate := 0.0
+	platformRate := 0.0
+	appRate := 0.0
+
+	if infraTotal > 0 {
+		infraRate = float64(infraAnomalies) / float64(infraTotal)
+	}
+	if platformTotal > 0 {
+		platformRate = float64(platformAnomalies) / float64(platformTotal)
+	}
+	if appTotal > 0 {
+		appRate = float64(appAnomalies) / float64(appTotal)
+	}
+
+	predictions.RootCauseSuggestion = mld.determineMLRootCause(infraRate, platformRate, appRate)
+
+	// Mark root cause layer
+	switch predictions.RootCauseSuggestion {
+	case models.LayerInfrastructure:
+		if predictions.Infrastructure != nil {
+			predictions.Infrastructure.IsRootCause = true
+		}
+	case models.LayerPlatform:
+		if predictions.Platform != nil {
+			predictions.Platform.IsRootCause = true
+		}
+	case models.LayerApplication:
+		if predictions.Application != nil {
+			predictions.Application.IsRootCause = true
+		}
+	}
+
+	return predictions
+}
+
+// getLegacyMLPredictions calls the legacy ML service for predictions (deprecated)
+func (mld *MLLayerDetector) getLegacyMLPredictions(ctx context.Context, description string, resources []models.Resource) (*models.MLLayerPredictions, error) {
 	// Extract events from resources for pattern analysis
 	events := make([]string, 0, len(resources))
 	for _, r := range resources {
@@ -127,7 +386,8 @@ func (mld *MLLayerDetector) getMLPredictions(ctx context.Context, description st
 		"description": description,
 		"resources":   len(resources),
 		"events":      len(events),
-	}).Debug("Calling ML pattern analysis for layer detection")
+		"provider":    "legacy_ml",
+	}).Debug("Calling legacy ML pattern analysis for layer detection")
 
 	resp, err := mld.mlClient.AnalyzePatterns(ctx, req)
 	if err != nil {
@@ -138,6 +398,7 @@ func (mld *MLLayerDetector) getMLPredictions(ctx context.Context, description st
 	predictions := mld.parseMLResponse(resp, resources)
 
 	mld.log.WithFields(logrus.Fields{
+		"provider":        "legacy_ml",
 		"ml_confidence":   predictions.Confidence,
 		"patterns_found":  len(resp.Patterns),
 		"root_suggestion": predictions.RootCauseSuggestion,
@@ -358,6 +619,13 @@ func (mld *MLLayerDetector) enhanceWithMLPredictions(issue *models.LayeredIssue,
 
 func maxFloat64(a, b float64) float64 {
 	if a > b {
+		return a
+	}
+	return b
+}
+
+func minFloat64(a, b float64) float64 {
+	if a < b {
 		return a
 	}
 	return b
