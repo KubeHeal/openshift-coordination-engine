@@ -82,7 +82,7 @@ jobs:
           ls -lh bin/coordination-engine
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: coordination-engine
           path: bin/coordination-engine
