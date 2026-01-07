@@ -28,11 +28,43 @@ Currently, the API does not require authentication when accessed from within the
 | `Content-Type` | Always `application/json` |
 | `X-Request-ID` | Request ID for tracing (auto-generated if not provided) |
 
-## Health Check Endpoint
+## Health Check Endpoints
+
+The coordination engine provides two health check endpoints to support different use cases:
+
+### GET /health
+
+**Lightweight health check for Kubernetes probes** (Recommended for liveness/readiness probes)
+
+Returns a simple health status following Kubernetes conventions. This endpoint is optimized for frequent health checks with minimal overhead.
+
+**Request**:
+```http
+GET /health HTTP/1.1
+Host: coordination-engine:8080
+```
+
+**Response** (200 OK):
+```json
+{
+  "status": "ok",
+  "version": "ocp-4.20-abc123"
+}
+```
+
+**Use Cases**:
+- Kubernetes liveness probes
+- Kubernetes readiness probes
+- Load balancer health checks
+- Quick availability checks
+
+---
 
 ### GET /api/v1/health
 
-Returns the health status of the coordination engine and its dependencies.
+**Detailed health check with dependency monitoring**
+
+Returns comprehensive health status of the coordination engine and all its dependencies.
 
 **Request**:
 ```http
@@ -271,7 +303,10 @@ CORS is not enabled by default. To enable CORS for frontend applications:
 ### Health Check with curl
 
 ```bash
-# Simple health check
+# Lightweight health check (recommended)
+curl http://coordination-engine:8080/health
+
+# Detailed health check with dependency status
 curl http://coordination-engine:8080/api/v1/health
 
 # Pretty-printed with jq
@@ -288,11 +323,18 @@ curl -H "X-Request-ID: healthcheck-$(date +%s)" \
 # Port-forward to access from local machine
 kubectl port-forward svc/coordination-engine 8080:8080 -n self-healing-platform
 
-# Access health endpoint
+# Lightweight health check
+curl http://localhost:8080/health
+
+# Detailed health check
 curl http://localhost:8080/api/v1/health
 ```
 
 ### Kubernetes Probes
+
+**Recommended: Use `/health` endpoint for probes**
+
+The `/health` endpoint follows Kubernetes conventions and provides lightweight health checks optimized for frequent probe requests.
 
 **Deployment manifest example**:
 ```yaml
@@ -313,22 +355,39 @@ spec:
           name: metrics
         livenessProbe:
           httpGet:
-            path: /api/v1/health
+            path: /health
             port: http
-          initialDelaySeconds: 30
+          initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /api/v1/health
+            path: /health
             port: http
-          initialDelaySeconds: 10
+          initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
           successThreshold: 1
           failureThreshold: 3
 ```
+
+**Alternative: Use `/api/v1/health` for detailed monitoring**
+
+If you need dependency status visibility in your probes, you can use the detailed endpoint:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+```
+
+> **Note**: The detailed endpoint performs additional checks (Kubernetes API, ML service, RBAC) which may add latency. Use `/health` for most cases.
 
 ## Monitoring Integration
 

@@ -66,9 +66,10 @@ resources:
     cpu: "500m"
 
 # Liveness probe configuration
+# Using /health endpoint (Kubernetes standard) for lightweight health checks
 livenessProbe:
   httpGet:
-    path: /api/v1/health
+    path: /health
     port: 8080
   initialDelaySeconds: 10
   periodSeconds: 10
@@ -76,9 +77,10 @@ livenessProbe:
   failureThreshold: 3
 
 # Readiness probe configuration
+# Using /health endpoint (Kubernetes standard) for lightweight health checks
 readinessProbe:
   httpGet:
-    path: /api/v1/health
+    path: /health
     port: 8080
   initialDelaySeconds: 5
   periodSeconds: 5
