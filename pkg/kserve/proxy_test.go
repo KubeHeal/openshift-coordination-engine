@@ -529,4 +529,3 @@ func TestDetectResponse_JSON(t *testing.T) {
 	assert.Equal(t, "anomaly-detector", resp.ModelName)
 	assert.Equal(t, "v2", resp.ModelVersion)
 }
-
