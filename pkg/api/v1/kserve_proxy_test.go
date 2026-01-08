@@ -221,7 +221,7 @@ func TestKServeProxyHandler_RegisterRoutes(t *testing.T) {
 
 	for _, route := range routes {
 		t.Run(route.path, func(t *testing.T) {
-			req := httptest.NewRequest(route.method, route.path, nil)
+			req := httptest.NewRequest(route.method, route.path, http.NoBody)
 			match := &mux.RouteMatch{}
 			matched := router.Match(req, match)
 			assert.True(t, matched, "Route %s %s should be registered", route.method, route.path)
