@@ -27,6 +27,11 @@ func NewKServeProxyHandler(proxyClient *kserve.ProxyClient, log *logrus.Logger) 
 	}
 }
 
+// GetProxyClient returns the KServe proxy client for use by other handlers
+func (h *KServeProxyHandler) GetProxyClient() *kserve.ProxyClient {
+	return h.proxyClient
+}
+
 // RegisterRoutes registers KServe proxy API routes
 func (h *KServeProxyHandler) RegisterRoutes(router *mux.Router) {
 	// POST /api/v1/detect - Call KServe model for predictions

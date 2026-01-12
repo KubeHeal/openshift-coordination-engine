@@ -147,6 +147,25 @@ func main() {
 	coordinationHandler := v1.NewCoordinationHandler(layerDetector, multiLayerPlanner, multiLayerOrchestrator, log)
 	log.Info("Coordination handler initialized")
 
+	// Create recommendations handler with KServe integration for ML predictions
+	var recommendationsHandler *v1.RecommendationsHandler
+	if kserveProxyHandler != nil {
+		recommendationsHandler = v1.NewRecommendationsHandler(
+			orchestrator,
+			remediationHandler.GetIncidentStore(),
+			kserveProxyHandler.GetProxyClient(),
+			log,
+		)
+	} else {
+		recommendationsHandler = v1.NewRecommendationsHandler(
+			orchestrator,
+			remediationHandler.GetIncidentStore(),
+			nil, // No KServe client
+			log,
+		)
+	}
+	log.Info("Recommendations handler initialized")
+
 	// API v1 routes
 	apiV1 := router.PathPrefix("/api/v1").Subrouter()
 
@@ -157,6 +176,10 @@ func main() {
 	apiV1.HandleFunc("/remediation/trigger", remediationHandler.TriggerRemediation).Methods("POST")
 	apiV1.HandleFunc("/workflows/{id}", remediationHandler.GetWorkflow).Methods("GET")
 	apiV1.HandleFunc("/incidents", remediationHandler.ListIncidents).Methods("GET")
+
+	// Recommendations endpoint (ML-powered remediation predictions)
+	apiV1.HandleFunc("/recommendations", recommendationsHandler.GetRecommendations).Methods("POST")
+	log.Info("Recommendations API endpoint registered: POST /api/v1/recommendations")
 
 	// Detection endpoints
 	detectionHandler.RegisterRoutes(router)
