@@ -47,6 +47,10 @@ type KServeConfig struct {
 	// Namespace where KServe InferenceServices are deployed
 	Namespace string `json:"namespace"`
 
+	// PredictorPort is the port where KServe InferenceService predictors listen
+	// In RawDeployment mode, predictors listen on 8080, not the default HTTP port 80
+	PredictorPort int `json:"predictor_port"`
+
 	// Services maps service types to KServe InferenceService names
 	// Legacy hardcoded services for backward compatibility
 	Services KServeServices `json:"services"`
@@ -73,7 +77,7 @@ func (k *KServeConfig) GetAnomalyDetectorURL() string {
 	if k.Services.AnomalyDetector == "" {
 		return ""
 	}
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local", k.Services.AnomalyDetector, k.Namespace)
+	return k.buildServiceURL(k.Services.AnomalyDetector)
 }
 
 // GetPredictiveAnalyticsURL returns the full URL for the predictive analytics KServe service
@@ -81,7 +85,16 @@ func (k *KServeConfig) GetPredictiveAnalyticsURL() string {
 	if k.Services.PredictiveAnalytics == "" {
 		return ""
 	}
-	return fmt.Sprintf("http://%s.%s.svc.cluster.local", k.Services.PredictiveAnalytics, k.Namespace)
+	return k.buildServiceURL(k.Services.PredictiveAnalytics)
+}
+
+// buildServiceURL constructs the full service URL including the predictor port
+func (k *KServeConfig) buildServiceURL(serviceName string) string {
+	port := k.PredictorPort
+	if port == 0 {
+		port = DefaultKServePredictorPort
+	}
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, k.Namespace, port)
 }
 
 // GetAllServices returns all registered KServe services (legacy + dynamic)
@@ -127,9 +140,10 @@ const (
 	DefaultEnableCORS      = false
 
 	// KServe defaults (ADR-039)
-	DefaultKServeEnabled   = true
-	DefaultKServeNamespace = "self-healing-platform"
-	DefaultKServeTimeout   = 10 * time.Second
+	DefaultKServeEnabled       = true
+	DefaultKServeNamespace     = "self-healing-platform"
+	DefaultKServeTimeout       = 10 * time.Second
+	DefaultKServePredictorPort = 8080 // KServe predictors in RawDeployment mode listen on 8080
 )
 
 // Valid log levels
@@ -160,8 +174,9 @@ func Load() (*Config, error) {
 
 		// KServe configuration (ADR-039, ADR-040)
 		KServe: KServeConfig{
-			Enabled:   getEnvAsBool("ENABLE_KSERVE_INTEGRATION", DefaultKServeEnabled),
-			Namespace: getEnv("KSERVE_NAMESPACE", DefaultKServeNamespace),
+			Enabled:       getEnvAsBool("ENABLE_KSERVE_INTEGRATION", DefaultKServeEnabled),
+			Namespace:     getEnv("KSERVE_NAMESPACE", DefaultKServeNamespace),
+			PredictorPort: getEnvAsInt("KSERVE_PREDICTOR_PORT", DefaultKServePredictorPort),
 			Services: KServeServices{
 				AnomalyDetector:     getEnv("KSERVE_ANOMALY_DETECTOR_SERVICE", ""),
 				PredictiveAnalytics: getEnv("KSERVE_PREDICTIVE_ANALYTICS_SERVICE", ""),
@@ -370,6 +385,7 @@ func discoverKServeServicesFromEnv() map[string]string {
 		// Skip known configuration variables
 		if strings.HasPrefix(env, "KSERVE_NAMESPACE") ||
 			strings.HasPrefix(env, "KSERVE_TIMEOUT") ||
+			strings.HasPrefix(env, "KSERVE_PREDICTOR_PORT") ||
 			strings.HasPrefix(env, "KSERVE_ANOMALY_DETECTOR_SERVICE") ||
 			strings.HasPrefix(env, "KSERVE_PREDICTIVE_ANALYTICS_SERVICE") {
 			continue
