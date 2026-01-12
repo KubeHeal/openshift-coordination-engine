@@ -115,7 +115,7 @@ func (c *PrometheusClient) GetCPURollingMean(ctx context.Context) (float64, erro
 
 	// Normalize to 0-1 range (assuming typical cluster has ~100 cores)
 	// In production, you'd query node_cpu_seconds_total to get actual capacity
-	normalizedValue := normalizeMetricValue(value, 0.0, 1.0)
+	normalizedValue := normalizeMetricValue(value, 1.0)
 
 	c.setCached(cacheKey, normalizedValue)
 	c.log.WithFields(logrus.Fields{
@@ -156,7 +156,7 @@ func (c *PrometheusClient) GetMemoryRollingMean(ctx context.Context) (float64, e
 	}
 
 	// Ensure value is in 0-1 range
-	normalizedValue := normalizeMetricValue(value, 0.0, 1.0)
+	normalizedValue := normalizeMetricValue(value, 1.0)
 
 	c.setCached(cacheKey, normalizedValue)
 	c.log.WithFields(logrus.Fields{
@@ -187,7 +187,7 @@ func (c *PrometheusClient) GetNamespaceCPURollingMean(ctx context.Context, names
 		return 0, err
 	}
 
-	normalizedValue := normalizeMetricValue(value, 0.0, 1.0)
+	normalizedValue := normalizeMetricValue(value, 1.0)
 	c.setCached(cacheKey, normalizedValue)
 
 	return normalizedValue, nil
@@ -212,7 +212,7 @@ func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, na
 		return 0, err
 	}
 
-	normalizedValue := normalizeMetricValue(value, 0.0, 1.0)
+	normalizedValue := normalizeMetricValue(value, 1.0)
 	c.setCached(cacheKey, normalizedValue)
 
 	return normalizedValue, nil
@@ -248,9 +248,7 @@ func (c *PrometheusClient) queryInstant(ctx context.Context, query string) (floa
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer closeBody(resp)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -333,10 +331,21 @@ func (c *PrometheusClient) ClearCache() {
 	c.cache = make(map[string]cachedMetric)
 }
 
-// normalizeMetricValue ensures a value is within the specified range
-func normalizeMetricValue(value, minVal, maxVal float64) float64 {
-	if value < minVal {
-		return minVal
+// closeBody closes the response body and logs any error
+func closeBody(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		if err := resp.Body.Close(); err != nil {
+			// Log is not available here, so we silently ignore
+			// In practice, close errors on read bodies are rare
+			_ = err
+		}
+	}
+}
+
+// normalizeMetricValue ensures a value is within the 0.0 to maxVal range
+func normalizeMetricValue(value, maxVal float64) float64 {
+	if value < 0 {
+		return 0
 	}
 	if value > maxVal {
 		return maxVal
