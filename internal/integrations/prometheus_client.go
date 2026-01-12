@@ -115,7 +115,7 @@ func (c *PrometheusClient) GetCPURollingMean(ctx context.Context) (float64, erro
 
 	// Normalize to 0-1 range (assuming typical cluster has ~100 cores)
 	// In production, you'd query node_cpu_seconds_total to get actual capacity
-	normalizedValue := normalizeMetricValue(value, 1.0)
+	normalizedValue := clampToUnitRange(value)
 
 	c.setCached(cacheKey, normalizedValue)
 	c.log.WithFields(logrus.Fields{
@@ -156,7 +156,7 @@ func (c *PrometheusClient) GetMemoryRollingMean(ctx context.Context) (float64, e
 	}
 
 	// Ensure value is in 0-1 range
-	normalizedValue := normalizeMetricValue(value, 1.0)
+	normalizedValue := clampToUnitRange(value)
 
 	c.setCached(cacheKey, normalizedValue)
 	c.log.WithFields(logrus.Fields{
@@ -187,7 +187,7 @@ func (c *PrometheusClient) GetNamespaceCPURollingMean(ctx context.Context, names
 		return 0, err
 	}
 
-	normalizedValue := normalizeMetricValue(value, 1.0)
+	normalizedValue := clampToUnitRange(value)
 	c.setCached(cacheKey, normalizedValue)
 
 	return normalizedValue, nil
@@ -212,7 +212,7 @@ func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, na
 		return 0, err
 	}
 
-	normalizedValue := normalizeMetricValue(value, 1.0)
+	normalizedValue := clampToUnitRange(value)
 	c.setCached(cacheKey, normalizedValue)
 
 	return normalizedValue, nil
@@ -342,13 +342,13 @@ func closeBody(resp *http.Response) {
 	}
 }
 
-// normalizeMetricValue ensures a value is within the 0.0 to maxVal range
-func normalizeMetricValue(value, maxVal float64) float64 {
+// clampToUnitRange ensures a value is within the 0.0 to 1.0 range
+func clampToUnitRange(value float64) float64 {
 	if value < 0 {
 		return 0
 	}
-	if value > maxVal {
-		return maxVal
+	if value > 1 {
+		return 1
 	}
 	return value
 }
