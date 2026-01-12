@@ -236,7 +236,8 @@ func TestProxyClient_GetAllModels(t *testing.T) {
 func TestProxyClient_Predict(t *testing.T) {
 	// Create mock KServe server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/models/test-model:predict", r.URL.Path)
+		// KServe defaults to model name "model" when spec.predictor.model.name is not set
+		assert.Equal(t, "/v1/models/model:predict", r.URL.Path)
 		assert.Equal(t, "POST", r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
@@ -349,12 +350,13 @@ func TestProxyClient_Predict_ServerError(t *testing.T) {
 func TestProxyClient_CheckModelHealth(t *testing.T) {
 	// Create healthy mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/models/test-model", r.URL.Path)
+		// KServe defaults to model name "model" when spec.predictor.model.name is not set
+		assert.Equal(t, "/v1/models/model", r.URL.Path)
 		assert.Equal(t, "GET", r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"name": "test-model"})
+		json.NewEncoder(w).Encode(map[string]string{"name": "model"})
 	}))
 	defer server.Close()
 
