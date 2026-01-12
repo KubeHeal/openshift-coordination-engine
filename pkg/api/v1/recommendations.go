@@ -11,6 +11,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
+	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
 	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
 	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
@@ -19,10 +20,15 @@ import (
 
 // RecommendationsHandler handles ML-powered remediation recommendations API requests
 type RecommendationsHandler struct {
-	orchestrator  *remediation.Orchestrator
-	incidentStore *storage.IncidentStore
-	kserveClient  *kserve.ProxyClient
-	log           *logrus.Logger
+	orchestrator     *remediation.Orchestrator
+	incidentStore    *storage.IncidentStore
+	kserveClient     *kserve.ProxyClient
+	prometheusClient *integrations.PrometheusClient
+	log              *logrus.Logger
+
+	// Default values when Prometheus is not available
+	defaultCPURollingMean    float64
+	defaultMemoryRollingMean float64
 }
 
 // NewRecommendationsHandler creates a new recommendations handler
@@ -33,10 +39,21 @@ func NewRecommendationsHandler(
 	log *logrus.Logger,
 ) *RecommendationsHandler {
 	return &RecommendationsHandler{
-		orchestrator:  orchestrator,
-		incidentStore: incidentStore,
-		kserveClient:  kserveClient,
-		log:           log,
+		orchestrator:             orchestrator,
+		incidentStore:            incidentStore,
+		kserveClient:             kserveClient,
+		prometheusClient:         nil, // Optional, set via SetPrometheusClient
+		log:                      log,
+		defaultCPURollingMean:    0.65, // 65% average CPU usage
+		defaultMemoryRollingMean: 0.72, // 72% average memory usage
+	}
+}
+
+// SetPrometheusClient sets the Prometheus client for real metrics querying
+func (h *RecommendationsHandler) SetPrometheusClient(client *integrations.PrometheusClient) {
+	h.prometheusClient = client
+	if client != nil && client.IsAvailable() {
+		h.log.Info("Prometheus client configured for recommendations handler")
 	}
 }
 
@@ -288,7 +305,7 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req *GetR
 	// Prepare input features matching model training order:
 	// [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
 	// The model expects exactly 4 features in this specific order
-	instances := h.buildPredictionInstances(currentTime)
+	instances := h.buildPredictionInstances(ctx, currentTime)
 
 	h.log.WithFields(logrus.Fields{
 		"hour_of_day": currentTime.Hour(),
@@ -314,14 +331,20 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req *GetR
 
 // buildPredictionInstances creates feature instances for ML prediction
 // Features must match training order: [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
-func (h *RecommendationsHandler) buildPredictionInstances(currentTime time.Time) [][]float64 {
+func (h *RecommendationsHandler) buildPredictionInstances(ctx context.Context, currentTime time.Time) [][]float64 {
 	hourOfDay := float64(currentTime.Hour())
 	dayOfWeek := float64(currentTime.Weekday())
 
 	// Calculate rolling means from recent metrics
-	// In production, these would come from Prometheus queries over 24h window
-	cpuRollingMean := h.getCPURollingMean()
-	memoryRollingMean := h.getMemoryRollingMean()
+	// Uses Prometheus if available, otherwise falls back to defaults
+	cpuRollingMean := h.getCPURollingMeanWithContext(ctx)
+	memoryRollingMean := h.getMemoryRollingMeanWithContext(ctx)
+
+	h.log.WithFields(logrus.Fields{
+		"cpu_rolling_mean":    cpuRollingMean,
+		"memory_rolling_mean": memoryRollingMean,
+		"prometheus_enabled":  h.prometheusClient != nil && h.prometheusClient.IsAvailable(),
+	}).Debug("Retrieved rolling mean metrics")
 
 	// Build instances with 4 features each (matching model training)
 	instances := [][]float64{
@@ -340,23 +363,41 @@ func (h *RecommendationsHandler) buildPredictionInstances(currentTime time.Time)
 }
 
 // getCPURollingMean returns the 24-hour rolling mean of CPU usage
-// In production, this would query Prometheus: avg_over_time(container_cpu_usage_seconds_total[24h])
+// Queries Prometheus if available, otherwise returns a default value
 func (h *RecommendationsHandler) getCPURollingMean() float64 {
-	// TODO: Integrate with Prometheus for real metrics
-	// For now, return a reasonable default that represents typical cluster state
-	// This should be replaced with actual Prometheus query:
-	// query: avg(rate(container_cpu_usage_seconds_total{namespace!=""}[24h]))
-	return 0.65 // 65% average CPU usage
+	return h.getCPURollingMeanWithContext(context.Background())
+}
+
+// getCPURollingMeanWithContext returns the 24-hour rolling mean of CPU usage with context
+func (h *RecommendationsHandler) getCPURollingMeanWithContext(ctx context.Context) float64 {
+	if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
+		value, err := h.prometheusClient.GetCPURollingMean(ctx)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get CPU rolling mean from Prometheus, using default")
+			return h.defaultCPURollingMean
+		}
+		return value
+	}
+	return h.defaultCPURollingMean
 }
 
 // getMemoryRollingMean returns the 24-hour rolling mean of memory usage
-// In production, this would query Prometheus: avg_over_time(container_memory_usage_bytes[24h])
+// Queries Prometheus if available, otherwise returns a default value
 func (h *RecommendationsHandler) getMemoryRollingMean() float64 {
-	// TODO: Integrate with Prometheus for real metrics
-	// For now, return a reasonable default that represents typical cluster state
-	// This should be replaced with actual Prometheus query:
-	// query: avg(container_memory_usage_bytes{namespace!=""} / container_spec_memory_limit_bytes{namespace!=""})
-	return 0.72 // 72% average memory usage
+	return h.getMemoryRollingMeanWithContext(context.Background())
+}
+
+// getMemoryRollingMeanWithContext returns the 24-hour rolling mean of memory usage with context
+func (h *RecommendationsHandler) getMemoryRollingMeanWithContext(ctx context.Context) float64 {
+	if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
+		value, err := h.prometheusClient.GetMemoryRollingMean(ctx)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get memory rolling mean from Prometheus, using default")
+			return h.defaultMemoryRollingMean
+		}
+		return value
+	}
+	return h.defaultMemoryRollingMean
 }
 
 // interpretMLPredictions converts model output to recommendations

@@ -147,6 +147,9 @@ func main() {
 	coordinationHandler := v1.NewCoordinationHandler(layerDetector, multiLayerPlanner, multiLayerOrchestrator, log)
 	log.Info("Coordination handler initialized")
 
+	// Initialize Prometheus client for metrics querying (optional)
+	prometheusClient := initPrometheusClient(cfg, log)
+
 	// Create recommendations handler with KServe integration for ML predictions
 	var recommendationsHandler *v1.RecommendationsHandler
 	if kserveProxyHandler != nil {
@@ -163,6 +166,12 @@ func main() {
 			nil, // No KServe client
 			log,
 		)
+	}
+
+	// Configure Prometheus client for real metrics if available
+	if prometheusClient != nil {
+		recommendationsHandler.SetPrometheusClient(prometheusClient)
+		log.WithField("prometheus_url", cfg.PrometheusURL).Info("Prometheus client configured for ML predictions")
 	}
 	log.Info("Recommendations handler initialized")
 
@@ -337,6 +346,23 @@ func initRemediationComponents(
 	log.WithField("remediators", strategySelector.GetRegisteredRemediators()).Info("Remediation orchestrator initialized")
 
 	return orchestrator, strategySelector
+}
+
+// initPrometheusClient creates a Prometheus query client if configured
+func initPrometheusClient(cfg *config.Config, log *logrus.Logger) *integrations.PrometheusClient {
+	if cfg.PrometheusURL == "" {
+		log.Info("PROMETHEUS_URL not set, ML predictions will use default metric values")
+		return nil
+	}
+
+	client := integrations.NewPrometheusClient(cfg.PrometheusURL, cfg.HTTPTimeout, log)
+	if client == nil {
+		log.Warn("Failed to create Prometheus client")
+		return nil
+	}
+
+	log.WithField("prometheus_url", cfg.PrometheusURL).Info("Prometheus client initialized for metrics querying")
+	return client
 }
 
 // initKubernetesClient creates both standard and dynamic Kubernetes clients

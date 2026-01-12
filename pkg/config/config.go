@@ -24,6 +24,9 @@ type Config struct {
 	MLServiceURL string `json:"ml_service_url,omitempty"` // Deprecated: use KServe integration
 	ArgocdAPIURL string `json:"argocd_api_url,omitempty"` // Optional, auto-detected
 
+	// Prometheus configuration for metrics querying
+	PrometheusURL string `json:"prometheus_url,omitempty"` // URL for Prometheus API queries
+
 	// KServe Integration (ADR-039)
 	KServe KServeConfig `json:"kserve"`
 
@@ -139,6 +142,10 @@ const (
 	DefaultKubernetesBurst = 100
 	DefaultEnableCORS      = false
 
+	// Prometheus defaults - empty means disabled
+	// In OpenShift, typically: https://prometheus-k8s.openshift-monitoring.svc:9091
+	DefaultPrometheusURL = ""
+
 	// KServe defaults (ADR-039)
 	DefaultKServeEnabled       = true
 	DefaultKServeNamespace     = "self-healing-platform"
@@ -166,6 +173,7 @@ func Load() (*Config, error) {
 		Namespace:       getEnv("NAMESPACE", DefaultNamespace),
 		MLServiceURL:    getEnv("ML_SERVICE_URL", DefaultMLServiceURL), // Deprecated
 		ArgocdAPIURL:    getEnv("ARGOCD_API_URL", ""),
+		PrometheusURL:   getEnv("PROMETHEUS_URL", DefaultPrometheusURL),
 		HTTPTimeout:     getEnvAsDuration("HTTP_TIMEOUT", DefaultHTTPTimeout),
 		EnableCORS:      getEnvAsBool("ENABLE_CORS", DefaultEnableCORS),
 		CORSAllowOrigin: getEnvAsSlice("CORS_ALLOW_ORIGIN", []string{"*"}),
@@ -249,6 +257,13 @@ func (c *Config) Validate() error {
 	if c.ArgocdAPIURL != "" {
 		if !strings.HasPrefix(c.ArgocdAPIURL, "http://") && !strings.HasPrefix(c.ArgocdAPIURL, "https://") {
 			errors = append(errors, fmt.Sprintf("argocd_api_url must start with http:// or https://: %s", c.ArgocdAPIURL))
+		}
+	}
+
+	// Validate Prometheus URL if provided
+	if c.PrometheusURL != "" {
+		if !strings.HasPrefix(c.PrometheusURL, "http://") && !strings.HasPrefix(c.PrometheusURL, "https://") {
+			errors = append(errors, fmt.Sprintf("prometheus_url must start with http:// or https://: %s", c.PrometheusURL))
 		}
 	}
 
