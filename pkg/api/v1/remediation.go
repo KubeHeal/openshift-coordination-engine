@@ -29,6 +29,11 @@ func NewRemediationHandler(orchestrator *remediation.Orchestrator, log *logrus.L
 	}
 }
 
+// GetIncidentStore returns the incident store for use by other handlers
+func (h *RemediationHandler) GetIncidentStore() *storage.IncidentStore {
+	return h.incidentStore
+}
+
 // TriggerRemediationRequest represents the request body for triggering remediation
 type TriggerRemediationRequest struct {
 	IncidentID string `json:"incident_id"`
