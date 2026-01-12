@@ -161,7 +161,7 @@ func (h *RecommendationsHandler) collectRecommendations(ctx context.Context, req
 	}
 
 	// Get pattern-based recommendations
-	patternRecs := h.getPatternRecommendations(req)
+	patternRecs := h.getPatternRecommendations()
 	recommendations = append(recommendations, patternRecs...)
 
 	return recommendations, mlEnabled
@@ -325,7 +325,7 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req *GetR
 }
 
 // getPatternRecommendations detects common patterns and generates recommendations
-func (h *RecommendationsHandler) getPatternRecommendations(req *GetRecommendationsRequest) []Recommendation {
+func (h *RecommendationsHandler) getPatternRecommendations() []Recommendation {
 	recommendations := make([]Recommendation, 0)
 
 	if h.orchestrator == nil {
