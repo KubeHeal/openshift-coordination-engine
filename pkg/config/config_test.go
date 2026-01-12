@@ -502,7 +502,7 @@ func clearEnv(t *testing.T) {
 		"ENABLE_CORS", "CORS_ALLOW_ORIGIN",
 		"KUBERNETES_QPS", "KUBERNETES_BURST",
 		// KServe environment variables (ADR-039)
-		"ENABLE_KSERVE_INTEGRATION", "KSERVE_NAMESPACE",
+		"ENABLE_KSERVE_INTEGRATION", "KSERVE_NAMESPACE", "KSERVE_PREDICTOR_PORT",
 		"KSERVE_ANOMALY_DETECTOR_SERVICE", "KSERVE_PREDICTIVE_ANALYTICS_SERVICE",
 		"KSERVE_TIMEOUT",
 	}
@@ -632,8 +632,9 @@ func TestKServeConfig_Validation(t *testing.T) {
 
 func TestKServeConfig_GetURLs(t *testing.T) {
 	kserve := KServeConfig{
-		Enabled:   true,
-		Namespace: "self-healing-platform",
+		Enabled:       true,
+		Namespace:     "self-healing-platform",
+		PredictorPort: 8080,
 		Services: KServeServices{
 			AnomalyDetector:     "anomaly-detector-predictor",
 			PredictiveAnalytics: "predictive-analytics-predictor",
@@ -641,10 +642,40 @@ func TestKServeConfig_GetURLs(t *testing.T) {
 	}
 
 	anomalyURL := kserve.GetAnomalyDetectorURL()
-	assert.Equal(t, "http://anomaly-detector-predictor.self-healing-platform.svc.cluster.local", anomalyURL)
+	assert.Equal(t, "http://anomaly-detector-predictor.self-healing-platform.svc.cluster.local:8080", anomalyURL)
 
 	predictiveURL := kserve.GetPredictiveAnalyticsURL()
-	assert.Equal(t, "http://predictive-analytics-predictor.self-healing-platform.svc.cluster.local", predictiveURL)
+	assert.Equal(t, "http://predictive-analytics-predictor.self-healing-platform.svc.cluster.local:8080", predictiveURL)
+}
+
+func TestKServeConfig_GetURLs_DefaultPort(t *testing.T) {
+	// Test that default port is used when PredictorPort is 0
+	kserve := KServeConfig{
+		Enabled:       true,
+		Namespace:     "test-ns",
+		PredictorPort: 0, // Should default to 8080
+		Services: KServeServices{
+			AnomalyDetector: "anomaly-detector-predictor",
+		},
+	}
+
+	anomalyURL := kserve.GetAnomalyDetectorURL()
+	assert.Equal(t, "http://anomaly-detector-predictor.test-ns.svc.cluster.local:8080", anomalyURL)
+}
+
+func TestKServeConfig_GetURLs_CustomPort(t *testing.T) {
+	// Test that custom port is used when explicitly set
+	kserve := KServeConfig{
+		Enabled:       true,
+		Namespace:     "test-ns",
+		PredictorPort: 9000,
+		Services: KServeServices{
+			AnomalyDetector: "anomaly-detector-predictor",
+		},
+	}
+
+	anomalyURL := kserve.GetAnomalyDetectorURL()
+	assert.Equal(t, "http://anomaly-detector-predictor.test-ns.svc.cluster.local:9000", anomalyURL)
 }
 
 func TestKServeConfig_GetURLs_Empty(t *testing.T) {

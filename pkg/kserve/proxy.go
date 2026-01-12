@@ -20,11 +20,12 @@ import (
 // ProxyClient is a client for proxying requests to KServe InferenceServices.
 // It supports dynamic model discovery from environment variables.
 type ProxyClient struct {
-	namespace   string
-	models      map[string]*ModelInfo
-	httpClient  *http.Client
-	log         *logrus.Logger
-	modelsMutex sync.RWMutex
+	namespace     string
+	predictorPort int
+	models        map[string]*ModelInfo
+	httpClient    *http.Client
+	log           *logrus.Logger
+	modelsMutex   sync.RWMutex
 }
 
 // ModelInfo contains information about a registered KServe model
@@ -47,9 +48,16 @@ type ProxyConfig struct {
 	// Namespace is the default namespace for KServe InferenceServices
 	Namespace string
 
+	// PredictorPort is the port where KServe InferenceService predictors listen
+	// In RawDeployment mode, predictors listen on 8080, not the default HTTP port 80
+	PredictorPort int
+
 	// Timeout for HTTP requests to KServe services
 	Timeout time.Duration
 }
+
+// DefaultPredictorPort is the default port for KServe predictors in RawDeployment mode
+const DefaultPredictorPort = 8080
 
 // DetectRequest represents a request to call a KServe model for predictions
 type DetectRequest struct {
@@ -102,6 +110,11 @@ func NewProxyClient(cfg ProxyConfig, log *logrus.Logger) (*ProxyClient, error) {
 		timeout = 10 * time.Second
 	}
 
+	predictorPort := cfg.PredictorPort
+	if predictorPort == 0 {
+		predictorPort = DefaultPredictorPort
+	}
+
 	// Create HTTP client with connection pooling
 	transport := &http.Transport{
 		MaxIdleConns:        100,
@@ -111,8 +124,9 @@ func NewProxyClient(cfg ProxyConfig, log *logrus.Logger) (*ProxyClient, error) {
 	}
 
 	client := &ProxyClient{
-		namespace: cfg.Namespace,
-		models:    make(map[string]*ModelInfo),
+		namespace:     cfg.Namespace,
+		predictorPort: predictorPort,
+		models:        make(map[string]*ModelInfo),
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   timeout,
@@ -145,8 +159,10 @@ func (c *ProxyClient) loadModelsFromEnv() {
 			continue
 		}
 
-		// Skip KSERVE_NAMESPACE and KSERVE_TIMEOUT (configuration variables)
-		if strings.HasPrefix(env, "KSERVE_NAMESPACE") || strings.HasPrefix(env, "KSERVE_TIMEOUT") {
+		// Skip KSERVE_NAMESPACE, KSERVE_TIMEOUT, and KSERVE_PREDICTOR_PORT (configuration variables)
+		if strings.HasPrefix(env, "KSERVE_NAMESPACE") ||
+			strings.HasPrefix(env, "KSERVE_TIMEOUT") ||
+			strings.HasPrefix(env, "KSERVE_PREDICTOR_PORT") {
 			continue
 		}
 
@@ -168,8 +184,8 @@ func (c *ProxyClient) loadModelsFromEnv() {
 		modelName = strings.TrimSuffix(modelName, "_SERVICE")
 		modelName = strings.ToLower(strings.ReplaceAll(modelName, "_", "-"))
 
-		// Build service URL
-		url := fmt.Sprintf("http://%s.%s.svc.cluster.local", serviceName, c.namespace)
+		// Build service URL with the predictor port
+		url := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, c.namespace, c.predictorPort)
 
 		c.models[modelName] = &ModelInfo{
 			Name:        modelName,
@@ -182,6 +198,7 @@ func (c *ProxyClient) loadModelsFromEnv() {
 			"model":   modelName,
 			"service": serviceName,
 			"url":     url,
+			"port":    c.predictorPort,
 		}).Debug("Registered KServe model from environment")
 	}
 }
