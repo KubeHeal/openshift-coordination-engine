@@ -61,8 +61,7 @@ func NewPrometheusClient(baseURL string, timeout time.Duration, log *logrus.Logg
 		IdleConnTimeout:     90 * time.Second,
 		DisableKeepAlives:   false,
 		TLSClientConfig: &tls.Config{
-			//nolint:gosec // G402: Required for self-signed certs in OpenShift clusters
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: true, //#nosec G402 -- Required for self-signed certs in OpenShift clusters
 		},
 	}
 
