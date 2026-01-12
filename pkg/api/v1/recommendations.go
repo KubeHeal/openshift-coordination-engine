@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -50,17 +51,17 @@ type GetRecommendationsRequest struct {
 // Recommendation represents a single remediation recommendation
 type Recommendation struct {
 	ID                 string   `json:"id"`
-	Type               string   `json:"type"`                           // "proactive", "reactive"
-	IssueType          string   `json:"issue_type"`                     // e.g., "memory_pressure", "pod_crash_loop"
-	Target             string   `json:"target"`                         // e.g., "Deployment/payment-service"
-	Namespace          string   `json:"namespace"`                      // Target namespace
-	Severity           string   `json:"severity"`                       // "low", "medium", "high", "critical"
-	Confidence         float64  `json:"confidence"`                     // 0.0-1.0
-	PredictedTime      string   `json:"predicted_time,omitempty"`       // ISO8601 timestamp when issue is expected
-	RecommendedActions []string `json:"recommended_actions"`            // List of suggested remediation actions
-	Evidence           []string `json:"evidence"`                       // Supporting data points
-	Source             string   `json:"source,omitempty"`               // "ml_prediction", "historical_analysis", "pattern_detection"
-	RelatedIncidentID  string   `json:"related_incident_id,omitempty"`  // If related to an existing incident
+	Type               string   `json:"type"`
+	IssueType          string   `json:"issue_type"`
+	Target             string   `json:"target"`
+	Namespace          string   `json:"namespace"`
+	Severity           string   `json:"severity"`
+	Confidence         float64  `json:"confidence"`
+	PredictedTime      string   `json:"predicted_time,omitempty"`
+	RecommendedActions []string `json:"recommended_actions"`
+	Evidence           []string `json:"evidence"`
+	Source             string   `json:"source,omitempty"`
+	RelatedIncidentID  string   `json:"related_incident_id,omitempty"`
 }
 
 // GetRecommendationsResponse represents the response for getting recommendations
@@ -75,28 +76,40 @@ type GetRecommendationsResponse struct {
 }
 
 // GetRecommendations handles POST /api/v1/recommendations
-// @Summary Get ML-powered remediation recommendations
-// @Description Returns proactive and reactive remediation recommendations using ML predictions
-// @Tags recommendations
-// @Accept json
-// @Produce json
-// @Param request body GetRecommendationsRequest true "Recommendation request parameters"
-// @Success 200 {object} GetRecommendationsResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /api/v1/recommendations [post]
 func (h *RecommendationsHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
 	h.log.Info("Received get recommendations request")
 
-	// Parse request body (optional - defaults used if empty)
+	// Parse and validate request
+	req, err := h.parseAndValidateRequest(r)
+	if err != nil {
+		h.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.log.WithFields(logrus.Fields{
+		"timeframe":            req.Timeframe,
+		"include_predictions":  *req.IncludePredictions,
+		"confidence_threshold": req.ConfidenceThreshold,
+		"namespace":            req.Namespace,
+	}).Info("Processing recommendations request")
+
+	// Collect and filter recommendations
+	recommendations, mlEnabled := h.collectRecommendations(ctx, req)
+	filteredRecs := h.filterRecommendations(recommendations, req)
+
+	// Build and send response
+	h.sendRecommendationsResponse(w, req, filteredRecs, mlEnabled)
+}
+
+// parseAndValidateRequest parses the request body and validates parameters
+func (h *RecommendationsHandler) parseAndValidateRequest(r *http.Request) (*GetRecommendationsRequest, error) {
 	var req GetRecommendationsRequest
+
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			h.log.WithError(err).Debug("Failed to decode request body")
-			h.respondError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
-			return
+			return nil, fmt.Errorf("invalid request body: %w", err)
 		}
 	}
 
@@ -115,31 +128,26 @@ func (h *RecommendationsHandler) GetRecommendations(w http.ResponseWriter, r *ht
 	// Validate timeframe
 	validTimeframes := map[string]bool{"1h": true, "6h": true, "24h": true}
 	if !validTimeframes[req.Timeframe] {
-		h.respondError(w, http.StatusBadRequest, "Invalid timeframe: must be '1h', '6h', or '24h'")
-		return
+		return nil, fmt.Errorf("invalid timeframe: must be '1h', '6h', or '24h'")
 	}
 
 	// Validate confidence threshold
 	if req.ConfidenceThreshold < 0 || req.ConfidenceThreshold > 1 {
-		h.respondError(w, http.StatusBadRequest, "Invalid confidence_threshold: must be between 0.0 and 1.0")
-		return
+		return nil, fmt.Errorf("invalid confidence_threshold: must be between 0.0 and 1.0")
 	}
 
-	h.log.WithFields(logrus.Fields{
-		"timeframe":            req.Timeframe,
-		"include_predictions":  *req.IncludePredictions,
-		"confidence_threshold": req.ConfidenceThreshold,
-		"namespace":            req.Namespace,
-	}).Info("Processing recommendations request")
+	return &req, nil
+}
 
-	// Collect recommendations from various sources
+// collectRecommendations gathers recommendations from all sources
+func (h *RecommendationsHandler) collectRecommendations(ctx context.Context, req *GetRecommendationsRequest) ([]Recommendation, bool) {
 	recommendations := make([]Recommendation, 0)
 
-	// 1. Get historical incident-based recommendations
-	historicalRecs := h.getHistoricalRecommendations(ctx, req)
+	// Get historical incident-based recommendations
+	historicalRecs := h.getHistoricalRecommendations(req)
 	recommendations = append(recommendations, historicalRecs...)
 
-	// 2. Get ML predictions if enabled and KServe is available
+	// Get ML predictions if enabled and KServe is available
 	mlEnabled := false
 	if *req.IncludePredictions && h.kserveClient != nil {
 		mlEnabled = true
@@ -152,30 +160,31 @@ func (h *RecommendationsHandler) GetRecommendations(w http.ResponseWriter, r *ht
 		}
 	}
 
-	// 3. Get pattern-based recommendations
-	patternRecs := h.getPatternRecommendations(ctx, req)
+	// Get pattern-based recommendations
+	patternRecs := h.getPatternRecommendations(req)
 	recommendations = append(recommendations, patternRecs...)
 
-	// Filter by confidence threshold
-	filteredRecs := make([]Recommendation, 0, len(recommendations))
-	for _, rec := range recommendations {
-		if rec.Confidence >= req.ConfidenceThreshold {
-			filteredRecs = append(filteredRecs, rec)
-		}
-	}
+	return recommendations, mlEnabled
+}
 
-	// Filter by namespace if specified
-	if req.Namespace != "" {
-		namespacedRecs := make([]Recommendation, 0)
-		for _, rec := range filteredRecs {
-			if rec.Namespace == req.Namespace {
-				namespacedRecs = append(namespacedRecs, rec)
+// filterRecommendations filters recommendations by confidence and namespace
+func (h *RecommendationsHandler) filterRecommendations(recommendations []Recommendation, req *GetRecommendationsRequest) []Recommendation {
+	filteredRecs := make([]Recommendation, 0, len(recommendations))
+
+	for i := range recommendations {
+		rec := &recommendations[i]
+		if rec.Confidence >= req.ConfidenceThreshold {
+			if req.Namespace == "" || rec.Namespace == req.Namespace {
+				filteredRecs = append(filteredRecs, *rec)
 			}
 		}
-		filteredRecs = namespacedRecs
 	}
 
-	// Build response
+	return filteredRecs
+}
+
+// sendRecommendationsResponse builds and sends the response
+func (h *RecommendationsHandler) sendRecommendationsResponse(w http.ResponseWriter, req *GetRecommendationsRequest, filteredRecs []Recommendation, mlEnabled bool) {
 	response := GetRecommendationsResponse{
 		Status:               "success",
 		Timestamp:            time.Now().UTC().Format(time.RFC3339),
@@ -199,7 +208,7 @@ func (h *RecommendationsHandler) GetRecommendations(w http.ResponseWriter, r *ht
 }
 
 // getHistoricalRecommendations analyzes historical incidents to generate recommendations
-func (h *RecommendationsHandler) getHistoricalRecommendations(ctx context.Context, req GetRecommendationsRequest) []Recommendation {
+func (h *RecommendationsHandler) getHistoricalRecommendations(req *GetRecommendationsRequest) []Recommendation {
 	recommendations := make([]Recommendation, 0)
 
 	// Get historical incidents from store
@@ -217,20 +226,17 @@ func (h *RecommendationsHandler) getHistoricalRecommendations(ctx context.Contex
 
 	// Analyze incident patterns
 	issueFrequency := make(map[string]int)
-	namespaceIssues := make(map[string][]string)
 
 	// Count incident types from stored incidents
 	for _, inc := range incidents {
 		key := string(inc.Severity) + ":" + inc.Target
 		issueFrequency[key]++
-		namespaceIssues[inc.Target] = append(namespaceIssues[inc.Target], inc.Title)
 	}
 
 	// Count issue types from workflows
 	for _, wf := range workflows {
 		key := wf.IssueType + ":" + wf.Namespace
 		issueFrequency[key]++
-		namespaceIssues[wf.Namespace] = append(namespaceIssues[wf.Namespace], wf.IssueType)
 	}
 
 	// Generate recommendations for recurring issues
@@ -240,50 +246,34 @@ func (h *RecommendationsHandler) getHistoricalRecommendations(ctx context.Contex
 			continue // Only recommend for recurring issues
 		}
 
-		// Parse the key to extract issue type and namespace
-		var issueType, namespace string
-		if len(key) > 0 {
-			// Find the colon separator
-			for i, c := range key {
-				if c == ':' {
-					issueType = key[:i]
-					namespace = key[i+1:]
-					break
-				}
-			}
-		}
-
+		issueType, namespace := parseKeyParts(key)
 		if issueType == "" || namespace == "" {
 			continue
 		}
 
 		recID++
-		confidence := calculateHistoricalConfidence(count)
-
-		rec := Recommendation{
-			ID:        fmt.Sprintf("rec-hist-%03d", recID),
-			Type:      "proactive",
-			IssueType: issueType,
-			Target:    namespace,
-			Namespace: namespace,
-			Severity:  mapCountToSeverity(count),
-			Confidence: confidence,
+		recommendations = append(recommendations, Recommendation{
+			ID:                 fmt.Sprintf("rec-hist-%03d", recID),
+			Type:               "proactive",
+			IssueType:          issueType,
+			Target:             namespace,
+			Namespace:          namespace,
+			Severity:           mapCountToSeverity(count),
+			Confidence:         calculateHistoricalConfidence(count),
 			RecommendedActions: getRecommendedActions(issueType),
 			Evidence: []string{
 				fmt.Sprintf("Issue occurred %d times in recent history", count),
 				fmt.Sprintf("Pattern detected in namespace: %s", namespace),
 			},
 			Source: "historical_analysis",
-		}
-
-		recommendations = append(recommendations, rec)
+		})
 	}
 
 	return recommendations
 }
 
 // getMLPredictions calls KServe predictive-analytics model for ML-based predictions
-func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req GetRecommendationsRequest) ([]Recommendation, error) {
+func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req *GetRecommendationsRequest) ([]Recommendation, error) {
 	recommendations := make([]Recommendation, 0)
 
 	// Check if predictive-analytics model is available
@@ -293,7 +283,6 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req GetRe
 	}
 
 	// Prepare sample input data based on current cluster state
-	// In a real implementation, this would gather actual metrics from Prometheus
 	instances := [][]float64{
 		{0.75, 0.80, 0.02}, // CPU usage, memory usage, error rate
 		{0.85, 0.90, 0.05}, // High resource utilization scenario
@@ -307,17 +296,16 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req GetRe
 
 	// Interpret predictions (-1 = issue predicted, 1 = normal)
 	for i, prediction := range resp.Predictions {
-		if prediction == -1 { // Issue predicted
+		if prediction == -1 {
 			predictedTime := time.Now().Add(getPredictionHorizon(req.Timeframe))
-
-			rec := Recommendation{
+			recommendations = append(recommendations, Recommendation{
 				ID:            fmt.Sprintf("rec-ml-%03d", i+1),
 				Type:          "proactive",
 				IssueType:     interpretPrediction(i),
 				Target:        "cluster-resources",
 				Namespace:     req.Namespace,
 				Severity:      "high",
-				Confidence:    0.85, // Would come from model in real implementation
+				Confidence:    0.85,
 				PredictedTime: predictedTime.UTC().Format(time.RFC3339),
 				RecommendedActions: []string{
 					"increase_resource_limits",
@@ -329,9 +317,7 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req GetRe
 					fmt.Sprintf("Input features indicate resource pressure (instance %d)", i+1),
 				},
 				Source: "ml_prediction",
-			}
-
-			recommendations = append(recommendations, rec)
+			})
 		}
 	}
 
@@ -339,13 +325,13 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req GetRe
 }
 
 // getPatternRecommendations detects common patterns and generates recommendations
-func (h *RecommendationsHandler) getPatternRecommendations(ctx context.Context, req GetRecommendationsRequest) []Recommendation {
+func (h *RecommendationsHandler) getPatternRecommendations(req *GetRecommendationsRequest) []Recommendation {
 	recommendations := make([]Recommendation, 0)
 
-	// Pattern detection based on workflow analysis (if orchestrator is available)
 	if h.orchestrator == nil {
 		return recommendations
 	}
+
 	workflows := h.orchestrator.ListWorkflows()
 
 	// Track failure patterns
@@ -364,21 +350,13 @@ func (h *RecommendationsHandler) getPatternRecommendations(ctx context.Context, 
 			continue
 		}
 
-		var issueType, namespace string
-		for i, c := range key {
-			if c == ':' {
-				issueType = key[:i]
-				namespace = key[i+1:]
-				break
-			}
-		}
-
+		issueType, namespace := parseKeyParts(key)
 		if issueType == "" {
 			continue
 		}
 
 		recID++
-		rec := Recommendation{
+		recommendations = append(recommendations, Recommendation{
 			ID:         fmt.Sprintf("rec-pattern-%03d", recID),
 			Type:       "reactive",
 			IssueType:  issueType,
@@ -396,18 +374,27 @@ func (h *RecommendationsHandler) getPatternRecommendations(ctx context.Context, 
 				"Pattern suggests underlying infrastructure problem",
 			},
 			Source: "pattern_detection",
-		}
-
-		recommendations = append(recommendations, rec)
+		})
 	}
 
 	return recommendations
 }
 
+// parseKeyParts splits a "type:namespace" key into its components
+func parseKeyParts(key string) (issueType, namespace string) {
+	if key == "" {
+		return "", ""
+	}
+	idx := strings.Index(key, ":")
+	if idx == -1 {
+		return "", ""
+	}
+	return key[:idx], key[idx+1:]
+}
+
 // Helper functions
 
 func calculateHistoricalConfidence(count int) float64 {
-	// Higher occurrence count = higher confidence
 	switch {
 	case count >= 10:
 		return 0.95
@@ -487,7 +474,6 @@ func getPredictionHorizon(timeframe string) time.Duration {
 }
 
 func interpretPrediction(instanceIndex int) string {
-	// Map prediction instances to issue types
 	issueTypes := []string{
 		"memory_pressure",
 		"cpu_throttling",
