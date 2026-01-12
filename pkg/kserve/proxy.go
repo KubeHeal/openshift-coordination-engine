@@ -261,7 +261,10 @@ func (c *ProxyClient) Predict(ctx context.Context, modelName string, instances [
 	}
 
 	// Build endpoint URL - KServe v1 protocol: /v1/models/<model>:predict
-	endpoint := fmt.Sprintf("%s/v1/models/%s:predict", model.URL, modelName)
+	// Note: KServe defaults to model name "model" when spec.predictor.model.name is not set
+	// We use the hardcoded "model" name for KServe API paths, while keeping the logical
+	// model name (e.g., "anomaly-detector") for user-facing APIs and service resolution
+	endpoint := fmt.Sprintf("%s/v1/models/model:predict", model.URL)
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
@@ -339,7 +342,8 @@ func (c *ProxyClient) CheckModelHealth(ctx context.Context, modelName string) (*
 	}
 
 	// KServe v1 health endpoint: GET /v1/models/<model>
-	endpoint := fmt.Sprintf("%s/v1/models/%s", model.URL, modelName)
+	// Note: KServe defaults to model name "model" when spec.predictor.model.name is not set
+	endpoint := fmt.Sprintf("%s/v1/models/model", model.URL)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {
