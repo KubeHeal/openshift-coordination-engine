@@ -58,6 +58,74 @@ Trigger a remediation workflow.
 }
 ```
 
+#### `POST /incidents`
+Create a new incident for manual tracking and correlation.
+
+**Request Body**:
+```json
+{
+  "title": "Multiple pods crashing in payment namespace",
+  "description": "Correlated incident: 3 pods in payment namespace crashed simultaneously",
+  "severity": "high",
+  "target": "payment",
+  "affected_resources": [
+    "Deployment/payment-service",
+    "Pod/payment-abc123",
+    "Pod/payment-def456"
+  ],
+  "labels": {
+    "incident_type": "correlated",
+    "correlation_id": "cor-12345"
+  }
+}
+```
+
+**Required Fields**:
+- `title` (string, max 200 chars): Short incident title
+- `description` (string, max 2000 chars): Detailed incident description
+- `severity` (enum): `low`, `medium`, `high`, or `critical`
+- `target` (string, max 100 chars): Namespace or resource identifier
+
+**Optional Fields**:
+- `affected_resources` (array of strings): List of affected resources
+- `labels` (object): Custom key-value labels for categorization
+
+**Response** (201 Created):
+```json
+{
+  "status": "success",
+  "incident_id": "inc-98765",
+  "created_at": "2026-01-11T17:00:00Z",
+  "incident": {
+    "id": "inc-98765",
+    "title": "Multiple pods crashing in payment namespace",
+    "description": "Correlated incident: 3 pods crashed simultaneously",
+    "severity": "high",
+    "target": "payment",
+    "status": "active",
+    "affected_resources": [
+      "Deployment/payment-service",
+      "Pod/payment-abc123",
+      "Pod/payment-def456"
+    ],
+    "created_at": "2026-01-11T17:00:00Z",
+    "labels": {
+      "incident_type": "correlated",
+      "correlation_id": "cor-12345"
+    }
+  },
+  "message": "Incident created successfully"
+}
+```
+
+**Error Response** (400 Bad Request):
+```json
+{
+  "status": "error",
+  "error": "validation failed: title is required"
+}
+```
+
 #### `GET /incidents`
 List recent incidents and their remediation status.
 
