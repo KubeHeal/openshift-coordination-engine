@@ -99,7 +99,7 @@ func TestRecommendationsHandler_GetRecommendations(t *testing.T) {
 		var resp map[string]interface{}
 		json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, "error", resp["status"])
-		assert.Contains(t, resp["error"], "Invalid timeframe")
+		assert.Contains(t, resp["error"], "invalid timeframe")
 	})
 
 	t.Run("invalid confidence threshold - too high", func(t *testing.T) {
