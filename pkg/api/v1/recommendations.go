@@ -411,75 +411,78 @@ func (h *RecommendationsHandler) interpretMLPredictions(predictions []int, req *
 
 	// Process each prediction corresponding to each instance
 	for i, prediction := range predictions {
-		// -1 indicates the model predicts an issue
-		if prediction == -1 {
-			predictedTime := currentTime.Add(getPredictionHorizon(req.Timeframe))
-
-			// Determine issue type based on which metrics are elevated
-			var issueType string
-			var severity string
-			var actions []string
-			var evidence []string
-
-			// Get the instance features if available
-			var instanceCPU, instanceMem float64
-			if i < len(instances) {
-				instanceCPU = instances[i][2]  // cpu_rolling_mean
-				instanceMem = instances[i][3]  // memory_rolling_mean
-			} else {
-				instanceCPU = cpuRollingMean
-				instanceMem = memoryRollingMean
-			}
-
-			// Determine primary concern based on metric values
-			if instanceMem > instanceCPU {
-				issueType = "memory_pressure"
-				severity = mapMetricToSeverity(instanceMem)
-				actions = []string{
-					"increase_memory_limit",
-					"add_horizontal_scaling",
-					"optimize_memory_usage",
-				}
-				evidence = []string{
-					fmt.Sprintf("ML model predicts memory pressure within %s", req.Timeframe),
-					fmt.Sprintf("Current memory rolling mean: %.1f%%", instanceMem*100),
-				}
-			} else {
-				issueType = "cpu_throttling"
-				severity = mapMetricToSeverity(instanceCPU)
-				actions = []string{
-					"increase_cpu_limit",
-					"add_horizontal_scaling",
-					"review_resource_quotas",
-				}
-				evidence = []string{
-					fmt.Sprintf("ML model predicts CPU pressure within %s", req.Timeframe),
-					fmt.Sprintf("Current CPU rolling mean: %.1f%%", instanceCPU*100),
-				}
-			}
-
-			// Add feature context to evidence
-			evidence = append(evidence,
-				fmt.Sprintf("Features: hour=%d, day=%d, cpu_rolling=%.2f, memory_rolling=%.2f",
-					currentTime.Hour(), int(currentTime.Weekday()), cpuRollingMean, memoryRollingMean))
-
-			// Calculate confidence based on how elevated the metrics are
-			confidence := calculatePredictionConfidence(instanceCPU, instanceMem)
-
-			recommendations = append(recommendations, Recommendation{
-				ID:                 fmt.Sprintf("rec-ml-%03d", i+1),
-				Type:               "proactive",
-				IssueType:          issueType,
-				Target:             "cluster-resources",
-				Namespace:          req.Namespace,
-				Severity:           severity,
-				Confidence:         confidence,
-				PredictedTime:      predictedTime.UTC().Format(time.RFC3339),
-				RecommendedActions: actions,
-				Evidence:           evidence,
-				Source:             "ml_prediction",
-			})
+		// Skip if model predicts normal state (1 = normal, -1 = issue predicted)
+		if prediction != -1 {
+			continue
 		}
+
+		predictedTime := currentTime.Add(getPredictionHorizon(req.Timeframe))
+
+		// Determine issue type based on which metrics are elevated
+		var issueType string
+		var severity string
+		var actions []string
+		var evidence []string
+
+		// Get the instance features if available
+		var instanceCPU, instanceMem float64
+		if i < len(instances) {
+			// cpu_rolling_mean is at index 2, memory_rolling_mean is at index 3
+			instanceCPU = instances[i][2]
+			instanceMem = instances[i][3]
+		} else {
+			instanceCPU = cpuRollingMean
+			instanceMem = memoryRollingMean
+		}
+
+		// Determine primary concern based on metric values
+		if instanceMem > instanceCPU {
+			issueType = "memory_pressure"
+			severity = mapMetricToSeverity(instanceMem)
+			actions = []string{
+				"increase_memory_limit",
+				"add_horizontal_scaling",
+				"optimize_memory_usage",
+			}
+			evidence = []string{
+				fmt.Sprintf("ML model predicts memory pressure within %s", req.Timeframe),
+				fmt.Sprintf("Current memory rolling mean: %.1f%%", instanceMem*100),
+			}
+		} else {
+			issueType = "cpu_throttling"
+			severity = mapMetricToSeverity(instanceCPU)
+			actions = []string{
+				"increase_cpu_limit",
+				"add_horizontal_scaling",
+				"review_resource_quotas",
+			}
+			evidence = []string{
+				fmt.Sprintf("ML model predicts CPU pressure within %s", req.Timeframe),
+				fmt.Sprintf("Current CPU rolling mean: %.1f%%", instanceCPU*100),
+			}
+		}
+
+		// Add feature context to evidence
+		evidence = append(evidence,
+			fmt.Sprintf("Features: hour=%d, day=%d, cpu_rolling=%.2f, memory_rolling=%.2f",
+				currentTime.Hour(), int(currentTime.Weekday()), cpuRollingMean, memoryRollingMean))
+
+		// Calculate confidence based on how elevated the metrics are
+		confidence := calculatePredictionConfidence(instanceCPU, instanceMem)
+
+		recommendations = append(recommendations, Recommendation{
+			ID:                 fmt.Sprintf("rec-ml-%03d", i+1),
+			Type:               "proactive",
+			IssueType:          issueType,
+			Target:             "cluster-resources",
+			Namespace:          req.Namespace,
+			Severity:           severity,
+			Confidence:         confidence,
+			PredictedTime:      predictedTime.UTC().Format(time.RFC3339),
+			RecommendedActions: actions,
+			Evidence:           evidence,
+			Source:             "ml_prediction",
+		})
 	}
 
 	return recommendations
@@ -514,7 +517,6 @@ func calculatePredictionConfidence(cpuMean, memoryMean float64) float64 {
 	}
 	return confidence
 }
-
 
 // getPatternRecommendations detects common patterns and generates recommendations
 func (h *RecommendationsHandler) getPatternRecommendations() []Recommendation {

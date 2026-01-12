@@ -23,9 +23,9 @@ type PrometheusClient struct {
 	log        *logrus.Logger
 
 	// Cache for rolling mean values with TTL
-	cache      map[string]cachedMetric
-	cacheMu    sync.RWMutex
-	cacheTTL   time.Duration
+	cache    map[string]cachedMetric
+	cacheMu  sync.RWMutex
+	cacheTTL time.Duration
 }
 
 // cachedMetric holds a cached metric value with expiration
@@ -61,7 +61,8 @@ func NewPrometheusClient(baseURL string, timeout time.Duration, log *logrus.Logg
 		IdleConnTimeout:     90 * time.Second,
 		DisableKeepAlives:   false,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, // Required for self-signed certs in OpenShift
+			//nolint:gosec // G402: Required for self-signed certs in OpenShift clusters
+			InsecureSkipVerify: true,
 		},
 	}
 
@@ -178,7 +179,8 @@ func (c *PrometheusClient) GetNamespaceCPURollingMean(ctx context.Context, names
 		return value, nil
 	}
 
-	query := fmt.Sprintf(`avg(rate(container_cpu_usage_seconds_total{container!="",pod!="",namespace="%s"}[24h]))`, namespace)
+	// Build PromQL query with namespace filter
+	query := fmt.Sprintf(`avg(rate(container_cpu_usage_seconds_total{container!="",pod!="",namespace=%q}[24h]))`, namespace)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
@@ -202,7 +204,8 @@ func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, na
 		return value, nil
 	}
 
-	query := fmt.Sprintf(`avg(container_memory_usage_bytes{container!="",pod!="",namespace="%s"} / container_spec_memory_limit_bytes{container!="",pod!="",namespace="%s"} > 0)`, namespace, namespace)
+	// Build PromQL query with namespace filter
+	query := fmt.Sprintf(`avg(container_memory_usage_bytes{container!="",pod!="",namespace=%q} / container_spec_memory_limit_bytes{container!="",pod!="",namespace=%q} > 0)`, namespace, namespace)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
@@ -229,7 +232,7 @@ func (c *PrometheusClient) queryInstant(ctx context.Context, query string) (floa
 	params.Set("query", query)
 	reqURL.RawQuery = params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), http.NoBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -245,7 +248,9 @@ func (c *PrometheusClient) queryInstant(ctx context.Context, query string) (floa
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -329,12 +334,12 @@ func (c *PrometheusClient) ClearCache() {
 }
 
 // normalizeMetricValue ensures a value is within the specified range
-func normalizeMetricValue(value, min, max float64) float64 {
-	if value < min {
-		return min
+func normalizeMetricValue(value, minVal, maxVal float64) float64 {
+	if value < minVal {
+		return minVal
 	}
-	if value > max {
-		return max
+	if value > maxVal {
+		return maxVal
 	}
 	return value
 }
