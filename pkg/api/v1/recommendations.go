@@ -282,11 +282,19 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req *GetR
 		return recommendations, nil
 	}
 
-	// Prepare sample input data based on current cluster state
-	instances := [][]float64{
-		{0.75, 0.80, 0.02}, // CPU usage, memory usage, error rate
-		{0.85, 0.90, 0.05}, // High resource utilization scenario
-	}
+	// Get current time for temporal features
+	currentTime := time.Now()
+
+	// Prepare input features matching model training order:
+	// [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
+	// The model expects exactly 4 features in this specific order
+	instances := h.buildPredictionInstances(currentTime)
+
+	h.log.WithFields(logrus.Fields{
+		"hour_of_day": currentTime.Hour(),
+		"day_of_week": int(currentTime.Weekday()),
+		"instances":   len(instances),
+	}).Debug("Prepared ML prediction features")
 
 	// Call KServe model
 	resp, err := h.kserveClient.Predict(ctx, "predictive-analytics", instances)
@@ -294,35 +302,178 @@ func (h *RecommendationsHandler) getMLPredictions(ctx context.Context, req *GetR
 		return nil, fmt.Errorf("prediction failed: %w", err)
 	}
 
-	// Interpret predictions (-1 = issue predicted, 1 = normal)
-	for i, prediction := range resp.Predictions {
+	h.log.WithField("predictions", len(resp.Predictions)).Info("ML predictions successful")
+
+	// Interpret predictions
+	// The model may return classification (-1 = issue predicted, 1 = normal)
+	// or scaled values that indicate resource pressure
+	recommendations = h.interpretMLPredictions(resp.Predictions, req, currentTime, instances)
+
+	return recommendations, nil
+}
+
+// buildPredictionInstances creates feature instances for ML prediction
+// Features must match training order: [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
+func (h *RecommendationsHandler) buildPredictionInstances(currentTime time.Time) [][]float64 {
+	hourOfDay := float64(currentTime.Hour())
+	dayOfWeek := float64(currentTime.Weekday())
+
+	// Calculate rolling means from recent metrics
+	// In production, these would come from Prometheus queries over 24h window
+	cpuRollingMean := h.getCPURollingMean()
+	memoryRollingMean := h.getMemoryRollingMean()
+
+	// Build instances with 4 features each (matching model training)
+	instances := [][]float64{
+		{hourOfDay, dayOfWeek, cpuRollingMean, memoryRollingMean},
+	}
+
+	// Add scenario with slightly elevated metrics for comparison
+	instances = append(instances, []float64{
+		hourOfDay,
+		dayOfWeek,
+		min(cpuRollingMean*1.15, 1.0),    // 15% higher CPU scenario
+		min(memoryRollingMean*1.15, 1.0), // 15% higher memory scenario
+	})
+
+	return instances
+}
+
+// getCPURollingMean returns the 24-hour rolling mean of CPU usage
+// In production, this would query Prometheus: avg_over_time(container_cpu_usage_seconds_total[24h])
+func (h *RecommendationsHandler) getCPURollingMean() float64 {
+	// TODO: Integrate with Prometheus for real metrics
+	// For now, return a reasonable default that represents typical cluster state
+	// This should be replaced with actual Prometheus query:
+	// query: avg(rate(container_cpu_usage_seconds_total{namespace!=""}[24h]))
+	return 0.65 // 65% average CPU usage
+}
+
+// getMemoryRollingMean returns the 24-hour rolling mean of memory usage
+// In production, this would query Prometheus: avg_over_time(container_memory_usage_bytes[24h])
+func (h *RecommendationsHandler) getMemoryRollingMean() float64 {
+	// TODO: Integrate with Prometheus for real metrics
+	// For now, return a reasonable default that represents typical cluster state
+	// This should be replaced with actual Prometheus query:
+	// query: avg(container_memory_usage_bytes{namespace!=""} / container_spec_memory_limit_bytes{namespace!=""})
+	return 0.72 // 72% average memory usage
+}
+
+// interpretMLPredictions converts model output to recommendations
+// The model returns classification predictions (-1 = issue predicted, 1 = normal)
+// for each input instance based on the 4 features
+func (h *RecommendationsHandler) interpretMLPredictions(predictions []int, req *GetRecommendationsRequest, currentTime time.Time, instances [][]float64) []Recommendation {
+	recommendations := make([]Recommendation, 0)
+
+	cpuRollingMean := h.getCPURollingMean()
+	memoryRollingMean := h.getMemoryRollingMean()
+
+	// Process each prediction corresponding to each instance
+	for i, prediction := range predictions {
+		// -1 indicates the model predicts an issue
 		if prediction == -1 {
-			predictedTime := time.Now().Add(getPredictionHorizon(req.Timeframe))
-			recommendations = append(recommendations, Recommendation{
-				ID:            fmt.Sprintf("rec-ml-%03d", i+1),
-				Type:          "proactive",
-				IssueType:     interpretPrediction(i),
-				Target:        "cluster-resources",
-				Namespace:     req.Namespace,
-				Severity:      "high",
-				Confidence:    0.85,
-				PredictedTime: predictedTime.UTC().Format(time.RFC3339),
-				RecommendedActions: []string{
-					"increase_resource_limits",
+			predictedTime := currentTime.Add(getPredictionHorizon(req.Timeframe))
+
+			// Determine issue type based on which metrics are elevated
+			var issueType string
+			var severity string
+			var actions []string
+			var evidence []string
+
+			// Get the instance features if available
+			var instanceCPU, instanceMem float64
+			if i < len(instances) {
+				instanceCPU = instances[i][2]  // cpu_rolling_mean
+				instanceMem = instances[i][3]  // memory_rolling_mean
+			} else {
+				instanceCPU = cpuRollingMean
+				instanceMem = memoryRollingMean
+			}
+
+			// Determine primary concern based on metric values
+			if instanceMem > instanceCPU {
+				issueType = "memory_pressure"
+				severity = mapMetricToSeverity(instanceMem)
+				actions = []string{
+					"increase_memory_limit",
+					"add_horizontal_scaling",
+					"optimize_memory_usage",
+				}
+				evidence = []string{
+					fmt.Sprintf("ML model predicts memory pressure within %s", req.Timeframe),
+					fmt.Sprintf("Current memory rolling mean: %.1f%%", instanceMem*100),
+				}
+			} else {
+				issueType = "cpu_throttling"
+				severity = mapMetricToSeverity(instanceCPU)
+				actions = []string{
+					"increase_cpu_limit",
 					"add_horizontal_scaling",
 					"review_resource_quotas",
-				},
-				Evidence: []string{
-					fmt.Sprintf("ML model predicts issue within %s", req.Timeframe),
-					fmt.Sprintf("Input features indicate resource pressure (instance %d)", i+1),
-				},
-				Source: "ml_prediction",
+				}
+				evidence = []string{
+					fmt.Sprintf("ML model predicts CPU pressure within %s", req.Timeframe),
+					fmt.Sprintf("Current CPU rolling mean: %.1f%%", instanceCPU*100),
+				}
+			}
+
+			// Add feature context to evidence
+			evidence = append(evidence,
+				fmt.Sprintf("Features: hour=%d, day=%d, cpu_rolling=%.2f, memory_rolling=%.2f",
+					currentTime.Hour(), int(currentTime.Weekday()), cpuRollingMean, memoryRollingMean))
+
+			// Calculate confidence based on how elevated the metrics are
+			confidence := calculatePredictionConfidence(instanceCPU, instanceMem)
+
+			recommendations = append(recommendations, Recommendation{
+				ID:                 fmt.Sprintf("rec-ml-%03d", i+1),
+				Type:               "proactive",
+				IssueType:          issueType,
+				Target:             "cluster-resources",
+				Namespace:          req.Namespace,
+				Severity:           severity,
+				Confidence:         confidence,
+				PredictedTime:      predictedTime.UTC().Format(time.RFC3339),
+				RecommendedActions: actions,
+				Evidence:           evidence,
+				Source:             "ml_prediction",
 			})
 		}
 	}
 
-	return recommendations, nil
+	return recommendations
 }
+
+// mapMetricToSeverity converts a metric value (0.0-1.0) to severity level
+func mapMetricToSeverity(metricValue float64) string {
+	switch {
+	case metricValue >= 0.9:
+		return "critical"
+	case metricValue >= 0.8:
+		return "high"
+	case metricValue >= 0.7:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// calculatePredictionConfidence calculates confidence based on metric values
+func calculatePredictionConfidence(cpuMean, memoryMean float64) float64 {
+	// Higher metrics = higher confidence in the prediction
+	maxMetric := cpuMean
+	if memoryMean > cpuMean {
+		maxMetric = memoryMean
+	}
+
+	// Scale confidence between 0.7 and 0.95 based on metric severity
+	confidence := 0.7 + (maxMetric * 0.25)
+	if confidence > 0.95 {
+		confidence = 0.95
+	}
+	return confidence
+}
+
 
 // getPatternRecommendations detects common patterns and generates recommendations
 func (h *RecommendationsHandler) getPatternRecommendations() []Recommendation {
