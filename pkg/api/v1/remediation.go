@@ -9,20 +9,23 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
+	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
 )
 
 // RemediationHandler handles remediation API requests
 type RemediationHandler struct {
-	orchestrator *remediation.Orchestrator
-	log          *logrus.Logger
+	orchestrator  *remediation.Orchestrator
+	incidentStore *storage.IncidentStore
+	log           *logrus.Logger
 }
 
 // NewRemediationHandler creates a new remediation handler
 func NewRemediationHandler(orchestrator *remediation.Orchestrator, log *logrus.Logger) *RemediationHandler {
 	return &RemediationHandler{
-		orchestrator: orchestrator,
-		log:          log,
+		orchestrator:  orchestrator,
+		incidentStore: storage.NewIncidentStore(),
+		log:           log,
 	}
 }
 
@@ -66,6 +69,25 @@ type WorkflowResponse struct {
 	CompletedAt      string                `json:"completed_at,omitempty"`
 	Duration         string                `json:"duration,omitempty"`
 	Steps            []models.WorkflowStep `json:"steps,omitempty"`
+}
+
+// CreateIncidentRequest represents the request body for creating an incident
+type CreateIncidentRequest struct {
+	Title             string            `json:"title"`
+	Description       string            `json:"description"`
+	Severity          string            `json:"severity"`
+	Target            string            `json:"target"`
+	AffectedResources []string          `json:"affected_resources,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+}
+
+// CreateIncidentResponse represents the response for creating an incident
+type CreateIncidentResponse struct {
+	Status     string           `json:"status"`
+	IncidentID string           `json:"incident_id"`
+	CreatedAt  string           `json:"created_at"`
+	Incident   *models.Incident `json:"incident"`
+	Message    string           `json:"message"`
 }
 
 // TriggerRemediation handles POST /api/v1/remediation/trigger
@@ -196,29 +218,122 @@ func (h *RemediationHandler) GetWorkflow(w http.ResponseWriter, r *http.Request)
 	}).Info("Workflow details retrieved successfully")
 }
 
+// CreateIncident handles POST /api/v1/incidents
+func (h *RemediationHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
+	h.log.Info("Received create incident request")
+
+	// Parse request body
+	var req CreateIncidentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.log.WithError(err).Error("Failed to decode request body")
+		h.sendErrorResponse(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	// Create incident model from request
+	incident := &models.Incident{
+		Title:             req.Title,
+		Description:       req.Description,
+		Severity:          models.IncidentSeverity(req.Severity),
+		Target:            req.Target,
+		AffectedResources: req.AffectedResources,
+		Labels:            req.Labels,
+	}
+
+	// Store incident (validation happens in Create)
+	createdIncident, err := h.incidentStore.Create(incident)
+	if err != nil {
+		h.log.WithError(err).Error("Failed to create incident")
+		h.sendErrorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	h.log.WithFields(logrus.Fields{
+		"incident_id": createdIncident.ID,
+		"title":       createdIncident.Title,
+		"severity":    createdIncident.Severity,
+		"target":      createdIncident.Target,
+	}).Info("Incident created successfully")
+
+	// Build response
+	response := CreateIncidentResponse{
+		Status:     "success",
+		IncidentID: createdIncident.ID,
+		CreatedAt:  createdIncident.CreatedAt.Format(time.RFC3339),
+		Incident:   createdIncident,
+		Message:    "Incident created successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.log.WithError(err).Error("Failed to encode response")
+	}
+}
+
 // ListIncidents handles GET /api/v1/incidents
-// For now, this returns workflows (we'll enhance later with proper incident tracking)
 func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("Listing incidents")
 
-	// Get all workflows
+	// Parse query parameters for filtering
+	query := r.URL.Query()
+	namespace := query.Get("namespace")
+	severity := query.Get("severity")
+
+	// Get manually created incidents from the store
+	filter := storage.ListFilter{
+		Namespace: namespace,
+		Severity:  severity,
+		Limit:     50, // Default limit
+	}
+	storedIncidents := h.incidentStore.List(filter)
+
+	// Get workflow-based incidents
 	workflows := h.orchestrator.ListWorkflows()
 
-	// Convert to incident response format
-	incidents := make([]map[string]interface{}, 0, len(workflows))
+	// Combine both sources into response
+	incidents := make([]map[string]interface{}, 0, len(storedIncidents)+len(workflows))
+
+	// Add stored incidents first
+	for _, inc := range storedIncidents {
+		incident := map[string]interface{}{
+			"id":                 inc.ID,
+			"title":              inc.Title,
+			"description":        inc.Description,
+			"target":             inc.Target,
+			"severity":           string(inc.Severity),
+			"status":             string(inc.Status),
+			"created_at":         inc.CreatedAt.Format(time.RFC3339),
+			"affected_resources": inc.AffectedResources,
+			"labels":             inc.Labels,
+			"source":             "manual",
+		}
+		if inc.WorkflowID != "" {
+			incident["workflow_id"] = inc.WorkflowID
+		}
+		incidents = append(incidents, incident)
+	}
+
+	// Add workflow-based incidents
 	for _, wf := range workflows {
+		// Apply namespace filter if specified
+		if namespace != "" && wf.Namespace != namespace {
+			continue
+		}
+
 		incident := map[string]interface{}{
 			"id":          wf.IncidentID,
 			"namespace":   wf.Namespace,
+			"target":      wf.Namespace,
 			"resource":    wf.ResourceKind + "/" + wf.ResourceName,
 			"issue_type":  wf.IssueType,
-			"severity":    "high", // Default for now
+			"severity":    "high", // Default for workflow-based incidents
 			"created_at":  wf.CreatedAt.Format(time.RFC3339),
-			"status":      string(wf.Status),
 			"workflow_id": wf.ID,
+			"source":      "workflow",
 		}
 
-		// Add remediation status
+		// Map workflow status to incident status
 		switch wf.Status {
 		case models.WorkflowStatusCompleted:
 			incident["status"] = "remediated"
@@ -243,4 +358,17 @@ func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Reques
 	}
 
 	h.log.WithField("count", len(incidents)).Info("Incidents listed successfully")
+}
+
+// sendErrorResponse sends a JSON error response
+func (h *RemediationHandler) sendErrorResponse(w http.ResponseWriter, statusCode int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	response := map[string]string{
+		"status": "error",
+		"error":  message,
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.log.WithError(err).Error("Failed to encode error response")
+	}
 }
