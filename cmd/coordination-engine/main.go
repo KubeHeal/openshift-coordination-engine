@@ -182,6 +182,10 @@ func main() {
 	apiV1.HandleFunc("/recommendations", recommendationsHandler.GetRecommendations).Methods("POST")
 	log.Info("Recommendations API endpoint registered: POST /api/v1/recommendations")
 
+	// Recommendations endpoint (ML-powered remediation predictions)
+	apiV1.HandleFunc("/recommendations", recommendationsHandler.GetRecommendations).Methods("POST")
+	log.Info("Recommendations API endpoint registered: POST /api/v1/recommendations")
+
 	// Detection endpoints
 	detectionHandler.RegisterRoutes(router)
 	log.Info("Detection API endpoints registered")
