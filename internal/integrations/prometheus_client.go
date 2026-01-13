@@ -1055,12 +1055,8 @@ func (c *PrometheusClient) GetMemoryRollingMeanScoped(ctx context.Context, opts 
 	}
 
 	windowStr := formatDurationForPromQL(window)
-	query := c.buildQueryWithScope(
-		fmt.Sprintf(`avg(avg_over_time(container_memory_usage_bytes{%%s}[%s]) / container_spec_memory_limit_bytes{%%s} > 0)`, windowStr),
-		opts,
-	)
-	// Need to apply scope twice for the ratio
-	query = c.buildMemoryRatioQuery(opts, windowStr)
+	// Need to apply scope twice for the ratio query
+	query := c.buildMemoryRatioQuery(opts, windowStr)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
@@ -1166,10 +1162,7 @@ func (c *PrometheusClient) buildTrendData(dataPoints []MetricDataPoint) *TrendDa
 	minVal = math.MaxFloat64
 
 	for i, dp := range dataPoints {
-		trendPoints[i] = TrendPoint{
-			Timestamp: dp.Timestamp,
-			Value:     dp.Value,
-		}
+		trendPoints[i] = TrendPoint(dp)
 		sum += dp.Value
 		if dp.Value < minVal {
 			minVal = dp.Value
@@ -1201,7 +1194,7 @@ func (c *PrometheusClient) CalculateTrend(data *TrendData, threshold float64) *T
 	}
 
 	// Perform linear regression
-	slope, _, rSquared := c.linearRegression(data.Points)
+	slope, rSquared := c.linearRegression(data.Points)
 
 	// Calculate daily change percentage
 	dailyChange := 0.0
@@ -1243,11 +1236,11 @@ func (c *PrometheusClient) CalculateTrend(data *TrendData, threshold float64) *T
 	}
 }
 
-// linearRegression calculates slope, intercept, and R-squared for trend points
-func (c *PrometheusClient) linearRegression(points []TrendPoint) (slope, intercept, rSquared float64) {
+// linearRegression calculates slope and R-squared for trend points
+func (c *PrometheusClient) linearRegression(points []TrendPoint) (slope, rSquared float64) {
 	n := float64(len(points))
 	if n < 2 {
-		return 0, 0, 0
+		return 0, 0
 	}
 
 	// Convert timestamps to days from start
@@ -1278,11 +1271,11 @@ func (c *PrometheusClient) linearRegression(points []TrendPoint) (slope, interce
 	denominator := sumX2 - n*meanX*meanX
 
 	if denominator == 0 {
-		return 0, meanY, 0
+		return 0, 0
 	}
 
 	slope = numerator / denominator
-	intercept = meanY - slope*meanX
+	intercept := meanY - slope*meanX
 
 	// Calculate R-squared
 	ssRes := 0.0
@@ -1299,7 +1292,7 @@ func (c *PrometheusClient) linearRegression(points []TrendPoint) (slope, interce
 		rSquared = 1.0 - (ssRes / ssTot)
 	}
 
-	return slope, intercept, rSquared
+	return slope, rSquared
 }
 
 // calculateTrendConfidence calculates confidence score for trend analysis
