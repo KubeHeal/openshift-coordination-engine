@@ -108,11 +108,11 @@ type PredictErrorResponse struct {
 
 // Error codes for prediction failures
 const (
-	ErrCodeInvalidRequest       = "INVALID_REQUEST"
+	ErrCodeInvalidRequest        = "INVALID_REQUEST"
 	ErrCodePrometheusUnavailable = "PROMETHEUS_UNAVAILABLE"
-	ErrCodeKServeUnavailable    = "KSERVE_UNAVAILABLE"
-	ErrCodeModelNotFound        = "MODEL_NOT_FOUND"
-	ErrCodePredictionFailed     = "PREDICTION_FAILED"
+	ErrCodeKServeUnavailable     = "KSERVE_UNAVAILABLE"
+	ErrCodeModelNotFound         = "MODEL_NOT_FOUND"
+	ErrCodePredictionFailed      = "PREDICTION_FAILED"
 )
 
 // HandlePredict handles POST /api/v1/predict
