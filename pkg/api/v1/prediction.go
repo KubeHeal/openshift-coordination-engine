@@ -50,13 +50,13 @@ func (h *PredictionHandler) RegisterRoutes(router *mux.Router) {
 
 // PredictRequest represents the request body for time-specific predictions
 type PredictRequest struct {
-	Hour       int    `json:"hour"`         // Required: 0-23 (hour of day)
-	DayOfWeek  int    `json:"day_of_week"`  // Required: 0=Monday, 6=Sunday
-	Namespace  string `json:"namespace"`    // Optional: namespace filter
-	Deployment string `json:"deployment"`   // Optional: deployment filter
-	Pod        string `json:"pod"`          // Optional: specific pod filter
-	Scope      string `json:"scope"`        // Optional: pod, deployment, namespace, cluster (default: namespace)
-	Model      string `json:"model"`        // Optional: KServe model name (default: predictive-analytics)
+	Hour       int    `json:"hour"`        // Required: 0-23 (hour of day)
+	DayOfWeek  int    `json:"day_of_week"` // Required: 0=Monday, 6=Sunday
+	Namespace  string `json:"namespace"`   // Optional: namespace filter
+	Deployment string `json:"deployment"`  // Optional: deployment filter
+	Pod        string `json:"pod"`         // Optional: specific pod filter
+	Scope      string `json:"scope"`       // Optional: pod, deployment, namespace, cluster (default: namespace)
+	Model      string `json:"model"`       // Optional: KServe model name (default: predictive-analytics)
 }
 
 // PredictResponse represents the response for time-specific predictions
@@ -253,59 +253,86 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 
 // validateRequest validates the prediction request parameters
 func (h *PredictionHandler) validateRequest(req *PredictRequest) error {
+	if err := h.validateTimeFields(req); err != nil {
+		return err
+	}
+	if err := h.validateScope(req); err != nil {
+		return err
+	}
+	return h.validateScopeRequirements(req)
+}
+
+// validateTimeFields validates hour and day_of_week fields
+func (h *PredictionHandler) validateTimeFields(req *PredictRequest) error {
 	if req.Hour < 0 || req.Hour > 23 {
 		return fmt.Errorf("hour must be between 0-23")
 	}
 	if req.DayOfWeek < 0 || req.DayOfWeek > 6 {
 		return fmt.Errorf("day_of_week must be between 0-6 (0=Monday, 6=Sunday)")
 	}
+	return nil
+}
 
-	// Validate scope if provided
-	if req.Scope != "" {
-		validScopes := map[string]bool{
-			"pod":        true,
-			"deployment": true,
-			"namespace":  true,
-			"cluster":    true,
-		}
-		if !validScopes[req.Scope] {
-			return fmt.Errorf("scope must be one of: pod, deployment, namespace, cluster")
-		}
+// validateScope validates the scope field if provided
+func (h *PredictionHandler) validateScope(req *PredictRequest) error {
+	if req.Scope == "" {
+		return nil
 	}
+	validScopes := map[string]bool{
+		"pod":        true,
+		"deployment": true,
+		"namespace":  true,
+		"cluster":    true,
+	}
+	if !validScopes[req.Scope] {
+		return fmt.Errorf("scope must be one of: pod, deployment, namespace, cluster")
+	}
+	return nil
+}
 
-	// Validate scope-specific requirements
-	if req.Scope == "pod" && req.Pod == "" {
-		return fmt.Errorf("pod name is required when scope is 'pod'")
-	}
-	if req.Scope == "deployment" && req.Deployment == "" {
-		return fmt.Errorf("deployment name is required when scope is 'deployment'")
-	}
-	if (req.Scope == "pod" || req.Scope == "deployment" || req.Scope == "namespace") && req.Namespace == "" {
-		// Allow empty namespace for namespace scope - will use default
-		if req.Scope != "namespace" {
-			return fmt.Errorf("namespace is required when scope is '%s'", req.Scope)
+// validateScopeRequirements validates scope-specific field requirements
+func (h *PredictionHandler) validateScopeRequirements(req *PredictRequest) error {
+	switch req.Scope {
+	case "pod":
+		if req.Pod == "" {
+			return fmt.Errorf("pod name is required when scope is 'pod'")
+		}
+		if req.Namespace == "" {
+			return fmt.Errorf("namespace is required when scope is 'pod'")
+		}
+	case "deployment":
+		if req.Deployment == "" {
+			return fmt.Errorf("deployment name is required when scope is 'deployment'")
+		}
+		if req.Namespace == "" {
+			return fmt.Errorf("namespace is required when scope is 'deployment'")
 		}
 	}
-
 	return nil
 }
 
 // setRequestDefaults sets default values for optional request fields
 func (h *PredictionHandler) setRequestDefaults(req *PredictRequest) {
 	if req.Scope == "" {
-		if req.Pod != "" {
-			req.Scope = "pod"
-		} else if req.Deployment != "" {
-			req.Scope = "deployment"
-		} else if req.Namespace != "" {
-			req.Scope = "namespace"
-		} else {
-			req.Scope = "cluster"
-		}
+		req.Scope = h.inferScope(req)
 	}
 
 	if req.Model == "" {
 		req.Model = "predictive-analytics"
+	}
+}
+
+// inferScope determines the scope based on provided fields
+func (h *PredictionHandler) inferScope(req *PredictRequest) string {
+	switch {
+	case req.Pod != "":
+		return "pod"
+	case req.Deployment != "":
+		return "deployment"
+	case req.Namespace != "":
+		return "namespace"
+	default:
+		return "cluster"
 	}
 }
 
@@ -315,58 +342,48 @@ func (h *PredictionHandler) getScopedMetrics(ctx context.Context, req *PredictRe
 		return h.defaultCPURollingMean, h.defaultMemoryRollingMean, fmt.Errorf("prometheus client not available")
 	}
 
-	var cpuValue, memoryValue float64
-	var err error
-
 	switch req.Scope {
 	case "cluster":
-		cpuValue, err = h.prometheusClient.GetCPURollingMean(ctx)
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get cluster CPU metrics: %w", err)
-		}
-		memoryValue, err = h.prometheusClient.GetMemoryRollingMean(ctx)
-		if err != nil {
-			return cpuValue, 0, fmt.Errorf("failed to get cluster memory metrics: %w", err)
-		}
-
+		return h.getScopedMetricsForCluster(ctx)
 	case "namespace":
-		if req.Namespace == "" {
-			// Fall back to cluster-wide if no namespace specified
-			return h.getScopedMetricsForCluster(ctx)
-		}
-		cpuValue, err = h.prometheusClient.GetScopedCPURollingMean(ctx, req.Namespace, "", "")
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get namespace CPU metrics: %w", err)
-		}
-		memoryValue, err = h.prometheusClient.GetScopedMemoryRollingMean(ctx, req.Namespace, "", "")
-		if err != nil {
-			return cpuValue, 0, fmt.Errorf("failed to get namespace memory metrics: %w", err)
-		}
-
+		return h.getScopedMetricsForNamespace(ctx, req.Namespace)
 	case "deployment":
-		cpuValue, err = h.prometheusClient.GetScopedCPURollingMean(ctx, req.Namespace, req.Deployment, "")
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get deployment CPU metrics: %w", err)
-		}
-		memoryValue, err = h.prometheusClient.GetScopedMemoryRollingMean(ctx, req.Namespace, req.Deployment, "")
-		if err != nil {
-			return cpuValue, 0, fmt.Errorf("failed to get deployment memory metrics: %w", err)
-		}
-
+		return h.getScopedMetricsForDeployment(ctx, req.Namespace, req.Deployment)
 	case "pod":
-		cpuValue, err = h.prometheusClient.GetScopedCPURollingMean(ctx, req.Namespace, "", req.Pod)
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to get pod CPU metrics: %w", err)
-		}
-		memoryValue, err = h.prometheusClient.GetScopedMemoryRollingMean(ctx, req.Namespace, "", req.Pod)
-		if err != nil {
-			return cpuValue, 0, fmt.Errorf("failed to get pod memory metrics: %w", err)
-		}
-
+		return h.getScopedMetricsForPod(ctx, req.Namespace, req.Pod)
 	default:
 		return h.getScopedMetricsForCluster(ctx)
 	}
+}
 
+// getScopedMetricsForNamespace retrieves metrics for a specific namespace
+func (h *PredictionHandler) getScopedMetricsForNamespace(ctx context.Context, namespace string) (float64, float64, error) {
+	if namespace == "" {
+		return h.getScopedMetricsForCluster(ctx)
+	}
+	return h.getMetricsWithScope(ctx, namespace, "", "", "namespace")
+}
+
+// getScopedMetricsForDeployment retrieves metrics for a specific deployment
+func (h *PredictionHandler) getScopedMetricsForDeployment(ctx context.Context, namespace, deployment string) (float64, float64, error) {
+	return h.getMetricsWithScope(ctx, namespace, deployment, "", "deployment")
+}
+
+// getScopedMetricsForPod retrieves metrics for a specific pod
+func (h *PredictionHandler) getScopedMetricsForPod(ctx context.Context, namespace, pod string) (float64, float64, error) {
+	return h.getMetricsWithScope(ctx, namespace, "", pod, "pod")
+}
+
+// getMetricsWithScope is a helper that queries Prometheus with the given scope parameters
+func (h *PredictionHandler) getMetricsWithScope(ctx context.Context, namespace, deployment, pod, scopeName string) (float64, float64, error) {
+	cpuValue, err := h.prometheusClient.GetScopedCPURollingMean(ctx, namespace, deployment, pod)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get %s CPU metrics: %w", scopeName, err)
+	}
+	memoryValue, err := h.prometheusClient.GetScopedMemoryRollingMean(ctx, namespace, deployment, pod)
+	if err != nil {
+		return cpuValue, 0, fmt.Errorf("failed to get %s memory metrics: %w", scopeName, err)
+	}
 	return cpuValue, memoryValue, nil
 }
 
@@ -403,8 +420,8 @@ func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuR
 		confidence = 0.92 // Higher confidence when issue is predicted
 	} else if len(resp.Predictions) > 0 && resp.Predictions[0] == 1 {
 		// Normal operation predicted - slight variation expected
-		cpuPercent = cpuPercent * (1 + (0.05 - 0.1*cpuRollingMean)) // Small adjustment
-		memoryPercent = memoryPercent * (1 + (0.05 - 0.1*memoryRollingMean))
+		cpuPercent *= 1 + (0.05 - 0.1*cpuRollingMean) // Small adjustment
+		memoryPercent *= 1 + (0.05 - 0.1*memoryRollingMean)
 		confidence = 0.88
 	}
 

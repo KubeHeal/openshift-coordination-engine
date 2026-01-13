@@ -417,7 +417,7 @@ func TestPredictionHandler_RegisterRoutes(t *testing.T) {
 	handler.RegisterRoutes(router)
 
 	// Test that route is registered
-	req := httptest.NewRequest("POST", "/api/v1/predict", nil)
+	req := httptest.NewRequest("POST", "/api/v1/predict", http.NoBody)
 	match := &mux.RouteMatch{}
 	assert.True(t, router.Match(req, match))
 }
