@@ -214,6 +214,11 @@ func main() {
 	coordinationHandler.RegisterRoutes(router)
 	log.Info("Coordination API endpoints registered")
 
+	// Capacity analysis endpoints (Issue #27)
+	capacityHandler := v1.NewCapacityHandler(k8sClients.Clientset, prometheusClient, log)
+	capacityHandler.RegisterRoutes(router)
+	log.Info("Capacity API endpoints registered: /api/v1/capacity/namespace/{namespace}, /api/v1/capacity/cluster")
+
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
 		kserveProxyHandler.RegisterRoutes(router)
