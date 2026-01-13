@@ -30,7 +30,7 @@ func NewAnalyzer(k8sClient kubernetes.Interface, log *logrus.Logger) *Analyzer {
 
 // QuotaInfo contains resource quota information
 type QuotaInfo struct {
-	CPULimit       string  `json:"limit"`
+	CPULimit        string  `json:"limit"`
 	CPULimitNumeric float64 `json:"limit_numeric"`
 }
 
@@ -97,8 +97,8 @@ type CPUAvailable struct {
 
 // MemoryAvailable contains available memory capacity
 type MemoryAvailable struct {
-	Available      string `json:"available"`
-	AvailableBytes int64  `json:"available_bytes"`
+	Available      string  `json:"available"`
+	AvailableBytes int64   `json:"available_bytes"`
 	Percent        float64 `json:"percent"`
 }
 
@@ -113,9 +113,9 @@ type InfrastructureImpact struct {
 
 // ClusterCapacity contains cluster-wide capacity information
 type ClusterCapacity struct {
-	TotalCPU         string `json:"total_cpu"`
-	TotalMemory      string `json:"total_memory"`
-	AllocatableCPU   string `json:"allocatable_cpu"`
+	TotalCPU          string `json:"total_cpu"`
+	TotalMemory       string `json:"total_memory"`
+	AllocatableCPU    string `json:"allocatable_cpu"`
 	AllocatableMemory string `json:"allocatable_memory"`
 }
 
@@ -160,7 +160,8 @@ func (a *Analyzer) GetNamespaceQuota(ctx context.Context, namespace string) (*Na
 	var totalCPU, totalMemory resource.Quantity
 	var podCount int64
 
-	for _, quota := range quotaList.Items {
+	for i := range quotaList.Items {
+		quota := &quotaList.Items[i]
 		result.HasQuota = true
 
 		if cpu, ok := quota.Status.Hard[corev1.ResourceLimitsCPU]; ok {
@@ -208,8 +209,8 @@ func (a *Analyzer) GetNamespacePodCount(ctx context.Context, namespace string) (
 
 	// Count only running pods
 	count := 0
-	for _, pod := range pods.Items {
-		if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodPending {
+	for i := range pods.Items {
+		if pods.Items[i].Status.Phase == corev1.PodRunning || pods.Items[i].Status.Phase == corev1.PodPending {
 			count++
 		}
 	}
@@ -227,7 +228,8 @@ func (a *Analyzer) GetClusterCapacity(ctx context.Context) (*ClusterCapacity, er
 	var totalCPU, totalMemory resource.Quantity
 	var allocatableCPU, allocatableMemory resource.Quantity
 
-	for _, node := range nodes.Items {
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
 		// Skip master nodes if labeled
 		if _, isMaster := node.Labels["node-role.kubernetes.io/master"]; isMaster {
 			continue
@@ -266,8 +268,8 @@ func (a *Analyzer) GetClusterPodCount(ctx context.Context) (int, error) {
 	}
 
 	count := 0
-	for _, pod := range pods.Items {
-		if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodPending {
+	for i := range pods.Items {
+		if pods.Items[i].Status.Phase == corev1.PodRunning || pods.Items[i].Status.Phase == corev1.PodPending {
 			count++
 		}
 	}
@@ -283,8 +285,8 @@ func (a *Analyzer) ListNamespaces(ctx context.Context) ([]string, error) {
 	}
 
 	result := make([]string, 0, len(namespaces.Items))
-	for _, ns := range namespaces.Items {
-		result = append(result, ns.Name)
+	for i := range namespaces.Items {
+		result = append(result, namespaces.Items[i].Name)
 	}
 
 	return result, nil
