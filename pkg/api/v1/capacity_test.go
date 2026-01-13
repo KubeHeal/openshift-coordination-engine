@@ -230,7 +230,7 @@ func TestCapacityHandler_InvalidNamespace(t *testing.T) {
 	handler := NewCapacityHandler(fakeClient, nil, logger)
 
 	// Create request with empty namespace
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/namespace/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/namespace/", http.NoBody)
 	req = mux.SetURLVars(req, map[string]string{"namespace": ""})
 
 	// Create response recorder
@@ -432,7 +432,7 @@ func TestParseBoolParam(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/?"+tt.queryString, nil)
+			req := httptest.NewRequest(http.MethodGet, "/?"+tt.queryString, http.NoBody)
 			result := parseBoolParam(req, tt.paramName, tt.defaultValue)
 			assert.Equal(t, tt.expected, result)
 		})
@@ -536,7 +536,7 @@ func TestCapacityHandler_RegisterRoutes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
 			match := &mux.RouteMatch{}
 			matched := router.Match(req, match)
 			assert.True(t, matched, "Route %s should be registered", tt.path)
