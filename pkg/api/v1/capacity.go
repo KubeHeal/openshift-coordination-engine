@@ -4,6 +4,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -313,7 +314,7 @@ func (h *CapacityHandler) getClusterUsage(ctx context.Context, podCount int) *ca
 func (h *CapacityHandler) getNamespaceSummaries(ctx context.Context) ([]capacity.NamespaceSummary, error) {
 	namespaces, err := h.analyzer.ListNamespaces(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
 	summaries := make([]capacity.NamespaceSummary, 0)
