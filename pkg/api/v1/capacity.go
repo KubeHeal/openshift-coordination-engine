@@ -34,24 +34,24 @@ func NewCapacityHandler(k8sClient kubernetes.Interface, prometheusClient *integr
 
 // NamespaceCapacityResponse represents the API response for namespace capacity
 type NamespaceCapacityResponse struct {
-	Status               string                        `json:"status"`
-	Namespace            string                        `json:"namespace"`
-	Timestamp            time.Time                     `json:"timestamp"`
-	Quota                *capacity.NamespaceQuota      `json:"quota"`
-	CurrentUsage         *capacity.ResourceUsage       `json:"current_usage"`
-	Available            *capacity.AvailableCapacity   `json:"available"`
-	Trending             *capacity.TrendingInfo        `json:"trending,omitempty"`
+	Status               string                         `json:"status"`
+	Namespace            string                         `json:"namespace"`
+	Timestamp            time.Time                      `json:"timestamp"`
+	Quota                *capacity.NamespaceQuota       `json:"quota"`
+	CurrentUsage         *capacity.ResourceUsage        `json:"current_usage"`
+	Available            *capacity.AvailableCapacity    `json:"available"`
+	Trending             *capacity.TrendingInfo         `json:"trending,omitempty"`
 	InfrastructureImpact *capacity.InfrastructureImpact `json:"infrastructure_impact,omitempty"`
 }
 
 // ClusterCapacityResponse represents the API response for cluster-wide capacity
 type ClusterCapacityResponse struct {
-	Status          string                         `json:"status"`
-	Scope           string                         `json:"scope"`
-	Timestamp       time.Time                      `json:"timestamp"`
-	ClusterCapacity *capacity.ClusterCapacity      `json:"cluster_capacity"`
-	ClusterUsage    *capacity.ClusterUsage         `json:"cluster_usage"`
-	Namespaces      []capacity.NamespaceSummary    `json:"namespaces"`
+	Status          string                          `json:"status"`
+	Scope           string                          `json:"scope"`
+	Timestamp       time.Time                       `json:"timestamp"`
+	ClusterCapacity *capacity.ClusterCapacity       `json:"cluster_capacity"`
+	ClusterUsage    *capacity.ClusterUsage          `json:"cluster_usage"`
+	Namespaces      []capacity.NamespaceSummary     `json:"namespaces"`
 	Infrastructure  *capacity.ClusterInfrastructure `json:"infrastructure,omitempty"`
 }
 
@@ -131,41 +131,7 @@ func (h *CapacityHandler) NamespaceCapacity(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Get current usage from Prometheus
-	currentUsage := &capacity.ResourceUsage{
-		PodCount: podCount,
-	}
-
-	if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
-		cpuUsage, err := h.prometheusClient.GetNamespaceCPUUsage(ctx, namespace)
-		if err != nil {
-			h.log.WithError(err).Debug("Failed to get CPU usage from Prometheus")
-		} else {
-			percent := 0.0
-			if quota.CPU != nil && quota.CPU.LimitNumeric > 0 {
-				percent = (cpuUsage / quota.CPU.LimitNumeric) * 100
-			}
-			currentUsage.CPU = &capacity.CPUUsage{
-				Used:        formatCPU(cpuUsage),
-				UsedNumeric: cpuUsage,
-				Percent:     percent,
-			}
-		}
-
-		memUsage, err := h.prometheusClient.GetNamespaceMemoryUsage(ctx, namespace)
-		if err != nil {
-			h.log.WithError(err).Debug("Failed to get memory usage from Prometheus")
-		} else {
-			percent := 0.0
-			if quota.Memory != nil && quota.Memory.LimitBytes > 0 {
-				percent = (float64(memUsage) / float64(quota.Memory.LimitBytes)) * 100
-			}
-			currentUsage.Memory = &capacity.MemoryUsage{
-				Used:      formatBytes(memUsage),
-				UsedBytes: memUsage,
-				Percent:   percent,
-			}
-		}
-	}
+	currentUsage := h.getNamespaceUsage(ctx, namespace, podCount, quota)
 
 	// Calculate available capacity
 	available := capacity.CalculateAvailableCapacity(quota, currentUsage)
@@ -291,10 +257,12 @@ func (h *CapacityHandler) ClusterCapacity(w http.ResponseWriter, r *http.Request
 
 		// Get namespace resource usage if Prometheus is available
 		if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
-			cpuUsage, _ := h.prometheusClient.GetNamespaceCPURollingMean(ctx, ns)
-			memUsage, _ := h.prometheusClient.GetNamespaceMemoryRollingMean(ctx, ns)
-			summary.CPUPercent = cpuUsage * 100
-			summary.MemoryPercent = memUsage * 100
+			if cpuUsage, err := h.prometheusClient.GetNamespaceCPURollingMean(ctx, ns); err == nil {
+				summary.CPUPercent = cpuUsage * 100
+			}
+			if memUsage, err := h.prometheusClient.GetNamespaceMemoryRollingMean(ctx, ns); err == nil {
+				summary.MemoryPercent = memUsage * 100
+			}
 		}
 
 		namespaceSummaries = append(namespaceSummaries, summary)
@@ -321,6 +289,47 @@ func (h *CapacityHandler) ClusterCapacity(w http.ResponseWriter, r *http.Request
 	}).Info("Cluster capacity analysis completed")
 
 	h.respondJSON(w, http.StatusOK, response)
+}
+
+// getNamespaceUsage retrieves current resource usage for a namespace from Prometheus
+func (h *CapacityHandler) getNamespaceUsage(ctx context.Context, namespace string, podCount int, quota *capacity.NamespaceQuota) *capacity.ResourceUsage {
+	usage := &capacity.ResourceUsage{
+		PodCount: podCount,
+	}
+
+	if h.prometheusClient == nil || !h.prometheusClient.IsAvailable() {
+		return usage
+	}
+
+	if cpuUsage, err := h.prometheusClient.GetNamespaceCPUUsage(ctx, namespace); err == nil {
+		percent := 0.0
+		if quota.CPU != nil && quota.CPU.LimitNumeric > 0 {
+			percent = (cpuUsage / quota.CPU.LimitNumeric) * 100
+		}
+		usage.CPU = &capacity.CPUUsage{
+			Used:        formatCPU(cpuUsage),
+			UsedNumeric: cpuUsage,
+			Percent:     percent,
+		}
+	} else {
+		h.log.WithError(err).Debug("Failed to get CPU usage from Prometheus")
+	}
+
+	if memUsage, err := h.prometheusClient.GetNamespaceMemoryUsage(ctx, namespace); err == nil {
+		percent := 0.0
+		if quota.Memory != nil && quota.Memory.LimitBytes > 0 {
+			percent = (float64(memUsage) / float64(quota.Memory.LimitBytes)) * 100
+		}
+		usage.Memory = &capacity.MemoryUsage{
+			Used:      formatBytes(memUsage),
+			UsedBytes: memUsage,
+			Percent:   percent,
+		}
+	} else {
+		h.log.WithError(err).Debug("Failed to get memory usage from Prometheus")
+	}
+
+	return usage
 }
 
 // calculateTrending calculates trending data for a namespace
