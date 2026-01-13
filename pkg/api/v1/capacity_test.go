@@ -68,7 +68,7 @@ func TestCapacityHandler_NamespaceWithQuota(t *testing.T) {
 	handler := NewCapacityHandler(fakeClient, nil, logger)
 
 	// Create request
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/namespace/test-namespace?include_trending=false", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/namespace/test-namespace?include_trending=false", http.NoBody)
 	req = mux.SetURLVars(req, map[string]string{"namespace": "test-namespace"})
 
 	// Create response recorder
@@ -120,7 +120,7 @@ func TestCapacityHandler_NamespaceWithoutQuota(t *testing.T) {
 	handler := NewCapacityHandler(fakeClient, nil, logger)
 
 	// Create request
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/namespace/no-quota-namespace?include_trending=false", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/namespace/no-quota-namespace?include_trending=false", http.NoBody)
 	req = mux.SetURLVars(req, map[string]string{"namespace": "no-quota-namespace"})
 
 	// Create response recorder
@@ -198,7 +198,7 @@ func TestCapacityHandler_ClusterWide(t *testing.T) {
 	handler := NewCapacityHandler(fakeClient, nil, logger)
 
 	// Create request
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/cluster", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/capacity/cluster", http.NoBody)
 
 	// Create response recorder
 	rr := httptest.NewRecorder()

@@ -730,11 +730,24 @@ func (c *PrometheusClient) GetControlPlaneHealth(ctx context.Context) (string, e
 
 // queryRange executes a range query against Prometheus
 func (c *PrometheusClient) queryRange(ctx context.Context, query, window, step string) ([]MetricDataPoint, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/query_range", c.baseURL)
+	start, end := c.calculateTimeRange(window)
 
-	// Calculate time range
-	end := time.Now()
-	var start time.Time
+	reqURL, err := c.buildRangeQueryURL(query, start, end, step)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := c.executeRangeQuery(ctx, reqURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.parseRangeResponse(body, query)
+}
+
+// calculateTimeRange returns start and end times based on window
+func (c *PrometheusClient) calculateTimeRange(window string) (start, end time.Time) {
+	end = time.Now()
 	switch window {
 	case "30d":
 		start = end.AddDate(0, 0, -30)
@@ -743,11 +756,15 @@ func (c *PrometheusClient) queryRange(ctx context.Context, query, window, step s
 	default: // "7d"
 		start = end.AddDate(0, 0, -7)
 	}
+	return start, end
+}
 
-	// Build request URL with query parameters
+// buildRangeQueryURL builds the URL for a range query
+func (c *PrometheusClient) buildRangeQueryURL(query string, start, end time.Time, step string) (string, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/query_range", c.baseURL)
 	reqURL, err := url.Parse(endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse URL: %w", err)
+		return "", fmt.Errorf("failed to parse URL: %w", err)
 	}
 
 	params := url.Values{}
@@ -757,14 +774,17 @@ func (c *PrometheusClient) queryRange(ctx context.Context, query, window, step s
 	params.Set("step", step)
 	reqURL.RawQuery = params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), http.NoBody)
+	return reqURL.String(), nil
+}
+
+// executeRangeQuery executes the HTTP request for a range query
+func (c *PrometheusClient) executeRangeQuery(ctx context.Context, reqURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
-
-	// Add bearer token if available
 	if token := c.getServiceAccountToken(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -784,6 +804,11 @@ func (c *PrometheusClient) queryRange(ctx context.Context, query, window, step s
 		return nil, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
 	}
 
+	return body, nil
+}
+
+// parseRangeResponse parses the Prometheus range query response
+func (c *PrometheusClient) parseRangeResponse(body []byte, query string) ([]MetricDataPoint, error) {
 	var promResp PrometheusRangeQueryResponse
 	if err := json.Unmarshal(body, &promResp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
@@ -797,35 +822,43 @@ func (c *PrometheusClient) queryRange(ctx context.Context, query, window, step s
 		return nil, fmt.Errorf("no data returned for query: %s", query)
 	}
 
-	// Parse values into data points
-	dataPoints := make([]MetricDataPoint, 0)
-	for _, values := range promResp.Data.Result[0].Values {
-		if len(values) < 2 {
-			continue
-		}
+	return c.extractDataPoints(promResp.Data.Result[0].Values), nil
+}
 
-		// Timestamp is a float64 (unix timestamp)
-		ts, ok := values[0].(float64)
-		if !ok {
-			continue
+// extractDataPoints extracts MetricDataPoints from raw Prometheus values
+func (c *PrometheusClient) extractDataPoints(values [][]interface{}) []MetricDataPoint {
+	dataPoints := make([]MetricDataPoint, 0, len(values))
+	for _, v := range values {
+		if dp, ok := c.parseDataPoint(v); ok {
+			dataPoints = append(dataPoints, dp)
 		}
+	}
+	return dataPoints
+}
 
-		// Value is a string
-		valueStr, ok := values[1].(string)
-		if !ok {
-			continue
-		}
-
-		var value float64
-		if _, err := fmt.Sscanf(valueStr, "%f", &value); err != nil {
-			continue
-		}
-
-		dataPoints = append(dataPoints, MetricDataPoint{
-			Timestamp: time.Unix(int64(ts), 0),
-			Value:     value,
-		})
+// parseDataPoint parses a single data point from Prometheus response
+func (c *PrometheusClient) parseDataPoint(values []interface{}) (MetricDataPoint, bool) {
+	if len(values) < 2 {
+		return MetricDataPoint{}, false
 	}
 
-	return dataPoints, nil
+	ts, ok := values[0].(float64)
+	if !ok {
+		return MetricDataPoint{}, false
+	}
+
+	valueStr, ok := values[1].(string)
+	if !ok {
+		return MetricDataPoint{}, false
+	}
+
+	var value float64
+	if _, err := fmt.Sscanf(valueStr, "%f", &value); err != nil {
+		return MetricDataPoint{}, false
+	}
+
+	return MetricDataPoint{
+		Timestamp: time.Unix(int64(ts), 0),
+		Value:     value,
+	}, true
 }

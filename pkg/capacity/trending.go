@@ -27,11 +27,11 @@ type ResourceTrend struct {
 
 // TrendingInfo contains overall trending information
 type TrendingInfo struct {
-	CPU                      *ResourceTrend `json:"cpu,omitempty"`
-	Memory                   *ResourceTrend `json:"memory,omitempty"`
-	DaysUntil85Percent       int            `json:"days_until_85_percent"`
-	ProjectedExhaustionDate  string         `json:"projected_exhaustion_date,omitempty"`
-	Confidence               float64        `json:"confidence"`
+	CPU                     *ResourceTrend `json:"cpu,omitempty"`
+	Memory                  *ResourceTrend `json:"memory,omitempty"`
+	DaysUntil85Percent      int            `json:"days_until_85_percent"`
+	ProjectedExhaustionDate string         `json:"projected_exhaustion_date,omitempty"`
+	Confidence              float64        `json:"confidence"`
 }
 
 // DataPoint represents a single metric data point
