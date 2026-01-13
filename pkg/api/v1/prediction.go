@@ -61,13 +61,13 @@ type PredictRequest struct {
 
 // PredictResponse represents the response for time-specific predictions
 type PredictResponse struct {
-	Status         string              `json:"status"`
-	Scope          string              `json:"scope"`
-	Target         string              `json:"target"`
-	Predictions    PredictionValues    `json:"predictions"`
-	CurrentMetrics CurrentMetrics      `json:"current_metrics"`
-	ModelInfo      ModelInfo           `json:"model_info"`
-	TargetTime     TargetTimeInfo      `json:"target_time"`
+	Status         string           `json:"status"`
+	Scope          string           `json:"scope"`
+	Target         string           `json:"target"`
+	Predictions    PredictionValues `json:"predictions"`
+	CurrentMetrics CurrentMetrics   `json:"current_metrics"`
+	ModelInfo      ModelInfo        `json:"model_info"`
+	TargetTime     TargetTimeInfo   `json:"target_time"`
 }
 
 // PredictionValues contains the predicted resource usage percentages
