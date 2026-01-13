@@ -217,6 +217,183 @@ func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, na
 	return normalizedValue, nil
 }
 
+// GetScopedCPURollingMean returns CPU rolling mean with flexible scoping
+// Supports namespace, deployment, and pod filtering
+func (c *PrometheusClient) GetScopedCPURollingMean(ctx context.Context, namespace, deployment, pod string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("cpu_rolling_mean_scoped_%s_%s_%s", namespace, deployment, pod)
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	// Build PromQL query based on scope
+	query := c.buildScopedCPUQuery(namespace, deployment, pod)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		c.log.WithError(err).WithFields(logrus.Fields{
+			"namespace":  namespace,
+			"deployment": deployment,
+			"pod":        pod,
+			"query":      query,
+		}).Debug("Failed to query scoped CPU rolling mean from Prometheus")
+		return 0, err
+	}
+
+	normalizedValue := clampToUnitRange(value)
+	c.setCached(cacheKey, normalizedValue)
+
+	c.log.WithFields(logrus.Fields{
+		"raw_value":        value,
+		"normalized_value": normalizedValue,
+		"namespace":        namespace,
+		"deployment":       deployment,
+		"pod":              pod,
+	}).Debug("Retrieved scoped CPU rolling mean from Prometheus")
+
+	return normalizedValue, nil
+}
+
+// GetScopedMemoryRollingMean returns memory rolling mean with flexible scoping
+// Supports namespace, deployment, and pod filtering
+func (c *PrometheusClient) GetScopedMemoryRollingMean(ctx context.Context, namespace, deployment, pod string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("memory_rolling_mean_scoped_%s_%s_%s", namespace, deployment, pod)
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	// Build PromQL query based on scope
+	query := c.buildScopedMemoryQuery(namespace, deployment, pod)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		// Try fallback query without limits
+		c.log.WithError(err).Debug("Scoped memory ratio query failed, trying alternative")
+		fallbackQuery := c.buildScopedMemoryQueryFallback(namespace, deployment, pod)
+		value, err = c.queryInstant(ctx, fallbackQuery)
+		if err != nil {
+			c.log.WithError(err).WithFields(logrus.Fields{
+				"namespace":  namespace,
+				"deployment": deployment,
+				"pod":        pod,
+			}).Debug("Failed to query scoped memory rolling mean from Prometheus")
+			return 0, err
+		}
+	}
+
+	normalizedValue := clampToUnitRange(value)
+	c.setCached(cacheKey, normalizedValue)
+
+	c.log.WithFields(logrus.Fields{
+		"raw_value":        value,
+		"normalized_value": normalizedValue,
+		"namespace":        namespace,
+		"deployment":       deployment,
+		"pod":              pod,
+	}).Debug("Retrieved scoped memory rolling mean from Prometheus")
+
+	return normalizedValue, nil
+}
+
+// buildScopedCPUQuery constructs a PromQL query for CPU metrics based on scope
+func (c *PrometheusClient) buildScopedCPUQuery(namespace, deployment, pod string) string {
+	var labelSelectors []string
+
+	// Always exclude empty containers and pods
+	labelSelectors = append(labelSelectors, `container!=""`, `pod!=""`)
+
+	// Add namespace filter
+	if namespace != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+
+	// Add deployment filter (matches pods with deployment prefix)
+	if deployment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	// Add pod filter (exact match)
+	if pod != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+
+	selector := "{" + joinSelectors(labelSelectors) + "}"
+	return fmt.Sprintf(`avg(rate(container_cpu_usage_seconds_total%s[24h]))`, selector)
+}
+
+// buildScopedMemoryQuery constructs a PromQL query for memory metrics based on scope
+func (c *PrometheusClient) buildScopedMemoryQuery(namespace, deployment, pod string) string {
+	var labelSelectors []string
+
+	// Always exclude empty containers and pods
+	labelSelectors = append(labelSelectors, `container!=""`, `pod!=""`)
+
+	// Add namespace filter
+	if namespace != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+
+	// Add deployment filter (matches pods with deployment prefix)
+	if deployment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	// Add pod filter (exact match)
+	if pod != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+
+	selector := "{" + joinSelectors(labelSelectors) + "}"
+	return fmt.Sprintf(`avg(container_memory_usage_bytes%s / container_spec_memory_limit_bytes%s > 0)`, selector, selector)
+}
+
+// buildScopedMemoryQueryFallback constructs a fallback PromQL query for memory metrics
+// Used when container limits are not set
+func (c *PrometheusClient) buildScopedMemoryQueryFallback(namespace, deployment, pod string) string {
+	var labelSelectors []string
+
+	// Always exclude empty containers and pods
+	labelSelectors = append(labelSelectors, `container!=""`, `pod!=""`)
+
+	// Add namespace filter
+	if namespace != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+
+	// Add deployment filter (matches pods with deployment prefix)
+	if deployment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	// Add pod filter (exact match)
+	if pod != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+
+	selector := "{" + joinSelectors(labelSelectors) + "}"
+	// Use working set bytes as a percentage of a reasonable max (2GB per container as baseline)
+	return fmt.Sprintf(`avg(container_memory_working_set_bytes%s / 2147483648)`, selector)
+}
+
+// joinSelectors joins label selectors with commas
+func joinSelectors(selectors []string) string {
+	result := ""
+	for i, s := range selectors {
+		if i > 0 {
+			result += ","
+		}
+		result += s
+	}
+	return result
+}
+
 // queryInstant executes an instant query against Prometheus
 func (c *PrometheusClient) queryInstant(ctx context.Context, query string) (float64, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/query", c.baseURL)
