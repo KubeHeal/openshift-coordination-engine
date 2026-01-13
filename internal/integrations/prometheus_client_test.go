@@ -70,6 +70,7 @@ func mockPrometheusRangeResponse(values []float64) string {
 
 // newTestPrometheusClient creates a test client with a mock server
 func newTestPrometheusClient(t *testing.T, handler http.HandlerFunc) (*PrometheusClient, *httptest.Server) {
+	t.Helper()
 	server := httptest.NewServer(handler)
 	log := logrus.New()
 	log.SetLevel(logrus.DebugLevel)
@@ -346,7 +347,7 @@ func TestPrometheusClient_LinearRegression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			slope, _, rSquared := client.linearRegression(tt.points)
+			slope, rSquared := client.linearRegression(tt.points)
 			assert.InDelta(t, tt.expectedSlope, slope, tt.slopeTolerance)
 			assert.GreaterOrEqual(t, rSquared, 0.0)
 			assert.LessOrEqual(t, rSquared, 1.0)
