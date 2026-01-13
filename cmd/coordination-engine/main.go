@@ -152,6 +152,7 @@ func main() {
 
 	// Create recommendations handler with KServe integration for ML predictions
 	var recommendationsHandler *v1.RecommendationsHandler
+	var predictionHandler *v1.PredictionHandler
 	if kserveProxyHandler != nil {
 		recommendationsHandler = v1.NewRecommendationsHandler(
 			orchestrator,
@@ -159,11 +160,21 @@ func main() {
 			kserveProxyHandler.GetProxyClient(),
 			log,
 		)
+		predictionHandler = v1.NewPredictionHandler(
+			kserveProxyHandler.GetProxyClient(),
+			prometheusClient,
+			log,
+		)
 	} else {
 		recommendationsHandler = v1.NewRecommendationsHandler(
 			orchestrator,
 			remediationHandler.GetIncidentStore(),
 			nil, // No KServe client
+			log,
+		)
+		predictionHandler = v1.NewPredictionHandler(
+			nil, // No KServe client
+			prometheusClient,
 			log,
 		)
 	}
@@ -189,6 +200,10 @@ func main() {
 	// Recommendations endpoint (ML-powered remediation predictions)
 	apiV1.HandleFunc("/recommendations", recommendationsHandler.GetRecommendations).Methods("POST")
 	log.Info("Recommendations API endpoint registered: POST /api/v1/recommendations")
+
+	// Prediction endpoint (time-specific resource predictions)
+	predictionHandler.RegisterRoutes(router)
+	log.Info("Prediction API endpoint registered: POST /api/v1/predict")
 
 	// Detection endpoints
 	detectionHandler.RegisterRoutes(router)
