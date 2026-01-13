@@ -60,7 +60,7 @@ type TrendData struct {
 type TrendAnalysis struct {
 	DailyChangePercent  float64   `json:"daily_change_percent"`
 	WeeklyChangePercent float64   `json:"weekly_change_percent"`
-	Direction           string    `json:"direction"` // "increasing", "decreasing", "stable"
+	Direction           string    `json:"direction"`            // "increasing", "decreasing", "stable"
 	DaysUntilThreshold  int       `json:"days_until_threshold"` // -1 if not applicable
 	ProjectedDate       time.Time `json:"projected_date,omitempty"`
 	Confidence          float64   `json:"confidence"` // 0.0-1.0
@@ -1162,8 +1162,8 @@ func (c *PrometheusClient) buildTrendData(dataPoints []MetricDataPoint) *TrendDa
 	}
 
 	trendPoints := make([]TrendPoint, len(dataPoints))
-	var sum, min, max float64
-	min = math.MaxFloat64
+	var sum, minVal, maxVal float64
+	minVal = math.MaxFloat64
 
 	for i, dp := range dataPoints {
 		trendPoints[i] = TrendPoint{
@@ -1171,11 +1171,11 @@ func (c *PrometheusClient) buildTrendData(dataPoints []MetricDataPoint) *TrendDa
 			Value:     dp.Value,
 		}
 		sum += dp.Value
-		if dp.Value < min {
-			min = dp.Value
+		if dp.Value < minVal {
+			minVal = dp.Value
 		}
-		if dp.Value > max {
-			max = dp.Value
+		if dp.Value > maxVal {
+			maxVal = dp.Value
 		}
 	}
 
@@ -1186,8 +1186,8 @@ func (c *PrometheusClient) buildTrendData(dataPoints []MetricDataPoint) *TrendDa
 		Points:  trendPoints,
 		Current: current,
 		Average: average,
-		Min:     min,
-		Max:     max,
+		Min:     minVal,
+		Max:     maxVal,
 	}
 }
 
@@ -1504,8 +1504,12 @@ func (c *PrometheusClient) GetInfrastructureHealthSummary(ctx context.Context) (
 	result := make(map[string]interface{})
 
 	// Control plane health
-	controlPlaneHealth, _ := c.GetControlPlaneHealth(ctx)
-	result["control_plane_status"] = controlPlaneHealth
+	controlPlaneHealth, err := c.GetControlPlaneHealth(ctx)
+	if err == nil {
+		result["control_plane_status"] = controlPlaneHealth
+	} else {
+		result["control_plane_status"] = "unknown"
+	}
 
 	// etcd object count
 	etcdCount, err := c.GetETCDObjectCount(ctx)
