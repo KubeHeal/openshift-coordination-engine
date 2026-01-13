@@ -528,3 +528,304 @@ func clampToUnitRange(value float64) float64 {
 	}
 	return value
 }
+
+// PrometheusRangeQueryResponse represents the response from Prometheus range query API
+type PrometheusRangeQueryResponse struct {
+	Status string `json:"status"`
+	Data   struct {
+		ResultType string `json:"resultType"`
+		Result     []struct {
+			Metric map[string]string `json:"metric"`
+			Values [][]interface{}   `json:"values"` // [[timestamp, "value"], ...]
+		} `json:"result"`
+	} `json:"data"`
+	Error     string `json:"error,omitempty"`
+	ErrorType string `json:"errorType,omitempty"`
+}
+
+// MetricDataPoint represents a single metric data point with timestamp
+type MetricDataPoint struct {
+	Timestamp time.Time
+	Value     float64
+}
+
+// GetNamespaceCPUTrend queries historical CPU usage for trending analysis
+func (c *PrometheusClient) GetNamespaceCPUTrend(ctx context.Context, namespace, window string) ([]MetricDataPoint, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("prometheus client not available")
+	}
+
+	// Query for CPU usage rate over time with 1 hour resolution
+	query := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,container!=""}[5m]))`, namespace)
+
+	return c.queryRange(ctx, query, window, "1h")
+}
+
+// GetNamespaceMemoryTrend queries historical memory usage for trending analysis
+func (c *PrometheusClient) GetNamespaceMemoryTrend(ctx context.Context, namespace, window string) ([]MetricDataPoint, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("prometheus client not available")
+	}
+
+	// Query for memory usage over time with 1 hour resolution
+	query := fmt.Sprintf(`sum(container_memory_usage_bytes{namespace=%q,container!=""})`, namespace)
+
+	return c.queryRange(ctx, query, window, "1h")
+}
+
+// GetNamespaceCPUUsage queries current CPU usage for a namespace (in cores)
+func (c *PrometheusClient) GetNamespaceCPUUsage(ctx context.Context, namespace string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("cpu_usage_%s", namespace)
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	query := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,container!=""}[5m]))`, namespace)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+
+	c.setCached(cacheKey, value)
+	return value, nil
+}
+
+// GetNamespaceMemoryUsage queries current memory usage for a namespace (in bytes)
+func (c *PrometheusClient) GetNamespaceMemoryUsage(ctx context.Context, namespace string) (int64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("memory_usage_%s", namespace)
+	if value, ok := c.getCached(cacheKey); ok {
+		return int64(value), nil
+	}
+
+	query := fmt.Sprintf(`sum(container_memory_usage_bytes{namespace=%q,container!=""})`, namespace)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+
+	c.setCached(cacheKey, value)
+	return int64(value), nil
+}
+
+// GetClusterCPUUsage queries current total cluster CPU usage (in cores)
+func (c *PrometheusClient) GetClusterCPUUsage(ctx context.Context) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := "cluster_cpu_usage"
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	query := `sum(rate(container_cpu_usage_seconds_total{container!=""}[5m]))`
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+
+	c.setCached(cacheKey, value)
+	return value, nil
+}
+
+// GetClusterMemoryUsage queries current total cluster memory usage (in bytes)
+func (c *PrometheusClient) GetClusterMemoryUsage(ctx context.Context) (int64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := "cluster_memory_usage"
+	if value, ok := c.getCached(cacheKey); ok {
+		return int64(value), nil
+	}
+
+	query := `sum(container_memory_usage_bytes{container!=""})`
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+
+	c.setCached(cacheKey, value)
+	return int64(value), nil
+}
+
+// GetEtcdObjectCount queries the total number of objects in etcd
+func (c *PrometheusClient) GetEtcdObjectCount(ctx context.Context) (int64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	query := `sum(etcd_object_counts)`
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		// Try alternative query
+		query = `sum(apiserver_storage_objects)`
+		value, err = c.queryInstant(ctx, query)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	return int64(value), nil
+}
+
+// GetAPIServerQPS queries the current API server requests per second
+func (c *PrometheusClient) GetAPIServerQPS(ctx context.Context) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	query := `sum(rate(apiserver_request_total[5m]))`
+
+	return c.queryInstant(ctx, query)
+}
+
+// GetSchedulerQueueLength queries the current scheduler queue length
+func (c *PrometheusClient) GetSchedulerQueueLength(ctx context.Context) (int, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	query := `sum(scheduler_pending_pods)`
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+
+	return int(value), nil
+}
+
+// GetControlPlaneHealth queries control plane component health
+func (c *PrometheusClient) GetControlPlaneHealth(ctx context.Context) (string, error) {
+	if !c.IsAvailable() {
+		return "unknown", fmt.Errorf("prometheus client not available")
+	}
+
+	// Check if etcd is healthy
+	query := `sum(etcd_server_has_leader)`
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return "unknown", nil
+	}
+
+	if value > 0 {
+		return "healthy", nil
+	}
+	return "unhealthy", nil
+}
+
+// queryRange executes a range query against Prometheus
+func (c *PrometheusClient) queryRange(ctx context.Context, query, window, step string) ([]MetricDataPoint, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/query_range", c.baseURL)
+
+	// Calculate time range
+	end := time.Now()
+	var start time.Time
+	switch window {
+	case "30d":
+		start = end.AddDate(0, 0, -30)
+	case "14d":
+		start = end.AddDate(0, 0, -14)
+	default: // "7d"
+		start = end.AddDate(0, 0, -7)
+	}
+
+	// Build request URL with query parameters
+	reqURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("start", fmt.Sprintf("%d", start.Unix()))
+	params.Set("end", fmt.Sprintf("%d", end.Unix()))
+	params.Set("step", step)
+	reqURL.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	// Add bearer token if available
+	if token := c.getServiceAccountToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer closeBody(resp)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var promResp PrometheusRangeQueryResponse
+	if err := json.Unmarshal(body, &promResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if promResp.Status != "success" {
+		return nil, fmt.Errorf("prometheus query failed: %s - %s", promResp.ErrorType, promResp.Error)
+	}
+
+	if len(promResp.Data.Result) == 0 {
+		return nil, fmt.Errorf("no data returned for query: %s", query)
+	}
+
+	// Parse values into data points
+	dataPoints := make([]MetricDataPoint, 0)
+	for _, values := range promResp.Data.Result[0].Values {
+		if len(values) < 2 {
+			continue
+		}
+
+		// Timestamp is a float64 (unix timestamp)
+		ts, ok := values[0].(float64)
+		if !ok {
+			continue
+		}
+
+		// Value is a string
+		valueStr, ok := values[1].(string)
+		if !ok {
+			continue
+		}
+
+		var value float64
+		if _, err := fmt.Sscanf(valueStr, "%f", &value); err != nil {
+			continue
+		}
+
+		dataPoints = append(dataPoints, MetricDataPoint{
+			Timestamp: time.Unix(int64(ts), 0),
+			Value:     value,
+		})
+	}
+
+	return dataPoints, nil
+}
