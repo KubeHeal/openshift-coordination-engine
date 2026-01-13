@@ -202,70 +202,14 @@ func (h *CapacityHandler) ClusterCapacity(w http.ResponseWriter, r *http.Request
 	}
 
 	// Get cluster usage from Prometheus
-	clusterUsage := &capacity.ClusterUsage{
-		PodCount: podCount,
-	}
-
-	if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
-		cpuUsage, err := h.prometheusClient.GetClusterCPUUsage(ctx)
-		if err != nil {
-			h.log.WithError(err).Debug("Failed to get cluster CPU usage from Prometheus")
-		} else {
-			clusterUsage.CPU = &capacity.CPUUsage{
-				Used:        formatCPU(cpuUsage),
-				UsedNumeric: cpuUsage,
-				Percent:     0, // Calculate based on allocatable CPU if needed
-			}
-		}
-
-		memUsage, err := h.prometheusClient.GetClusterMemoryUsage(ctx)
-		if err != nil {
-			h.log.WithError(err).Debug("Failed to get cluster memory usage from Prometheus")
-		} else {
-			clusterUsage.Memory = &capacity.MemoryUsage{
-				Used:      formatBytes(memUsage),
-				UsedBytes: memUsage,
-				Percent:   0, // Calculate based on allocatable memory if needed
-			}
-		}
-	}
+	clusterUsage := h.getClusterUsage(ctx, podCount)
 
 	// Get namespace summaries
-	namespaces, err := h.analyzer.ListNamespaces(ctx)
+	namespaceSummaries, err := h.getNamespaceSummaries(ctx)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to list namespaces")
 		h.respondError(w, http.StatusInternalServerError, "failed to list namespaces")
 		return
-	}
-
-	namespaceSummaries := make([]capacity.NamespaceSummary, 0)
-	for _, ns := range namespaces {
-		// Skip system namespaces for summary
-		if isSystemNamespace(ns) {
-			continue
-		}
-
-		nsPodCount, err := h.analyzer.GetNamespacePodCount(ctx, ns)
-		if err != nil {
-			continue
-		}
-
-		summary := capacity.NamespaceSummary{
-			Name:     ns,
-			PodCount: nsPodCount,
-		}
-
-		// Get namespace resource usage if Prometheus is available
-		if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
-			if cpuUsage, err := h.prometheusClient.GetNamespaceCPURollingMean(ctx, ns); err == nil {
-				summary.CPUPercent = cpuUsage * 100
-			}
-			if memUsage, err := h.prometheusClient.GetNamespaceMemoryRollingMean(ctx, ns); err == nil {
-				summary.MemoryPercent = memUsage * 100
-			}
-		}
-
-		namespaceSummaries = append(namespaceSummaries, summary)
 	}
 
 	// Build response
@@ -330,6 +274,77 @@ func (h *CapacityHandler) getNamespaceUsage(ctx context.Context, namespace strin
 	}
 
 	return usage
+}
+
+// getClusterUsage retrieves current cluster resource usage from Prometheus
+func (h *CapacityHandler) getClusterUsage(ctx context.Context, podCount int) *capacity.ClusterUsage {
+	usage := &capacity.ClusterUsage{
+		PodCount: podCount,
+	}
+
+	if h.prometheusClient == nil || !h.prometheusClient.IsAvailable() {
+		return usage
+	}
+
+	if cpuUsage, err := h.prometheusClient.GetClusterCPUUsage(ctx); err == nil {
+		usage.CPU = &capacity.CPUUsage{
+			Used:        formatCPU(cpuUsage),
+			UsedNumeric: cpuUsage,
+			Percent:     0,
+		}
+	} else {
+		h.log.WithError(err).Debug("Failed to get cluster CPU usage from Prometheus")
+	}
+
+	if memUsage, err := h.prometheusClient.GetClusterMemoryUsage(ctx); err == nil {
+		usage.Memory = &capacity.MemoryUsage{
+			Used:      formatBytes(memUsage),
+			UsedBytes: memUsage,
+			Percent:   0,
+		}
+	} else {
+		h.log.WithError(err).Debug("Failed to get cluster memory usage from Prometheus")
+	}
+
+	return usage
+}
+
+// getNamespaceSummaries retrieves summary information for all non-system namespaces
+func (h *CapacityHandler) getNamespaceSummaries(ctx context.Context) ([]capacity.NamespaceSummary, error) {
+	namespaces, err := h.analyzer.ListNamespaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]capacity.NamespaceSummary, 0)
+	for _, ns := range namespaces {
+		if isSystemNamespace(ns) {
+			continue
+		}
+
+		nsPodCount, err := h.analyzer.GetNamespacePodCount(ctx, ns)
+		if err != nil {
+			continue
+		}
+
+		summary := capacity.NamespaceSummary{
+			Name:     ns,
+			PodCount: nsPodCount,
+		}
+
+		if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
+			if cpuUsage, err := h.prometheusClient.GetNamespaceCPURollingMean(ctx, ns); err == nil {
+				summary.CPUPercent = cpuUsage * 100
+			}
+			if memUsage, err := h.prometheusClient.GetNamespaceMemoryRollingMean(ctx, ns); err == nil {
+				summary.MemoryPercent = memUsage * 100
+			}
+		}
+
+		summaries = append(summaries, summary)
+	}
+
+	return summaries, nil
 }
 
 // calculateTrending calculates trending data for a namespace
