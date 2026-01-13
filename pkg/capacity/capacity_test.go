@@ -356,12 +356,12 @@ func TestAnalyzeTrend(t *testing.T) {
 
 func TestCalculateAvailableCapacity(t *testing.T) {
 	tests := []struct {
-		name               string
-		quota              *NamespaceQuota
-		usage              *ResourceUsage
-		expectedCPU        float64
-		expectedMem        int64
-		expectedPodSlots   int64
+		name             string
+		quota            *NamespaceQuota
+		usage            *ResourceUsage
+		expectedCPU      float64
+		expectedMem      int64
+		expectedPodSlots int64
 	}{
 		{
 			name: "normal usage",
