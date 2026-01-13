@@ -194,8 +194,8 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 	}}
 
 	h.log.WithFields(logrus.Fields{
-		"instances":          instances,
-		"cpu_rolling_mean":   cpuRollingMean,
+		"instances":           instances,
+		"cpu_rolling_mean":    cpuRollingMean,
 		"memory_rolling_mean": memoryRollingMean,
 	}).Debug("Prepared prediction instances")
 
@@ -415,7 +415,7 @@ func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuR
 	// If the model predicts an issue (-1), adjust the prediction upward
 	if len(resp.Predictions) > 0 && resp.Predictions[0] == -1 {
 		// Issue predicted - increase expected resource usage
-		cpuPercent = min(cpuPercent*1.15, 100.0)    // 15% increase
+		cpuPercent = min(cpuPercent*1.15, 100.0) // 15% increase
 		memoryPercent = min(memoryPercent*1.15, 100.0)
 		confidence = 0.92 // Higher confidence when issue is predicted
 	} else if len(resp.Predictions) > 0 && resp.Predictions[0] == 1 {
