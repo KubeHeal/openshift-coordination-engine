@@ -1535,3 +1535,243 @@ func (c *PrometheusClient) GetInfrastructureHealthSummary(ctx context.Context) (
 
 	return result, nil
 }
+
+// =============================================================================
+// Generic Query Methods (Issue #30 - Anomaly Analysis Support)
+// =============================================================================
+
+// Query executes an arbitrary PromQL query and returns the scalar result
+// This method is exposed for use by the anomaly analysis feature engineering
+func (c *PrometheusClient) Query(ctx context.Context, query string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+	return c.queryInstant(ctx, query)
+}
+
+// QueryWithDefault executes a PromQL query and returns a default value on error
+func (c *PrometheusClient) QueryWithDefault(ctx context.Context, query string, defaultValue float64) float64 {
+	value, err := c.Query(ctx, query)
+	if err != nil {
+		c.log.WithError(err).WithField("query", query).Debug("Query failed, using default value")
+		return defaultValue
+	}
+	return value
+}
+
+// AnomalyMetricFeatures contains the 9 features computed for a single metric
+type AnomalyMetricFeatures struct {
+	Value     float64 `json:"value"`      // current value
+	Mean5m    float64 `json:"mean_5m"`    // 5-minute rolling mean
+	Std5m     float64 `json:"std_5m"`     // 5-minute rolling stddev
+	Min5m     float64 `json:"min_5m"`     // 5-minute rolling min
+	Max5m     float64 `json:"max_5m"`     // 5-minute rolling max
+	Lag1      float64 `json:"lag_1"`      // 1-minute lag
+	Lag5      float64 `json:"lag_5"`      // 5-minute lag
+	Diff      float64 `json:"diff"`       // value - lag_1
+	PctChange float64 `json:"pct_change"` // (value - lag_1) / lag_1
+}
+
+// ToSlice converts the features to a slice for ML model input
+func (f *AnomalyMetricFeatures) ToSlice() []float64 {
+	return []float64{
+		f.Value, f.Mean5m, f.Std5m, f.Min5m, f.Max5m,
+		f.Lag1, f.Lag5, f.Diff, f.PctChange,
+	}
+}
+
+// GetAnomalyMetricFeatures queries all 9 features for a metric used in anomaly detection
+// Returns features for: value, mean_5m, std_5m, min_5m, max_5m, lag_1, lag_5, diff, pct_change
+func (c *PrometheusClient) GetAnomalyMetricFeatures(ctx context.Context, baseQuery string) (*AnomalyMetricFeatures, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("prometheus client not available")
+	}
+
+	// Query current value
+	value, err := c.queryInstant(ctx, baseQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query current value: %w", err)
+	}
+
+	// Query rolling statistics (5m window)
+	mean5m := c.QueryWithDefault(ctx, fmt.Sprintf("avg_over_time((%s)[5m:])", baseQuery), value)
+	std5m := c.QueryWithDefault(ctx, fmt.Sprintf("stddev_over_time((%s)[5m:])", baseQuery), 0)
+	min5m := c.QueryWithDefault(ctx, fmt.Sprintf("min_over_time((%s)[5m:])", baseQuery), value)
+	max5m := c.QueryWithDefault(ctx, fmt.Sprintf("max_over_time((%s)[5m:])", baseQuery), value)
+
+	// Query lag values
+	lag1 := c.QueryWithDefault(ctx, fmt.Sprintf("(%s) offset 1m", baseQuery), value)
+	lag5 := c.QueryWithDefault(ctx, fmt.Sprintf("(%s) offset 5m", baseQuery), value)
+
+	// Calculate derived features
+	diff := value - lag1
+	pctChange := 0.0
+	if lag1 != 0 {
+		pctChange = (value - lag1) / lag1
+	}
+
+	return &AnomalyMetricFeatures{
+		Value:     value,
+		Mean5m:    mean5m,
+		Std5m:     std5m,
+		Min5m:     min5m,
+		Max5m:     max5m,
+		Lag1:      lag1,
+		Lag5:      lag5,
+		Diff:      diff,
+		PctChange: pctChange,
+	}, nil
+}
+
+// GetNodeCPUUtilization returns node CPU utilization (0-1 range)
+func (c *PrometheusClient) GetNodeCPUUtilization(ctx context.Context) (float64, error) {
+	query := `avg(1 - rate(node_cpu_seconds_total{mode="idle"}[5m]))`
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return clampToUnitRange(value), nil
+}
+
+// GetNodeMemoryUtilization returns node memory utilization (0-1 range)
+func (c *PrometheusClient) GetNodeMemoryUtilization(ctx context.Context) (float64, error) {
+	query := `1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return clampToUnitRange(value), nil
+}
+
+// GetPodCPUUsage returns pod CPU usage for a namespace (in cores)
+func (c *PrometheusClient) GetPodCPUUsage(ctx context.Context, namespace string) (float64, error) {
+	query := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{namespace=%q,container!=""}[5m]))`, namespace)
+	return c.queryInstant(ctx, query)
+}
+
+// GetPodMemoryUsageRatio returns pod memory usage as ratio of limits (0-1 range)
+func (c *PrometheusClient) GetPodMemoryUsageRatio(ctx context.Context, namespace string) (float64, error) {
+	query := fmt.Sprintf(`sum(container_memory_working_set_bytes{namespace=%q,container!=""}) / sum(kube_pod_container_resource_limits{resource="memory",namespace=%q})`, namespace, namespace)
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		// Fallback to simpler query without limits
+		query = fmt.Sprintf(`avg(container_memory_working_set_bytes{namespace=%q,container!=""} / 2147483648)`, namespace)
+		value, err = c.queryInstant(ctx, query)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return clampToUnitRange(value), nil
+}
+
+// GetContainerRestartCount returns the total container restart count for a namespace
+func (c *PrometheusClient) GetContainerRestartCount(ctx context.Context, namespace string) (float64, error) {
+	query := fmt.Sprintf(`sum(kube_pod_container_status_restarts_total{namespace=%q})`, namespace)
+	return c.queryInstant(ctx, query)
+}
+
+// BuildAnomalyFeatureVector builds the complete 45-feature vector for anomaly detection
+// This queries 5 base metrics × 9 features each = 45 total features
+func (c *PrometheusClient) BuildAnomalyFeatureVector(ctx context.Context, namespace, pod, deployment string) ([]float64, map[string]float64, error) {
+	if !c.IsAvailable() {
+		return nil, nil, fmt.Errorf("prometheus client not available")
+	}
+
+	features := make([]float64, 0, 45)
+	currentValues := make(map[string]float64)
+
+	// Define base queries for each metric
+	queries := c.buildAnomalyQueries(namespace, pod, deployment)
+
+	metricNames := []string{
+		"node_cpu_utilization",
+		"node_memory_utilization",
+		"pod_cpu_usage",
+		"pod_memory_usage",
+		"container_restart_count",
+	}
+
+	for _, name := range metricNames {
+		query, ok := queries[name]
+		if !ok {
+			// Use default features if query not found
+			features = append(features, c.defaultMetricFeatures()...)
+			currentValues[name] = 0.5
+			continue
+		}
+
+		metricFeatures, err := c.GetAnomalyMetricFeatures(ctx, query)
+		if err != nil {
+			c.log.WithError(err).WithField("metric", name).Debug("Failed to get metric features, using defaults")
+			features = append(features, c.defaultMetricFeatures()...)
+			currentValues[name] = 0.5
+			continue
+		}
+
+		features = append(features, metricFeatures.ToSlice()...)
+		currentValues[name] = metricFeatures.Value
+	}
+
+	return features, currentValues, nil
+}
+
+// buildAnomalyQueries builds PromQL queries for anomaly detection metrics
+func (c *PrometheusClient) buildAnomalyQueries(namespace, pod, deployment string) map[string]string {
+	// Build label selectors
+	var selectors []string
+	if namespace != "" {
+		selectors = append(selectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+	if pod != "" {
+		selectors = append(selectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+	if deployment != "" {
+		selectors = append(selectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	selectorStr := ""
+	if len(selectors) > 0 {
+		selectorStr = strings.Join(selectors, ",")
+	}
+
+	prependComma := func(s string) string {
+		if s != "" {
+			return "," + s
+		}
+		return ""
+	}
+
+	return map[string]string{
+		"node_cpu_utilization": `avg(1 - rate(node_cpu_seconds_total{mode="idle"}[5m]))`,
+		"node_memory_utilization": `1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`,
+		"pod_cpu_usage": fmt.Sprintf(
+			`sum(rate(container_cpu_usage_seconds_total{container!=""%s}[5m]))`,
+			prependComma(selectorStr),
+		),
+		"pod_memory_usage": fmt.Sprintf(
+			`sum(container_memory_working_set_bytes{container!=""%s}) / sum(kube_pod_container_resource_limits{resource="memory"%s})`,
+			prependComma(selectorStr), prependComma(selectorStr),
+		),
+		"container_restart_count": func() string {
+			if selectorStr != "" {
+				return fmt.Sprintf(`sum(kube_pod_container_status_restarts_total{%s})`, selectorStr)
+			}
+			return `sum(kube_pod_container_status_restarts_total)`
+		}(),
+	}
+}
+
+// defaultMetricFeatures returns default feature values for a single metric
+func (c *PrometheusClient) defaultMetricFeatures() []float64 {
+	return []float64{
+		0.5, // value
+		0.5, // mean_5m
+		0.1, // std_5m
+		0.3, // min_5m
+		0.7, // max_5m
+		0.5, // lag_1
+		0.5, // lag_5
+		0.0, // diff
+		0.0, // pct_change
+	}
+}
