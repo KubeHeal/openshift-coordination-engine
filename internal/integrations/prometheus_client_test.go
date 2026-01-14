@@ -950,8 +950,8 @@ func TestPrometheusClient_NormalizedValues_InRange(t *testing.T) {
 		{"mid", 0.5},
 		{"high", 0.85},
 		{"max", 1.0},
-		{"over_max", 1.5},     // Should be clamped to 1.0
-		{"negative", -0.1},   // Should be clamped to 0.0
+		{"over_max", 1.5},  // Should be clamped to 1.0
+		{"negative", -0.1}, // Should be clamped to 0.0
 	}
 
 	for _, tc := range testCases {
