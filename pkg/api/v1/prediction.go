@@ -199,16 +199,28 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 		"memory_rolling_mean": memoryRollingMean,
 	}).Debug("Prepared prediction instances")
 
-	// Call KServe model
-	resp, err := h.kserveClient.Predict(ctx, req.Model, instances)
+	// Call KServe model with flexible response handling
+	resp, err := h.kserveClient.PredictFlexible(ctx, req.Model, instances)
 	if err != nil {
 		h.log.WithError(err).WithField("model", req.Model).Error("KServe prediction failed")
 		h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", err.Error(), ErrCodePredictionFailed)
 		return
 	}
 
-	// Process predictions
-	cpuPercent, memoryPercent, confidence := h.processPredictions(resp, cpuRollingMean, memoryRollingMean)
+	// Process predictions based on response type
+	var cpuPercent, memoryPercent, confidence float64
+	var modelVersion string
+
+	if resp.Type == "forecast" && resp.ForecastResponse != nil {
+		cpuPercent, memoryPercent, confidence = h.processForecastPredictions(resp.ForecastResponse, cpuRollingMean, memoryRollingMean)
+		modelVersion = resp.ForecastResponse.ModelVersion
+	} else if resp.AnomalyResponse != nil {
+		cpuPercent, memoryPercent, confidence = h.processAnomalyPredictions(resp.AnomalyResponse, cpuRollingMean, memoryRollingMean)
+		modelVersion = resp.AnomalyResponse.ModelVersion
+	} else {
+		h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Unknown response format from model", ErrCodePredictionFailed)
+		return
+	}
 
 	// Calculate target ISO timestamp
 	targetTimestamp := h.calculateTargetTimestamp(req.Hour, req.DayOfWeek)
@@ -230,7 +242,7 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 		},
 		ModelInfo: ModelInfo{
 			Name:       req.Model,
-			Version:    resp.ModelVersion,
+			Version:    modelVersion,
 			Confidence: confidence,
 		},
 		TargetTime: TargetTimeInfo{
@@ -400,9 +412,56 @@ func (h *PredictionHandler) getScopedMetricsForCluster(ctx context.Context) (flo
 	return cpuValue, memoryValue, nil
 }
 
-// processPredictions interprets the KServe model response and calculates predicted values
-func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuRollingMean, memoryRollingMean float64) (float64, float64, float64) {
-	// The predictive-analytics model returns classification predictions
+// processForecastPredictions interprets the predictive-analytics model response with forecast data
+func (h *PredictionHandler) processForecastPredictions(resp *kserve.ForecastResponse, cpuRollingMean, memoryRollingMean float64) (float64, float64, float64) {
+	// Default values based on rolling means
+	cpuPercent := cpuRollingMean * 100
+	memoryPercent := memoryRollingMean * 100
+	confidence := 0.85 // Base confidence
+
+	// Extract CPU forecast if available
+	if cpuForecast, ok := resp.Predictions["cpu_usage"]; ok && len(cpuForecast.Forecast) > 0 {
+		// Use the first forecast value (closest prediction)
+		cpuPercent = cpuForecast.Forecast[0] * 100
+
+		// Use confidence from the model if available
+		if len(cpuForecast.Confidence) > 0 {
+			confidence = cpuForecast.Confidence[0]
+		}
+	}
+
+	// Extract memory forecast if available
+	if memForecast, ok := resp.Predictions["memory_usage"]; ok && len(memForecast.Forecast) > 0 {
+		// Use the first forecast value (closest prediction)
+		memoryPercent = memForecast.Forecast[0] * 100
+
+		// Average confidence if both metrics have confidence values
+		if len(memForecast.Confidence) > 0 {
+			if cpuForecast, ok := resp.Predictions["cpu_usage"]; ok && len(cpuForecast.Confidence) > 0 {
+				confidence = (cpuForecast.Confidence[0] + memForecast.Confidence[0]) / 2
+			} else {
+				confidence = memForecast.Confidence[0]
+			}
+		}
+	}
+
+	// Clamp values to valid percentages
+	cpuPercent = clampPercentage(cpuPercent)
+	memoryPercent = clampPercentage(memoryPercent)
+
+	h.log.WithFields(logrus.Fields{
+		"cpu_percent":    cpuPercent,
+		"memory_percent": memoryPercent,
+		"confidence":     confidence,
+		"model_type":     "forecast",
+	}).Debug("Processed forecast predictions")
+
+	return cpuPercent, memoryPercent, confidence
+}
+
+// processAnomalyPredictions interprets the anomaly-detector model response (legacy behavior)
+func (h *PredictionHandler) processAnomalyPredictions(resp *kserve.DetectResponse, cpuRollingMean, memoryRollingMean float64) (float64, float64, float64) {
+	// The anomaly-detector model returns classification predictions (-1 or 1)
 	// We use the current metrics and prediction result to forecast values
 
 	// Base prediction on current metrics
@@ -430,6 +489,12 @@ func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuR
 	memoryPercent = clampPercentage(memoryPercent)
 
 	return cpuPercent, memoryPercent, confidence
+}
+
+// processPredictions is kept for backwards compatibility with tests
+// Deprecated: Use processAnomalyPredictions or processForecastPredictions instead
+func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuRollingMean, memoryRollingMean float64) (float64, float64, float64) {
+	return h.processAnomalyPredictions(resp, cpuRollingMean, memoryRollingMean)
 }
 
 // getTarget returns the target identifier based on the request scope

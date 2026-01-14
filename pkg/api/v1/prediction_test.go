@@ -679,3 +679,188 @@ func TestErrorCodes(t *testing.T) {
 	assert.Equal(t, "MODEL_NOT_FOUND", ErrCodeModelNotFound)
 	assert.Equal(t, "PREDICTION_FAILED", ErrCodePredictionFailed)
 }
+
+func TestPredictionHandler_ProcessForecastPredictions(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	handler := NewPredictionHandler(nil, nil, log)
+
+	t.Run("processes forecast with both CPU and memory", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{
+				"cpu_usage": {
+					Forecast:        []float64{0.65, 0.70, 0.72},
+					ForecastHorizon: 3,
+					Confidence:      []float64{0.90, 0.85, 0.80},
+				},
+				"memory_usage": {
+					Forecast:        []float64{0.75, 0.78, 0.80},
+					ForecastHorizon: 3,
+					Confidence:      []float64{0.88, 0.84, 0.80},
+				},
+			},
+			ModelName:      "predictive-analytics",
+			ModelVersion:   "1.0.0",
+			Timestamp:      "2026-01-14T15:00:00Z",
+			LookbackWindow: 24,
+		}
+
+		cpuPercent, memPercent, confidence := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// Should use first forecast value * 100
+		assert.Equal(t, 65.0, cpuPercent)
+		assert.Equal(t, 75.0, memPercent)
+		// Confidence should be average of both metrics' first confidence
+		assert.Equal(t, 0.89, confidence) // (0.90 + 0.88) / 2
+	})
+
+	t.Run("processes forecast with only CPU", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{
+				"cpu_usage": {
+					Forecast:        []float64{0.55},
+					ForecastHorizon: 1,
+					Confidence:      []float64{0.92},
+				},
+			},
+			ModelName: "predictive-analytics",
+		}
+
+		cpuPercent, memPercent, confidence := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// CPU should use forecast, memory should fall back to rolling mean
+		assert.InDelta(t, 55.0, cpuPercent, 0.001)
+		assert.InDelta(t, 70.0, memPercent, 0.001) // Rolling mean * 100
+		assert.Equal(t, 0.92, confidence)
+	})
+
+	t.Run("processes forecast with only memory", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{
+				"memory_usage": {
+					Forecast:        []float64{0.82},
+					ForecastHorizon: 1,
+					Confidence:      []float64{0.87},
+				},
+			},
+			ModelName: "predictive-analytics",
+		}
+
+		cpuPercent, memPercent, confidence := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// CPU should fall back to rolling mean, memory should use forecast
+		assert.Equal(t, 60.0, cpuPercent) // Rolling mean * 100
+		assert.Equal(t, 82.0, memPercent)
+		assert.Equal(t, 0.87, confidence)
+	})
+
+	t.Run("handles empty predictions", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{},
+			ModelName:   "predictive-analytics",
+		}
+
+		cpuPercent, memPercent, confidence := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// Should fall back to rolling means
+		assert.Equal(t, 60.0, cpuPercent)
+		assert.Equal(t, 70.0, memPercent)
+		assert.Equal(t, 0.85, confidence) // Base confidence
+	})
+
+	t.Run("handles empty forecast arrays", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{
+				"cpu_usage": {
+					Forecast:   []float64{},
+					Confidence: []float64{},
+				},
+			},
+			ModelName: "predictive-analytics",
+		}
+
+		cpuPercent, memPercent, confidence := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// Should fall back to rolling means
+		assert.Equal(t, 60.0, cpuPercent)
+		assert.Equal(t, 70.0, memPercent)
+		assert.Equal(t, 0.85, confidence)
+	})
+
+	t.Run("clamps values over 100", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{
+				"cpu_usage": {
+					Forecast:   []float64{1.2}, // 120%
+					Confidence: []float64{0.9},
+				},
+				"memory_usage": {
+					Forecast:   []float64{1.5}, // 150%
+					Confidence: []float64{0.85},
+				},
+			},
+			ModelName: "predictive-analytics",
+		}
+
+		cpuPercent, memPercent, _ := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// Should be clamped to 100
+		assert.Equal(t, 100.0, cpuPercent)
+		assert.Equal(t, 100.0, memPercent)
+	})
+
+	t.Run("clamps negative values", func(t *testing.T) {
+		resp := &kserve.ForecastResponse{
+			Predictions: map[string]kserve.ForecastResult{
+				"cpu_usage": {
+					Forecast:   []float64{-0.1},
+					Confidence: []float64{0.5},
+				},
+			},
+			ModelName: "predictive-analytics",
+		}
+
+		cpuPercent, _, _ := handler.processForecastPredictions(resp, 0.60, 0.70)
+
+		// Should be clamped to 0
+		assert.Equal(t, 0.0, cpuPercent)
+	})
+}
+
+func TestPredictionHandler_ProcessAnomalyPredictions(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	handler := NewPredictionHandler(nil, nil, log)
+
+	t.Run("issue predicted increases values", func(t *testing.T) {
+		resp := &kserve.DetectResponse{
+			Predictions: []int{-1}, // Issue predicted
+		}
+		cpuMean := 0.65
+		memMean := 0.72
+
+		cpuPercent, memPercent, confidence := handler.processAnomalyPredictions(resp, cpuMean, memMean)
+
+		// Should increase the predictions
+		assert.Greater(t, cpuPercent, cpuMean*100)
+		assert.Greater(t, memPercent, memMean*100)
+		assert.Equal(t, 0.92, confidence)
+	})
+
+	t.Run("normal operation", func(t *testing.T) {
+		resp := &kserve.DetectResponse{
+			Predictions: []int{1}, // Normal
+		}
+		cpuMean := 0.65
+		memMean := 0.72
+
+		cpuPercent, memPercent, confidence := handler.processAnomalyPredictions(resp, cpuMean, memMean)
+
+		// Values should be close to original
+		assert.InDelta(t, cpuMean*100, cpuPercent, 10.0)
+		assert.InDelta(t, memMean*100, memPercent, 10.0)
+		assert.Equal(t, 0.88, confidence)
+	})
+}
