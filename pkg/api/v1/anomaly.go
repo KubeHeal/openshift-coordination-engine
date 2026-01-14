@@ -421,7 +421,7 @@ func (h *AnomalyHandler) queryPromQL(ctx context.Context, query string) (float64
 	// Use the Prometheus client's Query method
 	value, err := h.prometheusClient.Query(ctx, query)
 	if err != nil {
-		return h.defaultMetricValue, err
+		return h.defaultMetricValue, fmt.Errorf("prometheus query failed: %w", err)
 	}
 
 	return value, nil
