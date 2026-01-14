@@ -634,3 +634,340 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+// =============================================================================
+// Tests for Issue #32: Normalized Metrics Queries
+// =============================================================================
+
+// TestPrometheusClient_GetCPURollingMean_Normalized tests normalized CPU query with allocatable capacity
+func TestPrometheusClient_GetCPURollingMean_Normalized(t *testing.T) {
+	// Mock server returns 0.45 (45% cluster CPU utilization)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+
+		// Verify the query uses the correct pattern
+		if contains(query, "kube_node_status_allocatable") {
+			// Primary query succeeded
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.45)))
+		} else {
+			// Fallback query
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.48)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetCPURollingMean(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 0.45, value, 0.01)
+	assert.GreaterOrEqual(t, value, 0.0)
+	assert.LessOrEqual(t, value, 1.0)
+}
+
+// TestPrometheusClient_GetCPURollingMean_Fallback tests CPU fallback when kube-state-metrics unavailable
+func TestPrometheusClient_GetCPURollingMean_Fallback(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		query := r.URL.Query().Get("query")
+
+		if callCount == 1 && contains(query, "kube_node_status_allocatable") {
+			// First call fails (kube-state-metrics unavailable)
+			w.WriteHeader(http.StatusOK)
+			resp := PrometheusQueryResponse{
+				Status: "success",
+			}
+			resp.Data.ResultType = "vector"
+			resp.Data.Result = []struct {
+				Metric map[string]string `json:"metric"`
+				Value  []interface{}     `json:"value"`
+			}{} // Empty result
+			data, _ := json.Marshal(resp)
+			_, _ = w.Write(data)
+		} else {
+			// Fallback query succeeds (node_cpu_seconds_total)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.52)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetCPURollingMean(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 0.52, value, 0.01)
+}
+
+// TestPrometheusClient_GetMemoryRollingMean_Normalized tests normalized memory query
+func TestPrometheusClient_GetMemoryRollingMean_Normalized(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+
+		if contains(query, "container_memory_working_set_bytes") && contains(query, "kube_node_status_allocatable") {
+			// Primary query with working_set_bytes / allocatable
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.62)))
+		} else {
+			// Fallback
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.65)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetMemoryRollingMean(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 0.62, value, 0.01)
+	assert.GreaterOrEqual(t, value, 0.0)
+	assert.LessOrEqual(t, value, 1.0)
+}
+
+// TestPrometheusClient_GetMemoryRollingMean_Fallback tests memory fallback query
+func TestPrometheusClient_GetMemoryRollingMean_Fallback(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+
+		if callCount == 1 {
+			// First call fails
+			w.WriteHeader(http.StatusOK)
+			resp := PrometheusQueryResponse{Status: "success"}
+			resp.Data.ResultType = "vector"
+			resp.Data.Result = []struct {
+				Metric map[string]string `json:"metric"`
+				Value  []interface{}     `json:"value"`
+			}{}
+			data, _ := json.Marshal(resp)
+			_, _ = w.Write(data)
+		} else {
+			// Fallback succeeds with node-level memory
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.58)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetMemoryRollingMean(context.Background())
+	require.NoError(t, err)
+	assert.InDelta(t, 0.58, value, 0.01)
+}
+
+// TestPrometheusClient_BuildScopedCPUQuery_Normalized verifies the query format
+func TestPrometheusClient_BuildScopedCPUQuery_Normalized(t *testing.T) {
+	log := logrus.New()
+	client := &PrometheusClient{log: log}
+
+	tests := []struct {
+		name       string
+		namespace  string
+		deployment string
+		pod        string
+		expected   []string
+	}{
+		{
+			name:       "cluster scope",
+			namespace:  "",
+			deployment: "",
+			pod:        "",
+			expected: []string{
+				"sum(rate(container_cpu_usage_seconds_total",
+				"kube_node_status_allocatable",
+				`resource="cpu"`,
+			},
+		},
+		{
+			name:       "namespace scope",
+			namespace:  "production",
+			deployment: "",
+			pod:        "",
+			expected: []string{
+				`namespace="production"`,
+				"kube_node_status_allocatable",
+			},
+		},
+		{
+			name:       "deployment scope",
+			namespace:  "default",
+			deployment: "web-app",
+			pod:        "",
+			expected: []string{
+				`namespace="default"`,
+				`pod=~"web-app-.*"`,
+				"kube_node_status_allocatable",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query := client.buildScopedCPUQuery(tt.namespace, tt.deployment, tt.pod)
+			for _, exp := range tt.expected {
+				assert.Contains(t, query, exp, "Query should contain: %s", exp)
+			}
+		})
+	}
+}
+
+// TestPrometheusClient_BuildScopedMemoryQuery_Normalized verifies memory query format
+func TestPrometheusClient_BuildScopedMemoryQuery_Normalized(t *testing.T) {
+	log := logrus.New()
+	client := &PrometheusClient{log: log}
+
+	tests := []struct {
+		name       string
+		namespace  string
+		deployment string
+		pod        string
+		expected   []string
+	}{
+		{
+			name:       "cluster scope",
+			namespace:  "",
+			deployment: "",
+			pod:        "",
+			expected: []string{
+				"sum(container_memory_working_set_bytes",
+				"kube_node_status_allocatable",
+				`resource="memory"`,
+			},
+		},
+		{
+			name:       "namespace scope",
+			namespace:  "staging",
+			deployment: "",
+			pod:        "",
+			expected: []string{
+				`namespace="staging"`,
+				"container_memory_working_set_bytes",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			query := client.buildScopedMemoryQuery(tt.namespace, tt.deployment, tt.pod)
+			for _, exp := range tt.expected {
+				assert.Contains(t, query, exp, "Query should contain: %s", exp)
+			}
+		})
+	}
+}
+
+// TestPrometheusClient_GetNamespaceCPURollingMean_Normalized tests namespace CPU normalization
+func TestPrometheusClient_GetNamespaceCPURollingMean_Normalized(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+
+		// Verify namespace filter is present
+		if contains(query, `namespace="test-ns"`) && contains(query, "kube_node_status_allocatable") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.15))) // 15% of cluster
+		} else {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.18)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetNamespaceCPURollingMean(context.Background(), "test-ns")
+	require.NoError(t, err)
+	assert.InDelta(t, 0.15, value, 0.01)
+}
+
+// TestPrometheusClient_GetNamespaceMemoryRollingMean_Normalized tests namespace memory normalization
+func TestPrometheusClient_GetNamespaceMemoryRollingMean_Normalized(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+
+		if contains(query, `namespace="kube-system"`) && contains(query, "container_memory_working_set_bytes") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.08))) // 8% of cluster
+		} else {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.10)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetNamespaceMemoryRollingMean(context.Background(), "kube-system")
+	require.NoError(t, err)
+	assert.InDelta(t, 0.08, value, 0.01)
+}
+
+// TestPrometheusClient_GetScopedCPURollingMean_WithFallback tests scoped CPU with fallback
+func TestPrometheusClient_GetScopedCPURollingMean_WithFallback(t *testing.T) {
+	callCount := 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		query := r.URL.Query().Get("query")
+
+		if callCount == 1 && contains(query, "kube_node_status_allocatable") {
+			// Primary fails
+			w.WriteHeader(http.StatusOK)
+			resp := PrometheusQueryResponse{Status: "success"}
+			resp.Data.ResultType = "vector"
+			resp.Data.Result = []struct {
+				Metric map[string]string `json:"metric"`
+				Value  []interface{}     `json:"value"`
+			}{}
+			data, _ := json.Marshal(resp)
+			_, _ = w.Write(data)
+		} else {
+			// Fallback succeeds
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockPrometheusResponse(0.35)))
+		}
+	})
+
+	client, server := newTestPrometheusClient(t, handler)
+	defer server.Close()
+
+	value, err := client.GetScopedCPURollingMean(context.Background(), "default", "api-server", "")
+	require.NoError(t, err)
+	assert.InDelta(t, 0.35, value, 0.01)
+}
+
+// TestPrometheusClient_NormalizedValues_InRange ensures all normalized values are 0-1
+func TestPrometheusClient_NormalizedValues_InRange(t *testing.T) {
+	testCases := []struct {
+		name     string
+		rawValue float64
+	}{
+		{"zero", 0.0},
+		{"low", 0.25},
+		{"mid", 0.5},
+		{"high", 0.85},
+		{"max", 1.0},
+		{"over_max", 1.5},     // Should be clamped to 1.0
+		{"negative", -0.1},   // Should be clamped to 0.0
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(mockPrometheusResponse(tc.rawValue)))
+			})
+
+			client, server := newTestPrometheusClient(t, handler)
+			defer server.Close()
+
+			value, err := client.GetCPURollingMean(context.Background())
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, value, 0.0, "Value should be >= 0")
+			assert.LessOrEqual(t, value, 1.0, "Value should be <= 1")
+		})
+	}
+}

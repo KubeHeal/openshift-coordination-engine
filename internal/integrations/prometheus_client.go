@@ -139,8 +139,9 @@ func (c *PrometheusClient) IsAvailable() bool {
 	return c != nil && c.baseURL != ""
 }
 
-// GetCPURollingMean returns the 24-hour rolling mean of CPU usage across the cluster
-// Query: avg(rate(container_cpu_usage_seconds_total{container!="",pod!=""}[24h]))
+// GetCPURollingMean returns the cluster CPU utilization as a ratio of allocatable capacity (0-1)
+// Primary Query: sum(rate(container_cpu_usage_seconds_total{...}[5m])) / sum(kube_node_status_allocatable{resource="cpu"})
+// Fallback: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))
 func (c *PrometheusClient) GetCPURollingMean(ctx context.Context) (float64, error) {
 	if !c.IsAvailable() {
 		return 0, fmt.Errorf("prometheus client not available")
@@ -151,19 +152,24 @@ func (c *PrometheusClient) GetCPURollingMean(ctx context.Context) (float64, erro
 		return value, nil
 	}
 
-	// Query for average CPU usage rate over 24h window
-	// This gives us a value between 0 and N (where N is the number of CPU cores used)
-	// We normalize it to 0-1 range by dividing by total available CPU
-	query := `avg(rate(container_cpu_usage_seconds_total{container!="",pod!=""}[24h]))`
+	// Primary query: Cluster CPU utilization as ratio of allocatable capacity
+	// sum(rate(...)) = Total CPU cores used across all containers
+	// sum(kube_node_status_allocatable{resource="cpu"}) = Total allocatable CPU cores
+	query := `sum(rate(container_cpu_usage_seconds_total{container!="",pod!=""}[5m])) / sum(kube_node_status_allocatable{resource="cpu"})`
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
-		c.log.WithError(err).Debug("Failed to query CPU rolling mean from Prometheus")
-		return 0, err
+		// Fallback: Use node-level CPU idle time (works without kube-state-metrics)
+		c.log.WithError(err).Debug("Primary CPU query failed, trying node-level fallback")
+		query = `1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))`
+		value, err = c.queryInstant(ctx, query)
+		if err != nil {
+			c.log.WithError(err).Debug("Failed to query CPU rolling mean from Prometheus")
+			return 0, err
+		}
 	}
 
-	// Normalize to 0-1 range (assuming typical cluster has ~100 cores)
-	// In production, you'd query node_cpu_seconds_total to get actual capacity
+	// Value should already be 0-1 range (utilization ratio)
 	normalizedValue := clampToUnitRange(value)
 
 	c.setCached(cacheKey, normalizedValue)
@@ -176,8 +182,9 @@ func (c *PrometheusClient) GetCPURollingMean(ctx context.Context) (float64, erro
 	return normalizedValue, nil
 }
 
-// GetMemoryRollingMean returns the 24-hour rolling mean of memory usage across the cluster
-// Query: avg(avg_over_time(container_memory_usage_bytes{container!="",pod!=""}[24h]) / container_spec_memory_limit_bytes{container!="",pod!=""})
+// GetMemoryRollingMean returns the cluster memory utilization as a ratio of allocatable capacity (0-1)
+// Primary Query: sum(container_memory_working_set_bytes{...}) / sum(kube_node_status_allocatable{resource="memory"})
+// Fallback: 1 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))
 func (c *PrometheusClient) GetMemoryRollingMean(ctx context.Context) (float64, error) {
 	if !c.IsAvailable() {
 		return 0, fmt.Errorf("prometheus client not available")
@@ -188,15 +195,17 @@ func (c *PrometheusClient) GetMemoryRollingMean(ctx context.Context) (float64, e
 		return value, nil
 	}
 
-	// Query for average memory usage as a ratio of limits over 24h
-	// This gives us a value between 0-1 representing memory utilization
-	query := `avg(container_memory_usage_bytes{container!="",pod!=""} / container_spec_memory_limit_bytes{container!="",pod!=""} > 0)`
+	// Primary query: Cluster memory utilization as ratio of allocatable capacity
+	// container_memory_working_set_bytes = Actual memory in use (excludes cache)
+	// sum(kube_node_status_allocatable{resource="memory"}) = Total allocatable memory
+	query := `sum(container_memory_working_set_bytes{container!="",pod!=""}) / sum(kube_node_status_allocatable{resource="memory"})`
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
-		// Try alternative query without limits (node-level)
-		c.log.WithError(err).Debug("Container memory ratio query failed, trying node-level query")
-		query = `1 - avg(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`
+		// Fallback: Use node-level available memory (works without kube-state-metrics)
+		// Note: This is more accurate than the previous fallback because it uses sum() across nodes
+		c.log.WithError(err).Debug("Primary memory query failed, trying node-level fallback")
+		query = `1 - (sum(node_memory_MemAvailable_bytes) / sum(node_memory_MemTotal_bytes))`
 		value, err = c.queryInstant(ctx, query)
 		if err != nil {
 			c.log.WithError(err).Debug("Failed to query memory rolling mean from Prometheus")
@@ -204,7 +213,7 @@ func (c *PrometheusClient) GetMemoryRollingMean(ctx context.Context) (float64, e
 		}
 	}
 
-	// Ensure value is in 0-1 range
+	// Value should already be 0-1 range (utilization ratio)
 	normalizedValue := clampToUnitRange(value)
 
 	c.setCached(cacheKey, normalizedValue)
@@ -217,7 +226,7 @@ func (c *PrometheusClient) GetMemoryRollingMean(ctx context.Context) (float64, e
 	return normalizedValue, nil
 }
 
-// GetNamespaceCPURollingMean returns CPU rolling mean for a specific namespace
+// GetNamespaceCPURollingMean returns CPU utilization for a specific namespace as a ratio of cluster allocatable (0-1)
 func (c *PrometheusClient) GetNamespaceCPURollingMean(ctx context.Context, namespace string) (float64, error) {
 	if !c.IsAvailable() {
 		return 0, fmt.Errorf("prometheus client not available")
@@ -228,12 +237,18 @@ func (c *PrometheusClient) GetNamespaceCPURollingMean(ctx context.Context, names
 		return value, nil
 	}
 
-	// Build PromQL query with namespace filter
-	query := fmt.Sprintf(`avg(rate(container_cpu_usage_seconds_total{container!="",pod!="",namespace=%q}[24h]))`, namespace)
+	// Primary: Namespace CPU usage as ratio of cluster allocatable CPU
+	query := fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{container!="",pod!="",namespace=%q}[5m])) / sum(kube_node_status_allocatable{resource="cpu"})`, namespace)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
-		return 0, err
+		// Fallback: Use namespace quota if available
+		c.log.WithError(err).Debug("Primary namespace CPU query failed, trying quota fallback")
+		query = fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total{container!="",pod!="",namespace=%q}[5m])) / sum(kube_resourcequota{resource="limits.cpu",namespace=%q})`, namespace, namespace)
+		value, err = c.queryInstant(ctx, query)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	normalizedValue := clampToUnitRange(value)
@@ -242,7 +257,7 @@ func (c *PrometheusClient) GetNamespaceCPURollingMean(ctx context.Context, names
 	return normalizedValue, nil
 }
 
-// GetNamespaceMemoryRollingMean returns memory rolling mean for a specific namespace
+// GetNamespaceMemoryRollingMean returns memory utilization for a specific namespace as a ratio of cluster allocatable (0-1)
 func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, namespace string) (float64, error) {
 	if !c.IsAvailable() {
 		return 0, fmt.Errorf("prometheus client not available")
@@ -253,12 +268,18 @@ func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, na
 		return value, nil
 	}
 
-	// Build PromQL query with namespace filter
-	query := fmt.Sprintf(`avg(container_memory_usage_bytes{container!="",pod!="",namespace=%q} / container_spec_memory_limit_bytes{container!="",pod!="",namespace=%q} > 0)`, namespace, namespace)
+	// Primary: Namespace memory usage as ratio of cluster allocatable memory
+	query := fmt.Sprintf(`sum(container_memory_working_set_bytes{container!="",pod!="",namespace=%q}) / sum(kube_node_status_allocatable{resource="memory"})`, namespace)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
-		return 0, err
+		// Fallback: Use namespace quota if available
+		c.log.WithError(err).Debug("Primary namespace memory query failed, trying quota fallback")
+		query = fmt.Sprintf(`sum(container_memory_working_set_bytes{container!="",pod!="",namespace=%q}) / sum(kube_resourcequota{resource="limits.memory",namespace=%q})`, namespace, namespace)
+		value, err = c.queryInstant(ctx, query)
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	normalizedValue := clampToUnitRange(value)
@@ -267,7 +288,7 @@ func (c *PrometheusClient) GetNamespaceMemoryRollingMean(ctx context.Context, na
 	return normalizedValue, nil
 }
 
-// GetScopedCPURollingMean returns CPU rolling mean with flexible scoping
+// GetScopedCPURollingMean returns CPU utilization with flexible scoping as a ratio of cluster allocatable (0-1)
 // Supports namespace, deployment, and pod filtering
 func (c *PrometheusClient) GetScopedCPURollingMean(ctx context.Context, namespace, deployment, pod string) (float64, error) {
 	if !c.IsAvailable() {
@@ -279,18 +300,24 @@ func (c *PrometheusClient) GetScopedCPURollingMean(ctx context.Context, namespac
 		return value, nil
 	}
 
-	// Build PromQL query based on scope
+	// Build primary PromQL query: scoped CPU / cluster allocatable
 	query := c.buildScopedCPUQuery(namespace, deployment, pod)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
-		c.log.WithError(err).WithFields(logrus.Fields{
-			"namespace":  namespace,
-			"deployment": deployment,
-			"pod":        pod,
-			"query":      query,
-		}).Debug("Failed to query scoped CPU rolling mean from Prometheus")
-		return 0, err
+		// Fallback: try without kube-state-metrics denominator
+		c.log.WithError(err).Debug("Primary scoped CPU query failed, trying fallback")
+		fallbackQuery := c.buildScopedCPUQueryFallback(namespace, deployment, pod)
+		value, err = c.queryInstant(ctx, fallbackQuery)
+		if err != nil {
+			c.log.WithError(err).WithFields(logrus.Fields{
+				"namespace":  namespace,
+				"deployment": deployment,
+				"pod":        pod,
+				"query":      query,
+			}).Debug("Failed to query scoped CPU rolling mean from Prometheus")
+			return 0, err
+		}
 	}
 
 	normalizedValue := clampToUnitRange(value)
@@ -307,7 +334,7 @@ func (c *PrometheusClient) GetScopedCPURollingMean(ctx context.Context, namespac
 	return normalizedValue, nil
 }
 
-// GetScopedMemoryRollingMean returns memory rolling mean with flexible scoping
+// GetScopedMemoryRollingMean returns memory utilization with flexible scoping as a ratio of cluster allocatable (0-1)
 // Supports namespace, deployment, and pod filtering
 func (c *PrometheusClient) GetScopedMemoryRollingMean(ctx context.Context, namespace, deployment, pod string) (float64, error) {
 	if !c.IsAvailable() {
@@ -319,12 +346,12 @@ func (c *PrometheusClient) GetScopedMemoryRollingMean(ctx context.Context, names
 		return value, nil
 	}
 
-	// Build PromQL query based on scope
+	// Build primary PromQL query: scoped memory / cluster allocatable
 	query := c.buildScopedMemoryQuery(namespace, deployment, pod)
 
 	value, err := c.queryInstant(ctx, query)
 	if err != nil {
-		// Try fallback query without limits
+		// Try fallback query without kube-state-metrics
 		c.log.WithError(err).Debug("Scoped memory ratio query failed, trying alternative")
 		fallbackQuery := c.buildScopedMemoryQueryFallback(namespace, deployment, pod)
 		value, err = c.queryInstant(ctx, fallbackQuery)
@@ -352,7 +379,7 @@ func (c *PrometheusClient) GetScopedMemoryRollingMean(ctx context.Context, names
 	return normalizedValue, nil
 }
 
-// buildScopedCPUQuery constructs a PromQL query for CPU metrics based on scope
+// buildScopedCPUQuery constructs a PromQL query for CPU metrics normalized by cluster allocatable
 func (c *PrometheusClient) buildScopedCPUQuery(namespace, deployment, pod string) string {
 	var labelSelectors []string
 
@@ -375,10 +402,39 @@ func (c *PrometheusClient) buildScopedCPUQuery(namespace, deployment, pod string
 	}
 
 	selector := "{" + joinSelectors(labelSelectors) + "}"
-	return fmt.Sprintf(`avg(rate(container_cpu_usage_seconds_total%s[24h]))`, selector)
+	// Return CPU usage as ratio of cluster allocatable CPU
+	return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total%s[5m])) / sum(kube_node_status_allocatable{resource="cpu"})`, selector)
 }
 
-// buildScopedMemoryQuery constructs a PromQL query for memory metrics based on scope
+// buildScopedCPUQueryFallback constructs a fallback CPU query using node-level metrics
+func (c *PrometheusClient) buildScopedCPUQueryFallback(namespace, deployment, pod string) string {
+	var labelSelectors []string
+
+	// Always exclude empty containers and pods
+	labelSelectors = append(labelSelectors, `container!=""`, `pod!=""`)
+
+	// Add namespace filter
+	if namespace != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+
+	// Add deployment filter (matches pods with deployment prefix)
+	if deployment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	// Add pod filter (exact match)
+	if pod != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+
+	selector := "{" + joinSelectors(labelSelectors) + "}"
+	// Fallback: estimate cluster capacity from node_cpu metrics
+	// Use sum of node CPUs as denominator
+	return fmt.Sprintf(`sum(rate(container_cpu_usage_seconds_total%s[5m])) / count(count by (cpu) (node_cpu_seconds_total{mode="idle"}))`, selector)
+}
+
+// buildScopedMemoryQuery constructs a PromQL query for memory metrics normalized by cluster allocatable
 func (c *PrometheusClient) buildScopedMemoryQuery(namespace, deployment, pod string) string {
 	var labelSelectors []string
 
@@ -401,11 +457,12 @@ func (c *PrometheusClient) buildScopedMemoryQuery(namespace, deployment, pod str
 	}
 
 	selector := "{" + joinSelectors(labelSelectors) + "}"
-	return fmt.Sprintf(`avg(container_memory_usage_bytes%s / container_spec_memory_limit_bytes%s > 0)`, selector, selector)
+	// Return memory working set as ratio of cluster allocatable memory
+	return fmt.Sprintf(`sum(container_memory_working_set_bytes%s) / sum(kube_node_status_allocatable{resource="memory"})`, selector)
 }
 
 // buildScopedMemoryQueryFallback constructs a fallback PromQL query for memory metrics
-// Used when container limits are not set
+// Used when kube-state-metrics is not available
 func (c *PrometheusClient) buildScopedMemoryQueryFallback(namespace, deployment, pod string) string {
 	var labelSelectors []string
 
@@ -428,8 +485,8 @@ func (c *PrometheusClient) buildScopedMemoryQueryFallback(namespace, deployment,
 	}
 
 	selector := "{" + joinSelectors(labelSelectors) + "}"
-	// Use working set bytes as a percentage of a reasonable max (2GB per container as baseline)
-	return fmt.Sprintf(`avg(container_memory_working_set_bytes%s / 2147483648)`, selector)
+	// Fallback: Use node memory total as denominator
+	return fmt.Sprintf(`sum(container_memory_working_set_bytes%s) / sum(node_memory_MemTotal_bytes)`, selector)
 }
 
 // joinSelectors joins label selectors with commas
