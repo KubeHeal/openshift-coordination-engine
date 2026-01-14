@@ -351,7 +351,7 @@ func TestAnomalyHandler_BuildScope(t *testing.T) {
 	handler := NewAnomalyHandler(nil, nil, log)
 
 	t.Run("pod scope", func(t *testing.T) {
-		req := AnomalyAnalyzeRequest{
+		req := &AnomalyAnalyzeRequest{
 			Namespace: "self-healing-platform",
 			Pod:       "broken-app-xyz",
 		}
@@ -364,7 +364,7 @@ func TestAnomalyHandler_BuildScope(t *testing.T) {
 	})
 
 	t.Run("deployment scope", func(t *testing.T) {
-		req := AnomalyAnalyzeRequest{
+		req := &AnomalyAnalyzeRequest{
 			Namespace:  "self-healing-platform",
 			Deployment: "broken-app",
 		}
@@ -376,7 +376,7 @@ func TestAnomalyHandler_BuildScope(t *testing.T) {
 	})
 
 	t.Run("namespace scope", func(t *testing.T) {
-		req := AnomalyAnalyzeRequest{
+		req := &AnomalyAnalyzeRequest{
 			Namespace: "self-healing-platform",
 		}
 		scope := handler.buildScope(req)
@@ -386,7 +386,7 @@ func TestAnomalyHandler_BuildScope(t *testing.T) {
 	})
 
 	t.Run("cluster-wide scope", func(t *testing.T) {
-		req := AnomalyAnalyzeRequest{}
+		req := &AnomalyAnalyzeRequest{}
 		scope := handler.buildScope(req)
 
 		assert.Equal(t, "cluster-wide", scope.TargetDescription)

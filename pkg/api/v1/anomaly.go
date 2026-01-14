@@ -51,26 +51,26 @@ func (h *AnomalyHandler) RegisterRoutes(router *mux.Router) {
 
 // AnomalyAnalyzeRequest represents the request body for anomaly analysis
 type AnomalyAnalyzeRequest struct {
-	TimeRange     string  `json:"time_range"`      // Options: 1h, 6h, 24h, 7d
-	Namespace     string  `json:"namespace"`       // Optional: scope to namespace
-	Deployment    string  `json:"deployment"`      // Optional: scope to deployment
-	Pod           string  `json:"pod"`             // Optional: scope to specific pod
-	LabelSelector string  `json:"label_selector"`  // Optional: label selector
-	Threshold     float64 `json:"threshold"`       // Anomaly score threshold (0.0-1.0)
-	ModelName     string  `json:"model_name"`      // KServe model to use (default: anomaly-detector)
+	TimeRange     string  `json:"time_range"`     // Options: 1h, 6h, 24h, 7d
+	Namespace     string  `json:"namespace"`      // Optional: scope to namespace
+	Deployment    string  `json:"deployment"`     // Optional: scope to deployment
+	Pod           string  `json:"pod"`            // Optional: scope to specific pod
+	LabelSelector string  `json:"label_selector"` // Optional: label selector
+	Threshold     float64 `json:"threshold"`      // Anomaly score threshold (0.0-1.0)
+	ModelName     string  `json:"model_name"`     // KServe model to use (default: anomaly-detector)
 }
 
 // AnomalyAnalyzeResponse represents the response for anomaly analysis
 type AnomalyAnalyzeResponse struct {
-	Status            string           `json:"status"`
-	TimeRange         string           `json:"time_range"`
-	Scope             AnomalyScope     `json:"scope"`
-	ModelUsed         string           `json:"model_used"`
-	AnomaliesDetected int              `json:"anomalies_detected"`
-	Anomalies         []AnomalyResult  `json:"anomalies"`
-	Summary           AnomalySummary   `json:"summary"`
-	Recommendation    string           `json:"recommendation"`
-	Features          FeatureInfo      `json:"features"`
+	Status            string          `json:"status"`
+	TimeRange         string          `json:"time_range"`
+	Scope             AnomalyScope    `json:"scope"`
+	ModelUsed         string          `json:"model_used"`
+	AnomaliesDetected int             `json:"anomalies_detected"`
+	Anomalies         []AnomalyResult `json:"anomalies"`
+	Summary           AnomalySummary  `json:"summary"`
+	Recommendation    string          `json:"recommendation"`
+	Features          FeatureInfo     `json:"features"`
 }
 
 // AnomalyScope describes the scope of the anomaly analysis
@@ -83,13 +83,13 @@ type AnomalyScope struct {
 
 // AnomalyResult represents a detected anomaly
 type AnomalyResult struct {
-	Timestamp         string            `json:"timestamp"`
-	Severity          string            `json:"severity"`            // critical, warning, info
-	AnomalyScore      float64           `json:"anomaly_score"`       // 0.0-1.0
-	Confidence        float64           `json:"confidence"`          // 0.0-1.0
+	Timestamp         string             `json:"timestamp"`
+	Severity          string             `json:"severity"`      // critical, warning, info
+	AnomalyScore      float64            `json:"anomaly_score"` // 0.0-1.0
+	Confidence        float64            `json:"confidence"`    // 0.0-1.0
 	Metrics           map[string]float64 `json:"metrics"`
-	Explanation       string            `json:"explanation"`
-	RecommendedAction string            `json:"recommended_action"`
+	Explanation       string             `json:"explanation"`
+	RecommendedAction string             `json:"recommended_action"`
 }
 
 // AnomalySummary provides summary statistics for the analysis
@@ -102,10 +102,10 @@ type AnomalySummary struct {
 
 // FeatureInfo provides information about the feature engineering
 type FeatureInfo struct {
-	TotalFeatures    int      `json:"total_features"`
-	BaseMetrics      []string `json:"base_metrics"`
-	FeaturesPerMetric int     `json:"features_per_metric"`
-	FeatureNames     []string `json:"feature_names"`
+	TotalFeatures     int      `json:"total_features"`
+	BaseMetrics       []string `json:"base_metrics"`
+	FeaturesPerMetric int      `json:"features_per_metric"`
+	FeatureNames      []string `json:"feature_names"`
 }
 
 // AnomalyErrorResponse represents an error response for anomaly analysis
@@ -118,11 +118,11 @@ type AnomalyErrorResponse struct {
 
 // Error codes for anomaly analysis failures
 const (
-	ErrCodeAnomalyInvalidRequest    = "INVALID_REQUEST"
+	ErrCodeAnomalyInvalidRequest        = "INVALID_REQUEST"
 	ErrCodeAnomalyPrometheusUnavailable = "PROMETHEUS_UNAVAILABLE"
-	ErrCodeAnomalyKServeUnavailable = "KSERVE_UNAVAILABLE"
-	ErrCodeAnomalyModelNotFound     = "MODEL_NOT_FOUND"
-	ErrCodeAnomalyAnalysisFailed    = "ANALYSIS_FAILED"
+	ErrCodeAnomalyKServeUnavailable     = "KSERVE_UNAVAILABLE"
+	ErrCodeAnomalyModelNotFound         = "MODEL_NOT_FOUND"
+	ErrCodeAnomalyAnalysisFailed        = "ANALYSIS_FAILED"
 )
 
 // Base metrics used for anomaly detection
@@ -137,14 +137,14 @@ var baseMetrics = []string{
 
 // Feature names per metric
 var featureNames = []string{
-	"value",     // current value
-	"mean_5m",   // 5-minute rolling mean
-	"std_5m",    // 5-minute rolling stddev
-	"min_5m",    // 5-minute rolling min
-	"max_5m",    // 5-minute rolling max
-	"lag_1",     // 1-minute lag
-	"lag_5",     // 5-minute lag
-	"diff",      // value - lag_1
+	"value",      // current value
+	"mean_5m",    // 5-minute rolling mean
+	"std_5m",     // 5-minute rolling stddev
+	"min_5m",     // 5-minute rolling min
+	"max_5m",     // 5-minute rolling max
+	"lag_1",      // 1-minute lag
+	"lag_5",      // 5-minute lag
+	"diff",       // value - lag_1
 	"pct_change", // (value - lag_1) / lag_1
 }
 
@@ -186,12 +186,12 @@ func (h *AnomalyHandler) AnalyzeAnomalies(w http.ResponseWriter, r *http.Request
 	}
 
 	h.log.WithFields(logrus.Fields{
-		"time_range":  req.TimeRange,
-		"namespace":   req.Namespace,
-		"deployment":  req.Deployment,
-		"pod":         req.Pod,
-		"threshold":   req.Threshold,
-		"model_name":  req.ModelName,
+		"time_range": req.TimeRange,
+		"namespace":  req.Namespace,
+		"deployment": req.Deployment,
+		"pod":        req.Pod,
+		"threshold":  req.Threshold,
+		"model_name": req.ModelName,
 	}).Info("Processing anomaly analysis request")
 
 	// Check if KServe is available
@@ -229,7 +229,7 @@ func (h *AnomalyHandler) AnalyzeAnomalies(w http.ResponseWriter, r *http.Request
 	}
 
 	// Process predictions and build response
-	response := h.buildAnalysisResponse(req, resp, features, metricsData)
+	response := h.buildAnalysisResponse(&req, resp, features, metricsData)
 
 	h.log.WithFields(logrus.Fields{
 		"anomalies_detected": response.AnomaliesDetected,
@@ -315,15 +315,15 @@ func (h *AnomalyHandler) queryMetricFeatures(ctx context.Context, metric, namesp
 		return nil, 0, fmt.Errorf("failed to query current value for %s: %w", metric, err)
 	}
 
-	// Query rolling statistics (5m window)
-	mean5m, _ := h.queryPromQL(ctx, fmt.Sprintf("avg_over_time((%s)[5m:])", baseQuery))
-	std5m, _ := h.queryPromQL(ctx, fmt.Sprintf("stddev_over_time((%s)[5m:])", baseQuery))
-	min5m, _ := h.queryPromQL(ctx, fmt.Sprintf("min_over_time((%s)[5m:])", baseQuery))
-	max5m, _ := h.queryPromQL(ctx, fmt.Sprintf("max_over_time((%s)[5m:])", baseQuery))
+	// Query rolling statistics (5m window) - use helper that returns default on error
+	mean5m := h.queryPromQLWithDefault(ctx, fmt.Sprintf("avg_over_time((%s)[5m:])", baseQuery), currentValue)
+	std5m := h.queryPromQLWithDefault(ctx, fmt.Sprintf("stddev_over_time((%s)[5m:])", baseQuery), 0)
+	min5m := h.queryPromQLWithDefault(ctx, fmt.Sprintf("min_over_time((%s)[5m:])", baseQuery), currentValue)
+	max5m := h.queryPromQLWithDefault(ctx, fmt.Sprintf("max_over_time((%s)[5m:])", baseQuery), currentValue)
 
 	// Query lag values
-	lag1, _ := h.queryPromQL(ctx, fmt.Sprintf("(%s) offset 1m", baseQuery))
-	lag5, _ := h.queryPromQL(ctx, fmt.Sprintf("(%s) offset 5m", baseQuery))
+	lag1 := h.queryPromQLWithDefault(ctx, fmt.Sprintf("(%s) offset 1m", baseQuery), currentValue)
+	lag5 := h.queryPromQLWithDefault(ctx, fmt.Sprintf("(%s) offset 5m", baseQuery), currentValue)
 
 	// Calculate derived features
 	diff := currentValue - lag1
@@ -351,10 +351,10 @@ func (h *AnomalyHandler) getMetricBaseQuery(metric, namespace, pod, deployment s
 	// Build label selectors
 	var selectors []string
 	if namespace != "" {
-		selectors = append(selectors, fmt.Sprintf(`namespace="%s"`, namespace))
+		selectors = append(selectors, fmt.Sprintf("namespace=%q", namespace))
 	}
 	if pod != "" {
-		selectors = append(selectors, fmt.Sprintf(`pod="%s"`, pod))
+		selectors = append(selectors, fmt.Sprintf("pod=%q", pod))
 	}
 	if deployment != "" {
 		selectors = append(selectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
@@ -414,18 +414,27 @@ func (h *AnomalyHandler) wrapSelector(selector string) string {
 
 // queryPromQL executes a PromQL query and returns the result
 func (h *AnomalyHandler) queryPromQL(ctx context.Context, query string) (float64, error) {
-	// Use the Prometheus client's internal query method via reflection or direct HTTP call
-	// For simplicity, we'll use the scoped methods where possible
-	
-	// This is a simplified implementation - in production, you'd want to
-	// extend PrometheusClient with a generic Query method
 	if h.prometheusClient == nil {
 		return h.defaultMetricValue, nil
 	}
 
-	// For now, return default values - the actual implementation would query Prometheus
-	// The PrometheusClient already has the infrastructure for this
-	return h.defaultMetricValue, nil
+	// Use the Prometheus client's Query method
+	value, err := h.prometheusClient.Query(ctx, query)
+	if err != nil {
+		return h.defaultMetricValue, err
+	}
+
+	return value, nil
+}
+
+// queryPromQLWithDefault executes a PromQL query and returns a default value on error
+func (h *AnomalyHandler) queryPromQLWithDefault(ctx context.Context, query string, defaultValue float64) float64 {
+	value, err := h.queryPromQL(ctx, query)
+	if err != nil {
+		h.log.WithError(err).WithField("query", query).Debug("PromQL query failed, using default value")
+		return defaultValue
+	}
+	return value
 }
 
 // getDefaultFeatures returns a default 45-feature vector
@@ -433,15 +442,15 @@ func (h *AnomalyHandler) getDefaultFeatures() []float64 {
 	features := make([]float64, 45)
 	for i := 0; i < 5; i++ { // 5 metrics
 		baseIdx := i * 9
-		features[baseIdx+0] = 0.5  // value
-		features[baseIdx+1] = 0.5  // mean_5m
-		features[baseIdx+2] = 0.1  // std_5m
-		features[baseIdx+3] = 0.3  // min_5m
-		features[baseIdx+4] = 0.7  // max_5m
-		features[baseIdx+5] = 0.5  // lag_1
-		features[baseIdx+6] = 0.5  // lag_5
-		features[baseIdx+7] = 0.0  // diff
-		features[baseIdx+8] = 0.0  // pct_change
+		features[baseIdx+0] = 0.5 // value
+		features[baseIdx+1] = 0.5 // mean_5m
+		features[baseIdx+2] = 0.1 // std_5m
+		features[baseIdx+3] = 0.3 // min_5m
+		features[baseIdx+4] = 0.7 // max_5m
+		features[baseIdx+5] = 0.5 // lag_1
+		features[baseIdx+6] = 0.5 // lag_5
+		features[baseIdx+7] = 0.0 // diff
+		features[baseIdx+8] = 0.0 // pct_change
 	}
 	return features
 }
@@ -474,7 +483,7 @@ func (h *AnomalyHandler) getDefaultMetricsData() map[string]float64 {
 
 // buildAnalysisResponse builds the anomaly analysis response from model predictions
 func (h *AnomalyHandler) buildAnalysisResponse(
-	req AnomalyAnalyzeRequest,
+	req *AnomalyAnalyzeRequest,
 	resp *kserve.DetectResponse,
 	features []float64,
 	metricsData map[string]float64,
@@ -638,7 +647,7 @@ func (h *AnomalyHandler) recommendAction(metrics map[string]float64, severity st
 }
 
 // buildScope builds the scope description
-func (h *AnomalyHandler) buildScope(req AnomalyAnalyzeRequest) AnomalyScope {
+func (h *AnomalyHandler) buildScope(req *AnomalyAnalyzeRequest) AnomalyScope {
 	var description string
 	switch {
 	case req.Pod != "":
