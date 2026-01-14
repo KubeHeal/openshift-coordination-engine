@@ -219,6 +219,24 @@ func main() {
 	capacityHandler.RegisterRoutes(router)
 	log.Info("Capacity API endpoints registered: /api/v1/capacity/namespace/{namespace}, /api/v1/capacity/cluster")
 
+	// Anomaly analysis endpoints (Issue #30)
+	var anomalyHandler *v1.AnomalyHandler
+	if kserveProxyHandler != nil {
+		anomalyHandler = v1.NewAnomalyHandler(
+			kserveProxyHandler.GetProxyClient(),
+			prometheusClient,
+			log,
+		)
+	} else {
+		anomalyHandler = v1.NewAnomalyHandler(
+			nil, // No KServe client
+			prometheusClient,
+			log,
+		)
+	}
+	anomalyHandler.RegisterRoutes(router)
+	log.Info("Anomaly analysis API endpoint registered: POST /api/v1/anomalies/analyze")
+
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
 		kserveProxyHandler.RegisterRoutes(router)
