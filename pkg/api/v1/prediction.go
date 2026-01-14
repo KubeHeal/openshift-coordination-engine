@@ -211,13 +211,22 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 	var cpuPercent, memoryPercent, confidence float64
 	var modelVersion string
 
-	if resp.Type == "forecast" && resp.ForecastResponse != nil {
+	switch resp.Type {
+	case "forecast":
+		if resp.ForecastResponse == nil {
+			h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Empty forecast response from model", ErrCodePredictionFailed)
+			return
+		}
 		cpuPercent, memoryPercent, confidence = h.processForecastPredictions(resp.ForecastResponse, cpuRollingMean, memoryRollingMean)
 		modelVersion = resp.ForecastResponse.ModelVersion
-	} else if resp.AnomalyResponse != nil {
+	case "anomaly":
+		if resp.AnomalyResponse == nil {
+			h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Empty anomaly response from model", ErrCodePredictionFailed)
+			return
+		}
 		cpuPercent, memoryPercent, confidence = h.processAnomalyPredictions(resp.AnomalyResponse, cpuRollingMean, memoryRollingMean)
 		modelVersion = resp.AnomalyResponse.ModelVersion
-	} else {
+	default:
 		h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Unknown response format from model", ErrCodePredictionFailed)
 		return
 	}
