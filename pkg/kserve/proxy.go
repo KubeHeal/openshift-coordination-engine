@@ -69,9 +69,9 @@ type DetectRequest struct {
 	Instances [][]float64 `json:"instances"`
 }
 
-// DetectResponse represents the response from a KServe model prediction
+// DetectResponse represents the response from a KServe model prediction (anomaly-detector)
 type DetectResponse struct {
-	// Predictions contains the model predictions
+	// Predictions contains the model predictions (for anomaly-detector: []int)
 	Predictions []int `json:"predictions"`
 
 	// ModelName is the name of the model that made the prediction
@@ -79,6 +79,48 @@ type DetectResponse struct {
 
 	// ModelVersion is the version of the model
 	ModelVersion string `json:"model_version,omitempty"`
+}
+
+// ForecastResult contains the forecast data for a single metric
+type ForecastResult struct {
+	// Forecast contains the predicted values
+	Forecast []float64 `json:"forecast"`
+
+	// ForecastHorizon is the number of time periods forecasted
+	ForecastHorizon int `json:"forecast_horizon"`
+
+	// Confidence contains the confidence scores for each forecast value
+	Confidence []float64 `json:"confidence"`
+}
+
+// ForecastResponse represents the response from the predictive-analytics KServe model
+type ForecastResponse struct {
+	// Predictions contains forecasts per metric (cpu_usage, memory_usage)
+	Predictions map[string]ForecastResult `json:"predictions"`
+
+	// ModelName is the name of the model that made the prediction
+	ModelName string `json:"model_name"`
+
+	// ModelVersion is the version of the model
+	ModelVersion string `json:"model_version,omitempty"`
+
+	// Timestamp when the prediction was generated
+	Timestamp string `json:"timestamp,omitempty"`
+
+	// LookbackWindow is the number of hours of historical data used
+	LookbackWindow int `json:"lookback_window,omitempty"`
+}
+
+// ModelResponse is a flexible response type that can hold either DetectResponse or ForecastResponse
+type ModelResponse struct {
+	// Type indicates the response type: "anomaly" or "forecast"
+	Type string
+
+	// AnomalyResponse holds anomaly detection results (for anomaly-detector model)
+	AnomalyResponse *DetectResponse
+
+	// ForecastResponse holds forecast results (for predictive-analytics model)
+	ForecastResponse *ForecastResponse
 }
 
 // ModelHealthResponse represents the health status of a KServe model
@@ -327,6 +369,185 @@ func (c *ProxyClient) Predict(ctx context.Context, modelName string, instances [
 		ModelName:    modelName,
 		ModelVersion: kserveResp.ModelVersion,
 	}, nil
+}
+
+// PredictFlexible calls a KServe model and returns a flexible response that handles
+// different model response formats (anomaly-detector vs predictive-analytics).
+// This method uses a type switch based on the model name to properly parse the response.
+func (c *ProxyClient) PredictFlexible(ctx context.Context, modelName string, instances [][]float64) (*ModelResponse, error) {
+	model, exists := c.GetModel(modelName)
+	if !exists {
+		return nil, &ModelNotFoundError{ModelName: modelName}
+	}
+
+	// Build KServe v1 request
+	kserveReq := map[string]interface{}{
+		"instances": instances,
+	}
+
+	jsonData, err := json.Marshal(kserveReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode request: %w", err)
+	}
+
+	// Build endpoint URL - KServe v1 protocol: /v1/models/<model>:predict
+	endpoint := fmt.Sprintf("%s/v1/models/model:predict", model.URL)
+
+	// Create HTTP request
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+
+	// Execute request
+	startTime := time.Now()
+	resp, err := c.httpClient.Do(httpReq)
+	duration := time.Since(startTime)
+
+	if err != nil {
+		c.log.WithFields(logrus.Fields{
+			"model":    modelName,
+			"endpoint": endpoint,
+			"duration": duration.Milliseconds(),
+		}).WithError(err).Error("KServe predict request failed")
+		return nil, &ModelUnavailableError{ModelName: modelName, Cause: err}
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			c.log.WithError(closeErr).Warn("Failed to close response body")
+		}
+	}()
+
+	// Log request
+	c.log.WithFields(logrus.Fields{
+		"model":    modelName,
+		"endpoint": endpoint,
+		"status":   resp.StatusCode,
+		"duration": duration.Milliseconds(),
+	}).Debug("KServe predict request completed")
+
+	// Check status code
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("model %s returned status %d, failed to read body: %w", modelName, resp.StatusCode, readErr)
+		}
+		return nil, fmt.Errorf("model %s returned status %d: %s", modelName, resp.StatusCode, string(bodyBytes))
+	}
+
+	// Read the response body for flexible parsing
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body from model %s: %w", modelName, err)
+	}
+
+	// Parse response based on model type
+	return c.parseModelResponse(modelName, bodyBytes)
+}
+
+// parseModelResponse parses the response body based on the model type
+func (c *ProxyClient) parseModelResponse(modelName string, body []byte) (*ModelResponse, error) {
+	switch modelName {
+	case "predictive-analytics":
+		return c.parseForecastResponse(modelName, body)
+	case "anomaly-detector":
+		return c.parseAnomalyResponse(modelName, body)
+	default:
+		// Try to detect the response type by attempting to parse both formats
+		return c.parseAutoDetectResponse(modelName, body)
+	}
+}
+
+// parseForecastResponse parses a predictive-analytics model response
+func (c *ProxyClient) parseForecastResponse(modelName string, body []byte) (*ModelResponse, error) {
+	var forecastResp struct {
+		Predictions    map[string]ForecastResult `json:"predictions"`
+		ModelName      string                    `json:"model_name,omitempty"`
+		ModelVersion   string                    `json:"model_version,omitempty"`
+		Timestamp      string                    `json:"timestamp,omitempty"`
+		LookbackWindow int                       `json:"lookback_window,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &forecastResp); err != nil {
+		return nil, fmt.Errorf("failed to decode forecast response from model %s: %w", modelName, err)
+	}
+
+	return &ModelResponse{
+		Type: "forecast",
+		ForecastResponse: &ForecastResponse{
+			Predictions:    forecastResp.Predictions,
+			ModelName:      modelName,
+			ModelVersion:   forecastResp.ModelVersion,
+			Timestamp:      forecastResp.Timestamp,
+			LookbackWindow: forecastResp.LookbackWindow,
+		},
+	}, nil
+}
+
+// parseAnomalyResponse parses an anomaly-detector model response
+func (c *ProxyClient) parseAnomalyResponse(modelName string, body []byte) (*ModelResponse, error) {
+	var anomalyResp struct {
+		Predictions  []int  `json:"predictions"`
+		ModelName    string `json:"model_name,omitempty"`
+		ModelVersion string `json:"model_version,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &anomalyResp); err != nil {
+		return nil, fmt.Errorf("failed to decode anomaly response from model %s: %w", modelName, err)
+	}
+
+	return &ModelResponse{
+		Type: "anomaly",
+		AnomalyResponse: &DetectResponse{
+			Predictions:  anomalyResp.Predictions,
+			ModelName:    modelName,
+			ModelVersion: anomalyResp.ModelVersion,
+		},
+	}, nil
+}
+
+// parseAutoDetectResponse tries to detect and parse the response format automatically
+func (c *ProxyClient) parseAutoDetectResponse(modelName string, body []byte) (*ModelResponse, error) {
+	// First, try to unmarshal into a generic map to inspect the structure
+	var rawResp map[string]interface{}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response from model %s: %w", modelName, err)
+	}
+
+	predictions, exists := rawResp["predictions"]
+	if !exists {
+		return nil, fmt.Errorf("response from model %s missing 'predictions' field", modelName)
+	}
+
+	// Check if predictions is an array (anomaly-detector) or object (predictive-analytics)
+	switch predictions.(type) {
+	case []interface{}:
+		// Anomaly-detector format: predictions is an array
+		return c.parseAnomalyResponse(modelName, body)
+	case map[string]interface{}:
+		// Predictive-analytics format: predictions is a nested object
+		return c.parseForecastResponse(modelName, body)
+	default:
+		return nil, fmt.Errorf("unsupported predictions format from model %s", modelName)
+	}
+}
+
+// PredictForecast is a convenience method that calls PredictFlexible and returns only forecast responses.
+// Returns an error if the model does not return a forecast response.
+func (c *ProxyClient) PredictForecast(ctx context.Context, modelName string, instances [][]float64) (*ForecastResponse, error) {
+	resp, err := c.PredictFlexible(ctx, modelName, instances)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Type != "forecast" || resp.ForecastResponse == nil {
+		return nil, fmt.Errorf("model %s did not return a forecast response (got type: %s)", modelName, resp.Type)
+	}
+
+	return resp.ForecastResponse, nil
 }
 
 // CheckModelHealth checks if a specific KServe model is healthy
