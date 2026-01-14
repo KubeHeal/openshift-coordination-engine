@@ -224,20 +224,7 @@ func main() {
 	log.Info("Capacity API endpoints registered: /api/v1/capacity/namespace/{namespace}, /api/v1/capacity/cluster")
 
 	// Anomaly analysis endpoints (Issue #30)
-	var anomalyHandler *v1.AnomalyHandler
-	if kserveProxyHandler != nil {
-		anomalyHandler = v1.NewAnomalyHandler(
-			kserveProxyHandler.GetProxyClient(),
-			prometheusClient,
-			log,
-		)
-	} else {
-		anomalyHandler = v1.NewAnomalyHandler(
-			nil, // No KServe client
-			prometheusClient,
-			log,
-		)
-	}
+	anomalyHandler := initAnomalyHandler(kserveProxyHandler, prometheusClient, log)
 	anomalyHandler.RegisterRoutes(router)
 	log.Info("Anomaly analysis API endpoint registered: POST /api/v1/anomalies/analyze")
 
@@ -405,6 +392,26 @@ func initPrometheusClient(cfg *config.Config, log *logrus.Logger) *integrations.
 
 	log.WithField("prometheus_url", cfg.PrometheusURL).Info("Prometheus client initialized for metrics querying")
 	return client
+}
+
+// initAnomalyHandler creates the anomaly analysis handler (Issue #30)
+func initAnomalyHandler(
+	kserveProxyHandler *v1.KServeProxyHandler,
+	prometheusClient *integrations.PrometheusClient,
+	log *logrus.Logger,
+) *v1.AnomalyHandler {
+	if kserveProxyHandler != nil {
+		return v1.NewAnomalyHandler(
+			kserveProxyHandler.GetProxyClient(),
+			prometheusClient,
+			log,
+		)
+	}
+	return v1.NewAnomalyHandler(
+		nil, // No KServe client
+		prometheusClient,
+		log,
+	)
 }
 
 // initKubernetesClient creates both standard and dynamic Kubernetes clients
