@@ -461,9 +461,19 @@ func (c *ProxyClient) parseModelResponse(modelName string, body []byte) (*ModelR
 	}
 }
 
-// parseForecastResponse parses a predictive-analytics model response
+// parseForecastResponse parses predictive-analytics model responses.
+// Supports two formats for flexibility with different model architectures:
+//
+// Format 1 - Nested (custom wrapper output):
+//
+//	{"predictions": {"cpu_usage": {"forecast": [...], ...}, "memory_usage": {...}}}
+//
+// Format 2 - Array (standard sklearn multi-output):
+//
+//	{"predictions": [[cpu_value, memory_value], ...]}
 func (c *ProxyClient) parseForecastResponse(modelName string, body []byte) (*ModelResponse, error) {
-	var forecastResp struct {
+	// Try Format 1: Nested structure (custom wrapper or rich model output)
+	var nestedResp struct {
 		Predictions    map[string]ForecastResult `json:"predictions"`
 		ModelName      string                    `json:"model_name,omitempty"`
 		ModelVersion   string                    `json:"model_version,omitempty"`
@@ -471,18 +481,89 @@ func (c *ProxyClient) parseForecastResponse(modelName string, body []byte) (*Mod
 		LookbackWindow int                       `json:"lookback_window,omitempty"`
 	}
 
-	if err := json.Unmarshal(body, &forecastResp); err != nil {
-		return nil, fmt.Errorf("failed to decode forecast response from model %s: %w", modelName, err)
+	if err := json.Unmarshal(body, &nestedResp); err == nil &&
+		nestedResp.Predictions != nil && len(nestedResp.Predictions) > 0 {
+		c.log.WithFields(logrus.Fields{
+			"model":  modelName,
+			"format": "nested",
+		}).Debug("Parsed forecast response in nested format")
+		return &ModelResponse{
+			Type: "forecast",
+			ForecastResponse: &ForecastResponse{
+				Predictions:    nestedResp.Predictions,
+				ModelName:      modelName,
+				ModelVersion:   nestedResp.ModelVersion,
+				Timestamp:      nestedResp.Timestamp,
+				LookbackWindow: nestedResp.LookbackWindow,
+			},
+		}, nil
+	}
+
+	// Fallback to Format 2: Array structure (sklearn multi-output)
+	var arrayResp struct {
+		Predictions  [][]float64 `json:"predictions"`
+		ModelName    string      `json:"model_name,omitempty"`
+		ModelVersion string      `json:"model_version,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &arrayResp); err != nil {
+		return nil, fmt.Errorf("failed to parse forecast response from model %s: %w", modelName, err)
+	}
+
+	// Convert array format to nested format
+	// Convention: [0] = CPU, [1] = Memory (per model metadata)
+	predictions := make(map[string]ForecastResult)
+
+	if len(arrayResp.Predictions) > 0 && len(arrayResp.Predictions[0]) >= 2 {
+		cpuForecasts := make([]float64, len(arrayResp.Predictions))
+		memForecasts := make([]float64, len(arrayResp.Predictions))
+
+		for i, pred := range arrayResp.Predictions {
+			cpuForecasts[i] = pred[0]
+			memForecasts[i] = pred[1]
+		}
+
+		predictions["cpu_usage"] = ForecastResult{
+			Forecast:        cpuForecasts,
+			ForecastHorizon: len(cpuForecasts),
+			Confidence:      []float64{0.85}, // Default confidence for sklearn models
+		}
+		predictions["memory_usage"] = ForecastResult{
+			Forecast:        memForecasts,
+			ForecastHorizon: len(memForecasts),
+			Confidence:      []float64{0.85},
+		}
+
+		c.log.WithFields(logrus.Fields{
+			"model":       modelName,
+			"format":      "array_converted",
+			"num_samples": len(arrayResp.Predictions),
+		}).Debug("Converted array forecast to nested format")
+	} else if len(arrayResp.Predictions) > 0 && len(arrayResp.Predictions[0]) == 1 {
+		// Handle single-output models (just CPU or a single metric)
+		forecasts := make([]float64, len(arrayResp.Predictions))
+		for i, pred := range arrayResp.Predictions {
+			forecasts[i] = pred[0]
+		}
+		predictions["forecast"] = ForecastResult{
+			Forecast:        forecasts,
+			ForecastHorizon: len(forecasts),
+			Confidence:      []float64{0.85},
+		}
+
+		c.log.WithFields(logrus.Fields{
+			"model":       modelName,
+			"format":      "array_single_converted",
+			"num_samples": len(arrayResp.Predictions),
+		}).Debug("Converted single-output array forecast to nested format")
 	}
 
 	return &ModelResponse{
 		Type: "forecast",
 		ForecastResponse: &ForecastResponse{
-			Predictions:    forecastResp.Predictions,
-			ModelName:      modelName,
-			ModelVersion:   forecastResp.ModelVersion,
-			Timestamp:      forecastResp.Timestamp,
-			LookbackWindow: forecastResp.LookbackWindow,
+			Predictions:  predictions,
+			ModelName:    modelName,
+			ModelVersion: arrayResp.ModelVersion,
 		},
 	}, nil
 }
@@ -522,10 +603,18 @@ func (c *ProxyClient) parseAutoDetectResponse(modelName string, body []byte) (*M
 		return nil, fmt.Errorf("response from model %s missing 'predictions' field", modelName)
 	}
 
-	// Check if predictions is an array (anomaly-detector) or object (predictive-analytics)
-	switch predictions.(type) {
+	// Check if predictions is an array or object
+	switch pred := predictions.(type) {
 	case []interface{}:
-		// Anomaly-detector format: predictions is an array
+		// Could be anomaly-detector (array of ints) or sklearn forecast (array of arrays)
+		if len(pred) > 0 {
+			// Check if it's an array of arrays (sklearn multi-output forecast)
+			if _, isArray := pred[0].([]interface{}); isArray {
+				// Array of arrays format: [[cpu, mem], ...] -> forecast
+				return c.parseForecastResponse(modelName, body)
+			}
+		}
+		// Simple array format: [0, 1, 0, ...] -> anomaly-detector
 		return c.parseAnomalyResponse(modelName, body)
 	case map[string]interface{}:
 		// Predictive-analytics format: predictions is a nested object
