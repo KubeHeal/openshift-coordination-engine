@@ -1742,7 +1742,7 @@ func (c *PrometheusClient) buildAnomalyQueries(namespace, pod, deployment string
 	}
 
 	return map[string]string{
-		"node_cpu_utilization": `avg(1 - rate(node_cpu_seconds_total{mode="idle"}[5m]))`,
+		"node_cpu_utilization":    `avg(1 - rate(node_cpu_seconds_total{mode="idle"}[5m]))`,
 		"node_memory_utilization": `1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`,
 		"pod_cpu_usage": fmt.Sprintf(
 			`sum(rate(container_cpu_usage_seconds_total{container!=""%s}[5m]))`,
