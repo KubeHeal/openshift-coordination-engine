@@ -196,6 +196,7 @@ func main() {
 	apiV1.HandleFunc("/remediation/trigger", remediationHandler.TriggerRemediation).Methods("POST")
 	apiV1.HandleFunc("/workflows/{id}", remediationHandler.GetWorkflow).Methods("GET")
 	apiV1.HandleFunc("/incidents", remediationHandler.ListIncidents).Methods("GET")
+	apiV1.HandleFunc("/incidents", remediationHandler.CreateIncident).Methods("POST")
 
 	// Recommendations endpoint (ML-powered remediation predictions)
 	apiV1.HandleFunc("/recommendations", recommendationsHandler.GetRecommendations).Methods("POST")
