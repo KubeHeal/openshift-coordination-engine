@@ -1,0 +1,134 @@
+# CODEOWNERS - Code Ownership and Automatic Review Assignment
+#
+# This file defines code ownership for the OpenShift Coordination Engine.
+# When a pull request modifies files in these paths, the specified owners
+# are automatically assigned as reviewers.
+#
+# Syntax: /path/to/files @username1 @username2
+#
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Note: As collaborators join the project, add them to relevant sections
+# based on their areas of expertise.
+
+# ==============================================================================
+# Default Owner
+# ==============================================================================
+# Applies to all files unless a more specific rule matches below
+*       @tosin2013
+
+# ==============================================================================
+# Core Code Areas
+# ==============================================================================
+
+# Deployment and layer detection logic (ADR-002, ADR-003, ADR-012)
+/internal/detector/            @tosin2013
+
+# Multi-layer coordination orchestration (ADR-003)
+/internal/coordination/        @tosin2013
+
+# Remediation strategies and execution (ADR-005)
+/internal/remediation/         @tosin2013
+
+# External service integrations (ArgoCD, MCO, ML service) (ADR-004, ADR-009)
+/internal/integrations/        @tosin2013
+
+# REST API handlers (ADR-011)
+/pkg/api/                      @tosin2013
+
+# Data models and types
+/pkg/models/                   @tosin2013
+
+# Main application entry point
+/cmd/coordination-engine/      @tosin2013
+
+# ==============================================================================
+# Infrastructure and Deployment
+# ==============================================================================
+
+# GitHub Actions workflows (CI/CD)
+/.github/workflows/            @tosin2013
+
+# Helm chart configuration (ADR-006)
+/charts/                       @tosin2013
+
+# Docker configuration
+/Dockerfile                    @tosin2013
+/.dockerignore                 @tosin2013
+
+# Kubernetes manifests (if any)
+/deploy/                       @tosin2013
+
+# ==============================================================================
+# Documentation
+# ==============================================================================
+
+# Architectural Decision Records
+/docs/adrs/                    @tosin2013
+
+# API contract specification (critical for MCP integration)
+/API-CONTRACT.md               @tosin2013
+
+# Development and contribution guides
+/DEVELOPMENT.md                @tosin2013
+/CONTRIBUTING.md               @tosin2013
+
+# Claude Code instructions
+/CLAUDE.md                     @tosin2013
+
+# GitHub setup guide
+/GITHUB-SETUP.md               @tosin2013
+
+# Migration guide
+/MIGRATION-GUIDE.md            @tosin2013
+
+# ==============================================================================
+# Build and Configuration
+# ==============================================================================
+
+# Makefile and build scripts
+/Makefile                      @tosin2013
+/scripts/                      @tosin2013
+
+# Go modules and dependencies
+/go.mod                        @tosin2013
+/go.sum                        @tosin2013
+
+# ==============================================================================
+# Testing
+# ==============================================================================
+
+# Unit tests (co-located with source, but explicit ownership)
+# Note: Covered by individual /internal/* rules above
+
+# Integration tests
+/tests/integration/            @tosin2013
+
+# End-to-end tests
+/tests/e2e/                    @tosin2013
+
+# Test utilities and mocks
+/tests/testutils/              @tosin2013
+
+# ==============================================================================
+# Future Collaboration Areas
+# ==============================================================================
+# As collaborators join, add them to specific areas:
+#
+# Example for ML integration specialist:
+# /internal/integrations/ml_*  @tosin2013 @ml-specialist
+# /docs/adrs/009-*             @tosin2013 @ml-specialist
+# /docs/adrs/012-*             @tosin2013 @ml-specialist
+#
+# Example for ArgoCD integration specialist:
+# /internal/integrations/argocd_*  @tosin2013 @argocd-specialist
+# /internal/remediation/argocd_*   @tosin2013 @argocd-specialist
+# /docs/adrs/004-*                 @tosin2013 @argocd-specialist
+#
+# Example for API specialist:
+# /pkg/api/                    @tosin2013 @api-specialist
+# /API-CONTRACT.md             @tosin2013 @api-specialist
+#
+# Example for documentation specialist:
+# /docs/                       @tosin2013 @docs-specialist
+# *.md                         @tosin2013 @docs-specialist

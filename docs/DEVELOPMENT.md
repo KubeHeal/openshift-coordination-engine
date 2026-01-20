@@ -437,7 +437,202 @@ curl -k https://argocd-server/api/v1/applications
 6. Commit with sign-off: `git commit -s -m "feat: add deployment detector"`
 7. Open PR with description and ADR references
 
+For a comprehensive contributing guide, see [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Pull Request Review Process
+
+All changes to protected branches (`main`, `release-*`) must go through the pull request review process. See [ADR-013](adrs/013-github-branch-protection-collaboration.md) for complete branch protection strategy.
+
+### Creating a Pull Request
+
+1. **Sync with upstream**:
+   ```bash
+   git checkout main
+   git pull upstream main
+   ```
+
+2. **Create feature branch**:
+   ```bash
+   git checkout -b feat/your-feature-name
+   # Or: fix/bug-name, docs/doc-update, refactor/code-cleanup
+   ```
+
+3. **Make changes and commit** (with DCO sign-off):
+   ```bash
+   git add .
+   git commit -s -m "feat(detector): add KServe deployment detection"
+   ```
+
+4. **Push to your fork**:
+   ```bash
+   git push origin feat/your-feature-name
+   ```
+
+5. **Open PR on GitHub**:
+   ```bash
+   gh pr create --title "feat(detector): add KServe deployment detection" \
+     --body "Adds detection for KServe-deployed models. Fixes #123"
+   ```
+
+### PR Requirements Checklist
+
+Before your PR can be merged, ensure:
+
+- ✅ **DCO sign-off**: All commits signed with `git commit -s`
+- ✅ **Conventional commits**: Title follows `type(scope): description` format
+- ✅ **CI checks pass**: Lint, Test, Build, Security Scan all green
+- ✅ **Code owner approval**: At least 1 approval from code owners
+- ✅ **Conversations resolved**: All review comments addressed
+- ✅ **Tests included**: Unit tests for new code (>80% coverage)
+- ✅ **Documentation updated**: README, ADRs, or this guide if applicable
+- ✅ **No merge conflicts**: Branch rebased on latest main if needed
+
+### Review Process Flow
+
+1. **PR created** → Code owners auto-assigned via CODEOWNERS
+2. **CI checks run** → Lint, Test, Build, Security Scan (4-5 minutes)
+3. **Review SLA** → Reviewers respond within 24-48 hours
+4. **Feedback addressed** → Author makes changes, pushes new commits
+5. **Re-review** → New commits dismiss previous approvals
+6. **Approval granted** → Once all requirements met
+7. **Merge** → Maintainer merges using squash and merge
+
+### Addressing Review Feedback
+
+**Respond to all review comments**:
+- If you made the requested change: `"Done in abc123"`
+- If you disagree: `"I kept X because Y. What do you think?"`
+- If you need clarification: `"Can you elaborate on Z?"`
+
+**Push new commits** (don't force push during review):
+```bash
+git add .
+git commit -s -m "fix(detector): address review feedback"
+git push origin feat/your-feature-name
+```
+
+**Resolve conversations** after addressing:
+- Go to "Files changed" tab in PR
+- Click "Resolve conversation" on addressed comments
+
+### Code Owner Expectations
+
+Code owners are automatically assigned based on `.github/CODEOWNERS`:
+
+| Path | Owner(s) |
+|------|----------|
+| `/internal/detector/` | @tosin2013 |
+| `/internal/coordination/` | @tosin2013 |
+| `/internal/remediation/` | @tosin2013 |
+| `/internal/integrations/` | @tosin2013 |
+| `/pkg/api/` | @tosin2013 |
+| `/docs/adrs/` | @tosin2013 |
+| `/.github/workflows/` | @tosin2013 |
+
+**Code owners will review for**:
+- Adherence to Go conventions (ADR-001)
+- Test coverage (>80% required)
+- Security considerations (no SQL injection, XSS, etc.)
+- Error handling and logging
+- Documentation completeness
+
+### Merge Strategy
+
+The repository uses **squash and merge** by default:
+
+**Squash and Merge (Default)**:
+```
+Your branch:  feat(api): add endpoint A
+              feat(api): add endpoint B
+              fix(api): fix typo
+
+Main after merge: feat(api): add endpoints A and B (#123)
+```
+
+Benefits:
+- Clean, linear history on main
+- PR description preserved in squash commit body
+- Easy to revert entire feature
+
+**Rebase and Merge (Allowed)**:
+- For single-commit PRs or meaningful commit history
+- Maintains linear history without squash
+
+**Merge Commits (Disabled)**:
+- Not allowed to prevent merge commit noise
+
+### Syncing Your Branch
+
+If your branch falls behind main:
+
+```bash
+# Fetch latest from upstream
+git fetch upstream
+
+# Rebase your branch on main
+git checkout feat/your-feature-name
+git rebase upstream/main
+
+# Resolve any conflicts, then push
+git push origin feat/your-feature-name --force-with-lease
+```
+
+### Common PR Issues
+
+**DCO check failing**:
+```bash
+# Amend last commit with sign-off
+git commit --amend --signoff
+git push origin feat/your-feature-name --force
+```
+
+**CI checks failing**:
+```bash
+# Run CI checks locally
+make ci  # Runs lint + test + build
+
+# Fix formatting
+make fmt
+
+# Re-run specific checks
+make lint
+make test
+make coverage
+```
+
+**Merge blocked - conversations not resolved**:
+- Go to "Files changed" tab
+- Find comments with 🔵 (unresolved)
+- Reply and click "Resolve conversation"
+
+**Branch out of date**:
+```bash
+# Update branch with latest main
+git checkout feat/your-feature-name
+git fetch upstream
+git rebase upstream/main
+git push origin feat/your-feature-name --force-with-lease
+```
+
+### PR Size Guidelines
+
+Keep PRs focused and reviewable:
+
+- ✅ **< 200 lines**: Ideal - quick review
+- ⚠️ **200-400 lines**: Acceptable - may take longer
+- ❌ **> 400 lines**: Too large - split into multiple PRs
+
+**Exceptions**: Generated code, large refactoring (discuss first), test additions
+
+### Escalation
+
+If a PR is blocked or needs urgent attention:
+
+1. **Comment on PR**: Tag reviewers with `@username`
+2. **Check review SLA**: Reviewers should respond within 24-48 hours
+3. **Reach out**: Contact maintainers if SLA exceeded
+
 ---
 
-**Need help?** Check the platform repo's troubleshooting guide or reach out to the platform team.
+**Need help?** Check the platform repo's troubleshooting guide, see [CONTRIBUTING.md](../CONTRIBUTING.md), or reach out to the platform team.
 
