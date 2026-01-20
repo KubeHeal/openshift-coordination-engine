@@ -24,6 +24,7 @@ These ADRs define the **Go implementation** of the coordination engine:
 | [009](009-python-ml-integration.md) | Python ML Service Integration | ACCEPTED | HTTP client for Python ML/AI service (anomaly detection, predictions) |
 | [011](011-mcp-server-integration.md) | MCP Server Integration | ACCEPTED | REST API contract for MCP server integration |
 | [012](012-ml-enhanced-layer-detection.md) | ML-Enhanced Layer Detection | ACCEPTED | ML-enhanced layer detection with confidence scores (Phase 6) |
+| [013](013-github-branch-protection-collaboration.md) | GitHub Branch Protection and Collaboration Workflow | ACCEPTED | Branch protection rules, code ownership, and contribution guidelines |
 
 **Note on numbering**: ADR-007, ADR-008, and ADR-010 are reserved numbers. These were initially planned for additional decisions but were either integrated into existing ADRs or deemed unnecessary. The numbers are kept reserved to maintain sequential reference integrity.
 
@@ -87,14 +88,15 @@ If you're new to the coordination engine, read ADRs in this order:
 
 1. **[Platform ADR-042](../../openshift-aiops-platform/docs/adrs/042-go-based-coordination-engine.md)** - Overall architecture and context
 2. **[ADR-001](001-go-project-architecture.md)** - Go standards and project layout
-3. **[ADR-011](011-mcp-server-integration.md)** - REST API contract (how MCP server calls us)
-4. **[ADR-002](002-deployment-detection-implementation.md)** - Deployment method detection
-5. **[ADR-003](003-multi-layer-coordination-implementation.md)** - Multi-layer coordination logic
-6. **[ADR-005](005-remediation-strategies-implementation.md)** - Remediation strategies
-7. **[ADR-004](004-argocd-mco-integration.md)** - ArgoCD and MCO integration
-8. **[ADR-006](006-rbac-kubernetes-client-configuration.md)** - Kubernetes client and RBAC
-9. **[ADR-009](009-python-ml-integration.md)** - Python ML service integration
-10. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection (builds on ADR-003 and ADR-009)
+3. **[ADR-013](013-github-branch-protection-collaboration.md)** - Branch protection and collaboration workflow
+4. **[ADR-011](011-mcp-server-integration.md)** - REST API contract (how MCP server calls us)
+5. **[ADR-002](002-deployment-detection-implementation.md)** - Deployment method detection
+6. **[ADR-003](003-multi-layer-coordination-implementation.md)** - Multi-layer coordination logic
+7. **[ADR-005](005-remediation-strategies-implementation.md)** - Remediation strategies
+8. **[ADR-004](004-argocd-mco-integration.md)** - ArgoCD and MCO integration
+9. **[ADR-006](006-rbac-kubernetes-client-configuration.md)** - Kubernetes client and RBAC
+10. **[ADR-009](009-python-ml-integration.md)** - Python ML service integration
+11. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection (builds on ADR-003 and ADR-009)
 
 ### For Platform Understanding
 
@@ -212,7 +214,7 @@ See: [ADR-009](009-python-ml-integration.md)
 
 When creating new ADRs:
 1. Follow the [ADR template](https://github.com/joelparkerhenderson/architecture-decision-record)
-2. Number ADRs sequentially (next: ADR-013; skip reserved numbers 007, 008, 010)
+2. Number ADRs sequentially (next: ADR-014; skip reserved numbers 007, 008, 010)
 3. Reference platform ADRs where applicable
 4. Update this README with the new ADR in index table, relationship diagram, and reading order
 5. Add cross-references in "Related ADRs" section
@@ -227,4 +229,4 @@ When creating new ADRs:
 
 ---
 
-*Last Updated: 2025-12-20*
+*Last Updated: 2026-01-20*
