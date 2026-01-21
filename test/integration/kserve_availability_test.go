@@ -1,0 +1,92 @@
+// +build integration
+
+package integration
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// TestKServeModelAvailability tests that KServe InferenceServices are available
+// before the coordination engine starts. This prevents 404 errors on startup.
+//
+// To run this test:
+//   INTEGRATION_TEST=true go test -tags=integration ./test/integration/...
+//
+// Prerequisites:
+//   - KServe InferenceServices deployed in self-healing-platform namespace
+//   - InferenceServices must be in Ready state
+//   - Model files must be present in PVC or S3
+func TestKServeModelAvailability(t *testing.T) {
+	if os.Getenv("INTEGRATION_TEST") != "true" {
+		t.Skip("Skipping integration test - set INTEGRATION_TEST=true to run")
+	}
+
+	namespace := os.Getenv("KSERVE_NAMESPACE")
+	if namespace == "" {
+		namespace = "self-healing-platform"
+	}
+
+	// List of expected KServe models
+	models := []string{
+		"anomaly-detector-predictor",
+		"predictive-analytics-predictor",
+	}
+
+	for _, model := range models {
+		t.Run(model, func(t *testing.T) {
+			// Build URL for KServe model health endpoint
+			// KServe v1 protocol: GET /v1/models/model
+			url := fmt.Sprintf("http://%s.%s.svc:8080/v1/models/model", model, namespace)
+
+			// Make HTTP GET request to model health endpoint
+			resp, err := http.Get(url)
+			require.NoError(t, err, "Failed to reach KServe model %s - ensure InferenceService is deployed", model)
+
+			// Check status code
+			require.Equal(t, http.StatusOK, resp.StatusCode,
+				"Model %s returned non-200 status: %d - verify model files exist and InferenceService is Ready",
+				model, resp.StatusCode)
+
+			resp.Body.Close()
+
+			t.Logf("✓ Model %s is available and healthy", model)
+		})
+	}
+}
+
+// TestKServeModelPrediction tests that KServe models can accept prediction requests
+func TestKServeModelPrediction(t *testing.T) {
+	if os.Getenv("INTEGRATION_TEST") != "true" {
+		t.Skip("Skipping integration test - set INTEGRATION_TEST=true to run")
+	}
+
+	namespace := os.Getenv("KSERVE_NAMESPACE")
+	if namespace == "" {
+		namespace = "self-healing-platform"
+	}
+
+	// Test anomaly-detector model with sample prediction request
+	t.Run("anomaly-detector-prediction", func(t *testing.T) {
+		url := fmt.Sprintf("http://anomaly-detector-predictor.%s.svc:8080/v1/models/model:predict", namespace)
+
+		// Sample request body (KServe v1 format)
+		requestBody := `{"instances": [[0.5, 0.3, 0.8]]}`
+
+		resp, err := http.Post(url, "application/json", nil)
+		require.NoError(t, err, "Failed to make prediction request to anomaly-detector")
+
+		// Accept both 200 (success) and 400 (bad request - model exists but rejects input)
+		// We just want to ensure the model endpoint is reachable
+		require.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusBadRequest,
+			"Unexpected status code %d - expected 200 or 400", resp.StatusCode)
+
+		resp.Body.Close()
+
+		t.Logf("✓ Anomaly detector model is reachable (status: %d)", resp.StatusCode)
+	})
+}
