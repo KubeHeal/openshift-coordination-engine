@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -77,7 +78,7 @@ func TestKServeModelPrediction(t *testing.T) {
 		// Sample request body (KServe v1 format)
 		requestBody := `{"instances": [[0.5, 0.3, 0.8]]}`
 
-		resp, err := http.Post(url, "application/json", nil)
+		resp, err := http.Post(url, "application/json", strings.NewReader(requestBody))
 		require.NoError(t, err, "Failed to make prediction request to anomaly-detector")
 
 		// Accept both 200 (success) and 400 (bad request - model exists but rejects input)
