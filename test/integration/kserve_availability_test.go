@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +20,9 @@ import (
 // To run this test:
 //
 //	INTEGRATION_TEST=true go test -tags=integration ./test/integration/...
+//
+// Note: Set INTEGRATION_TEST=true environment variable to enable these tests.
+// The tests target in-cluster DNS (*.svc) which requires running inside a Kubernetes cluster.
 //
 // Prerequisites:
 //   - KServe InferenceServices deployed in self-healing-platform namespace
@@ -40,6 +44,11 @@ func TestKServeModelAvailability(t *testing.T) {
 		"predictive-analytics-predictor",
 	}
 
+	// Create HTTP client with timeout to prevent indefinite hangs
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			// Build URL for KServe model health endpoint
@@ -47,7 +56,7 @@ func TestKServeModelAvailability(t *testing.T) {
 			url := fmt.Sprintf("http://%s.%s.svc:8080/v1/models/model", model, namespace)
 
 			// Make HTTP GET request to model health endpoint
-			resp, err := http.Get(url)
+			resp, err := client.Get(url)
 			require.NoError(t, err, "Failed to reach KServe model %s - ensure InferenceService is deployed", model)
 			require.NotNil(t, resp, "Response should not be nil")
 			defer resp.Body.Close()
@@ -73,6 +82,11 @@ func TestKServeModelPrediction(t *testing.T) {
 		namespace = "self-healing-platform"
 	}
 
+	// Create HTTP client with timeout to prevent indefinite hangs
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
 	// Test anomaly-detector model with sample prediction request
 	t.Run("anomaly-detector-prediction", func(t *testing.T) {
 		url := fmt.Sprintf("http://anomaly-detector-predictor.%s.svc:8080/v1/models/model:predict", namespace)
@@ -80,7 +94,7 @@ func TestKServeModelPrediction(t *testing.T) {
 		// Sample request body (KServe v1 format)
 		requestBody := `{"instances": [[0.5, 0.3, 0.8]]}`
 
-		resp, err := http.Post(url, "application/json", strings.NewReader(requestBody))
+		resp, err := client.Post(url, "application/json", strings.NewReader(requestBody))
 		require.NoError(t, err, "Failed to make prediction request to anomaly-detector")
 		require.NotNil(t, resp, "Response should not be nil")
 		defer resp.Body.Close()
