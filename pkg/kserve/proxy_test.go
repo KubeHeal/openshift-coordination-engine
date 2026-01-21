@@ -1151,6 +1151,42 @@ func TestProxyClient_AutoDetect_ArrayOfArrays(t *testing.T) {
 	assert.Nil(t, result.AnomalyResponse)
 }
 
+func TestProxyClient_PredictFlexible_NotFound(t *testing.T) {
+	// Create mock server that returns 404 with body
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Model with name 'test-model' does not exist"))
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	_, err = client.PredictFlexible(context.Background(), "test-model", [][]float64{{0.1, 0.2}})
+
+	assert.Error(t, err)
+	// Verify the error includes the helpful 404 guidance
+	assert.Contains(t, err.Error(), "not found (HTTP 404)")
+	assert.Contains(t, err.Error(), "Backend response:")
+	assert.Contains(t, err.Error(), "Model with name 'test-model' does not exist")
+	assert.Contains(t, err.Error(), "kubectl get inferenceservice test-service")
+	assert.Contains(t, err.Error(), "kubectl get pod -l serving.kserve.io/inferenceservice=test-service")
+}
+
 func TestProxyClient_AutoDetect_SimpleArray(t *testing.T) {
 	// Test auto-detection correctly identifies simple array as anomaly
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

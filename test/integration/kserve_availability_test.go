@@ -21,8 +21,12 @@ import (
 //
 //	INTEGRATION_TEST=true go test -tags=integration ./test/integration/...
 //
+// IMPORTANT: These tests use in-cluster DNS (*.svc) which requires running INSIDE a Kubernetes cluster.
+// To run from outside the cluster, you have two options:
+//  1. Use port-forward: kubectl port-forward -n self-healing-platform svc/anomaly-detector-predictor 8080:8080
+//  2. Run tests from inside the cluster: kubectl run -it --rm test-runner --image=golang:1.21 -- bash
+//
 // Note: Set INTEGRATION_TEST=true environment variable to enable these tests.
-// The tests target in-cluster DNS (*.svc) which requires running inside a Kubernetes cluster.
 //
 // Prerequisites:
 //   - KServe InferenceServices deployed in self-healing-platform namespace
