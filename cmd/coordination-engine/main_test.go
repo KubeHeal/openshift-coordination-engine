@@ -23,6 +23,16 @@ func testConfig() *config.Config {
 		HTTPTimeout:     30 * time.Second,
 		KubernetesQPS:   50.0,
 		KubernetesBurst: 100,
+		KServe: config.KServeConfig{
+			Enabled:       false,
+			Namespace:     "test-kserve-ns",
+			PredictorPort: 8080,
+			Services: config.KServeServices{
+				AnomalyDetector:     "anomaly-detector-predictor",
+				PredictiveAnalytics: "predictive-analytics-predictor",
+			},
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -160,4 +170,34 @@ func TestInitKubernetesClient_ConfigSource(t *testing.T) {
 	// Verify that config was loaded from kubeconfig (not in-cluster)
 	// This is implicit - if we're running tests locally, we're not in a pod
 	assert.NotNil(t, clients.Config)
+}
+
+func TestVerifyKServeModelsOnStartup_KServeDisabled(t *testing.T) {
+	// Setup test logger
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// Create config with KServe disabled
+	cfg := testConfig()
+	cfg.KServe.Enabled = false
+
+	// Should return immediately without checking models
+	verifyKServeModelsOnStartup(cfg, nil, log)
+
+	// No assertions needed - we just verify it doesn't panic
+}
+
+func TestVerifyKServeModelsOnStartup_NilHandler(t *testing.T) {
+	// Setup test logger
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// Create config with KServe enabled
+	cfg := testConfig()
+	cfg.KServe.Enabled = true
+
+	// Should return immediately when handler is nil
+	verifyKServeModelsOnStartup(cfg, nil, log)
+
+	// No assertions needed - we just verify it doesn't panic
 }
