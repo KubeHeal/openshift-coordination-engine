@@ -106,6 +106,8 @@ env:
   - name: KSERVE_PREDICTOR_PORT
     value: "8080"  # KServe InferenceService predictors in RawDeployment mode listen on 8080
   # Service names follow pattern: {inferenceservice-name}-predictor
+  # NOTE: These service names are also listed in the kserve.models section below
+  # for the health check Job. Keep both sections synchronized.
   - name: KSERVE_ANOMALY_DETECTOR_SERVICE
     value: "anomaly-detector-predictor"  # From InferenceService: anomaly-detector
   - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
@@ -166,8 +168,12 @@ autoscaling:
 kserve:
   enabled: true
   namespace: "self-healing-platform"
+  # Configurable predictor port and health path
+  predictorPort: 8080
+  healthPath: "/v1/models/model"
   # List of KServe model services to health check before deployment
-  # These should match the KSERVE_*_SERVICE environment variables above
+  # NOTE: These should match the KSERVE_*_SERVICE environment variables in the env section above
+  # to ensure configuration consistency
   models:
     - "anomaly-detector-predictor"
     - "predictive-analytics-predictor"
