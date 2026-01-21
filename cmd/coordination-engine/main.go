@@ -139,29 +139,7 @@ func main() {
 	kserveProxyHandler := initKServeProxy(cfg, log)
 
 	// Verify KServe model availability on startup
-	if cfg.KServe.Enabled && kserveProxyHandler != nil {
-		log.Info("Verifying KServe model availability...")
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		modelsHealthy := true
-		for _, modelName := range kserveProxyHandler.GetProxyClient().ListModels() {
-			health, err := kserveProxyHandler.GetProxyClient().CheckModelHealth(ctx, modelName)
-			if err != nil || health.Status != "ready" {
-				log.WithFields(logrus.Fields{
-					"model": modelName,
-					"error": err,
-				}).Warn("KServe model not ready on startup - ML predictions will fail until models are deployed")
-				modelsHealthy = false
-			} else {
-				log.WithField("model", modelName).Info("KServe model is healthy and ready")
-			}
-		}
-
-		if !modelsHealthy {
-			log.Warn("Some KServe models are not ready. Deploy InferenceServices and ensure model files exist.")
-		}
-	}
+	verifyKServeModelsOnStartup(cfg, kserveProxyHandler, log)
 
 	// Create API handlers
 	healthHandler := v1.NewHealthHandler(log, k8sClients.Clientset, rbacVerifier, cfg.MLServiceURL, Version, startTime)
@@ -432,6 +410,36 @@ func initAnomalyHandler(
 		prometheusClient,
 		log,
 	)
+}
+
+// verifyKServeModelsOnStartup validates that KServe models are available at startup
+// This prevents the coordination engine from starting with unavailable ML models
+func verifyKServeModelsOnStartup(cfg *config.Config, kserveProxyHandler *v1.KServeProxyHandler, log *logrus.Logger) {
+	if !cfg.KServe.Enabled || kserveProxyHandler == nil {
+		return
+	}
+
+	log.Info("Verifying KServe model availability...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	modelsHealthy := true
+	for _, modelName := range kserveProxyHandler.GetProxyClient().ListModels() {
+		health, err := kserveProxyHandler.GetProxyClient().CheckModelHealth(ctx, modelName)
+		if err != nil || health.Status != "ready" {
+			log.WithFields(logrus.Fields{
+				"model": modelName,
+				"error": err,
+			}).Warn("KServe model not ready on startup - ML predictions will fail until models are deployed")
+			modelsHealthy = false
+		} else {
+			log.WithField("model", modelName).Info("KServe model is healthy and ready")
+		}
+	}
+
+	if !modelsHealthy {
+		log.Warn("Some KServe models are not ready. Deploy InferenceServices and ensure model files exist.")
+	}
 }
 
 // initKubernetesClient creates both standard and dynamic Kubernetes clients
