@@ -14,7 +14,6 @@ spec:
   activeDeadlineSeconds: 600
   template:
     spec:
-      serviceAccountName: {{ include "coordination-engine.serviceAccountName" . }}
       restartPolicy: OnFailure
       containers:
       - name: health-check
