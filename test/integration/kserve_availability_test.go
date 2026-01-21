@@ -68,7 +68,9 @@ func TestKServeModelAvailability(t *testing.T) {
 				require.NoError(t, err, "Failed to reach KServe model %s - ensure InferenceService is deployed", model)
 			}
 			require.NotNil(t, resp, "Response should not be nil")
-			defer resp.Body.Close()
+			if resp != nil {
+				defer resp.Body.Close()
+			}
 
 			// Check status code
 			require.Equal(t, http.StatusOK, resp.StatusCode,
@@ -115,7 +117,9 @@ func TestKServeModelPrediction(t *testing.T) {
 			require.NoError(t, err, "Failed to make prediction request to anomaly-detector")
 		}
 		require.NotNil(t, resp, "Response should not be nil")
-		defer resp.Body.Close()
+		if resp != nil {
+			defer resp.Body.Close()
+		}
 
 		// Accept both 200 (success) and 400 (bad request - model exists but rejects input)
 		// We just want to ensure the model endpoint is reachable
