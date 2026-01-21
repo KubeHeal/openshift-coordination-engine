@@ -237,7 +237,7 @@ kubectl run -it --rm curl --image=curlimages/curl -n self-healing-platform -- \
 
 **Troubleshooting 404 Errors:**
 
-If you see "Model with name model does not exist" errors:
+If you see "KServe model 'model' does not exist" errors:
 1. Check InferenceService status: `kubectl describe inferenceservice <name> -n self-healing-platform`
 2. Check pod logs: `kubectl logs -n self-healing-platform -l serving.kserve.io/inferenceservice=<name>`
 3. Verify model files exist in PVC or S3
