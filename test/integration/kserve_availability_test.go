@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package integration
@@ -16,7 +17,8 @@ import (
 // before the coordination engine starts. This prevents 404 errors on startup.
 //
 // To run this test:
-//   INTEGRATION_TEST=true go test -tags=integration ./test/integration/...
+//
+//	INTEGRATION_TEST=true go test -tags=integration ./test/integration/...
 //
 // Prerequisites:
 //   - KServe InferenceServices deployed in self-healing-platform namespace
