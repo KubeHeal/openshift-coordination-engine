@@ -426,7 +426,7 @@ func verifyKServeModelsOnStartup(cfg *config.Config, kserveProxyHandler *v1.KSer
 	modelsHealthy := true
 	for _, modelName := range kserveProxyHandler.GetProxyClient().ListModels() {
 		health, err := kserveProxyHandler.GetProxyClient().CheckModelHealth(ctx, modelName)
-		if err != nil || health.Status != "ready" {
+		if err != nil || health == nil || health.Status != "ready" {
 			log.WithFields(logrus.Fields{
 				"model": modelName,
 				"error": err,

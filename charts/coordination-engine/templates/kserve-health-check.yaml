@@ -6,7 +6,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "2"
-    argocd.argoproj.io/hook: PreSync
   labels:
     {{- include "coordination-engine.labels" . | nindent 4 }}
 spec:
@@ -23,13 +22,13 @@ spec:
         - -c
         - |
           KSERVE_NS="{{ .Values.kserve.namespace }}"
-          MODELS="anomaly-detector-predictor predictive-analytics-predictor"
+          MODELS="{{ join " " .Values.kserve.models }}"
 
           echo "Checking KServe model availability in namespace: $KSERVE_NS"
           for model in $MODELS; do
             MAX_RETRIES=30
             RETRY=0
-            until curl -sf http://$model.$KSERVE_NS.svc:8080/v1/models/model; do
+            until curl -f http://$model.$KSERVE_NS.svc:8080/v1/models/model 2>&1; do
               RETRY=$((RETRY+1))
               if [ $RETRY -ge $MAX_RETRIES ]; then
                 echo "ERROR: Model $model not ready after $MAX_RETRIES attempts"
