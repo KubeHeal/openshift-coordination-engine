@@ -6,10 +6,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
   labels:
     {{- include "coordination-engine.labels" . | nindent 4 }}
 spec:
   backoffLimit: 10
+  activeDeadlineSeconds: 600
   template:
     spec:
       serviceAccountName: {{ include "coordination-engine.serviceAccountName" . }}
@@ -22,13 +24,15 @@ spec:
         - -c
         - |
           KSERVE_NS="{{ .Values.kserve.namespace }}"
+          KSERVE_PORT="{{ .Values.kserve.predictorPort | default 8080 }}"
+          KSERVE_PATH="{{ .Values.kserve.healthPath | default "/v1/models/model" }}"
           MODELS="{{ join " " .Values.kserve.models }}"
 
           echo "Checking KServe model availability in namespace: $KSERVE_NS"
           for model in $MODELS; do
             MAX_RETRIES=30
             RETRY=0
-            until curl -f http://$model.$KSERVE_NS.svc:8080/v1/models/model 2>&1; do
+            until curl -f --connect-timeout 5 --max-time 10 http://$model.$KSERVE_NS.svc:$KSERVE_PORT$KSERVE_PATH 2>&1; do
               RETRY=$((RETRY+1))
               if [ $RETRY -ge $MAX_RETRIES ]; then
                 echo "ERROR: Model $model not ready after $MAX_RETRIES attempts"
