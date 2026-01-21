@@ -412,8 +412,10 @@ func initAnomalyHandler(
 	)
 }
 
-// verifyKServeModelsOnStartup validates that KServe models are available at startup
-// This prevents the coordination engine from starting with unavailable ML models
+// verifyKServeModelsOnStartup validates KServe model availability on startup and logs warnings
+// if models are not ready. This helps operators diagnose deployment issues early.
+// Note: This function logs warnings but does not prevent startup - the coordination engine
+// will continue to start even if models are unavailable, allowing it to serve other endpoints.
 func verifyKServeModelsOnStartup(cfg *config.Config, kserveProxyHandler *v1.KServeProxyHandler, log *logrus.Logger) {
 	if !cfg.KServe.Enabled || kserveProxyHandler == nil {
 		return
