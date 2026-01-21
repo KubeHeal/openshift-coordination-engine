@@ -347,6 +347,46 @@ func TestProxyClient_Predict_ServerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "status 500")
 }
 
+func TestProxyClient_Predict_NotFoundWithActionableGuidance(t *testing.T) {
+	// Create mock server that returns 404 with a backend message
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Model with name 'test-model' does not exist"))
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	_, err = client.Predict(context.Background(), "test-model", [][]float64{{0.1, 0.2}})
+
+	assert.Error(t, err)
+	// Verify the error contains the backend response body
+	assert.Contains(t, err.Error(), "Model with name 'test-model' does not exist")
+	// Verify the error contains actionable kubectl commands
+	assert.Contains(t, err.Error(), "kubectl get inferenceservice")
+	assert.Contains(t, err.Error(), "kubectl get pod")
+	assert.Contains(t, err.Error(), "test-service")
+	assert.Contains(t, err.Error(), "test-ns")
+	// Verify contextual help message
+	assert.Contains(t, err.Error(), "HTTP 404")
+	assert.Contains(t, err.Error(), "KServe InferenceService may not be deployed")
+}
+
 func TestProxyClient_CheckModelHealth(t *testing.T) {
 	// Create healthy mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1145,4 +1185,44 @@ func TestProxyClient_AutoDetect_SimpleArray(t *testing.T) {
 	assert.Equal(t, "anomaly", result.Type, "Simple array should be detected as anomaly")
 	require.NotNil(t, result.AnomalyResponse)
 	assert.Nil(t, result.ForecastResponse)
+}
+
+func TestProxyClient_PredictFlexible_NotFoundWithActionableGuidance(t *testing.T) {
+	// Create mock server that returns 404 with a backend message
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Model 'predictive-model' not found in namespace"))
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-model"] = &ModelInfo{
+		Name:        "predictive-model",
+		ServiceName: "predictive-service-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	_, err = client.PredictFlexible(context.Background(), "predictive-model", [][]float64{{0.5, 1.2}})
+
+	assert.Error(t, err)
+	// Verify the error contains the backend response body
+	assert.Contains(t, err.Error(), "Model 'predictive-model' not found in namespace")
+	// Verify the error contains actionable kubectl commands
+	assert.Contains(t, err.Error(), "kubectl get inferenceservice")
+	assert.Contains(t, err.Error(), "kubectl get pod")
+	assert.Contains(t, err.Error(), "predictive-service")
+	assert.Contains(t, err.Error(), "test-ns")
+	// Verify contextual help message
+	assert.Contains(t, err.Error(), "HTTP 404")
+	assert.Contains(t, err.Error(), "KServe InferenceService may not be deployed")
 }
