@@ -166,3 +166,8 @@ autoscaling:
 kserve:
   enabled: true
   namespace: "self-healing-platform"
+  # List of KServe model services to health check before deployment
+  # These should match the KSERVE_*_SERVICE environment variables above
+  models:
+    - "anomaly-detector-predictor"
+    - "predictive-analytics-predictor"
