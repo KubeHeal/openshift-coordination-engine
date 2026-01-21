@@ -172,7 +172,7 @@ func TestInitKubernetesClient_ConfigSource(t *testing.T) {
 	assert.NotNil(t, clients.Config)
 }
 
-func TestVerifyKServeModelsOnStartup_KServeDisabled(t *testing.T) {
+func TestVerifyKServeModelsOnStartup_KServeDisabled(_ *testing.T) {
 	// Setup test logger
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
@@ -187,7 +187,7 @@ func TestVerifyKServeModelsOnStartup_KServeDisabled(t *testing.T) {
 	// No assertions needed - we just verify it doesn't panic
 }
 
-func TestVerifyKServeModelsOnStartup_NilHandler(t *testing.T) {
+func TestVerifyKServeModelsOnStartup_NilHandler(_ *testing.T) {
 	// Setup test logger
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
