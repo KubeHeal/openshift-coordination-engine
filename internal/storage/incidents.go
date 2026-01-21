@@ -1,8 +1,12 @@
+
 // Package storage provides in-memory and persistent storage for coordination engine data.
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -16,13 +20,89 @@ import (
 type IncidentStore struct {
 	incidents map[string]*models.Incident
 	mu        sync.RWMutex
+	dataFile  string
 }
 
 // NewIncidentStore creates a new incident store
 func NewIncidentStore() *IncidentStore {
-	return &IncidentStore{
-		incidents: make(map[string]*models.Incident),
+	return NewIncidentStoreWithPath("")
+}
+
+// NewIncidentStoreWithPath creates a new incident store with a custom data path
+func NewIncidentStoreWithPath(dataDir string) *IncidentStore {
+	if dataDir == "" {
+		dataDir = os.Getenv("DATA_DIR")
 	}
+	if dataDir == "" {
+		dataDir = "/data"
+	}
+
+	store := &IncidentStore{
+		incidents: make(map[string]*models.Incident),
+		dataFile:  filepath.Join(dataDir, "incidents.json"),
+	}
+
+	// Load existing data from disk
+	if err := store.load(); err != nil {
+		fmt.Printf("Warning: Could not load incidents from disk: %v\n", err)
+	} else {
+		fmt.Printf("Loaded %d incidents from %s\n", len(store.incidents), store.dataFile)
+	}
+
+	return store
+}
+
+// load reads incidents from the JSON file
+func (s *IncidentStore) load() error {
+	data, err := os.ReadFile(s.dataFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // File doesn't exist yet, that's OK
+		}
+		return fmt.Errorf("failed to read data file: %w", err)
+	}
+
+	var incidents []*models.Incident
+	if err := json.Unmarshal(data, &incidents); err != nil {
+		return fmt.Errorf("failed to unmarshal incidents: %w", err)
+	}
+
+	for _, inc := range incidents {
+		s.incidents[inc.ID] = inc
+	}
+
+	return nil
+}
+
+// save writes all incidents to the JSON file
+func (s *IncidentStore) save() error {
+	// Ensure directory exists
+	dir := filepath.Dir(s.dataFile)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create data directory: %w", err)
+	}
+
+	incidents := make([]*models.Incident, 0, len(s.incidents))
+	for _, inc := range s.incidents {
+		incidents = append(incidents, inc)
+	}
+
+	data, err := json.MarshalIndent(incidents, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal incidents: %w", err)
+	}
+
+	// Write to temp file first, then rename (atomic)
+	tmpFile := s.dataFile + ".tmp"
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpFile, s.dataFile); err != nil {
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
 }
 
 // Create stores a new incident and returns the generated ID
@@ -53,6 +133,11 @@ func (s *IncidentStore) Create(incident *models.Incident) (*models.Incident, err
 	// Store incident
 	s.incidents[incident.ID] = incident
 
+	// Persist to disk
+	if err := s.save(); err != nil {
+		fmt.Printf("Warning: Failed to persist incident: %v\n", err)
+	}
+
 	return incident, nil
 }
 
@@ -81,6 +166,11 @@ func (s *IncidentStore) Update(incident *models.Incident) error {
 	incident.UpdatedAt = time.Now()
 	s.incidents[incident.ID] = incident
 
+	// Persist to disk
+	if err := s.save(); err != nil {
+		fmt.Printf("Warning: Failed to persist incident update: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -94,6 +184,12 @@ func (s *IncidentStore) Delete(id string) error {
 	}
 
 	delete(s.incidents, id)
+
+	// Persist to disk
+	if err := s.save(); err != nil {
+		fmt.Printf("Warning: Failed to persist incident deletion: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -117,10 +213,10 @@ func (s *IncidentStore) List(filter ListFilter) []*models.Incident {
 		if filter.Namespace != "" && incident.Target != filter.Namespace {
 			continue
 		}
-		if filter.Severity != "" && string(incident.Severity) != filter.Severity {
+		if filter.Severity != "" && filter.Severity != "all" && string(incident.Severity) != filter.Severity {
 			continue
 		}
-		if filter.Status != "" && string(incident.Status) != filter.Status {
+		if filter.Status != "" && filter.Status != "all" && string(incident.Status) != filter.Status {
 			continue
 		}
 

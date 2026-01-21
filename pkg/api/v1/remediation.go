@@ -284,12 +284,14 @@ func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Reques
 	query := r.URL.Query()
 	namespace := query.Get("namespace")
 	severity := query.Get("severity")
+	status := query.Get("status") 
 
 	// Get manually created incidents from the store
 	filter := storage.ListFilter{
 		Namespace: namespace,
 		Severity:  severity,
 		Limit:     50, // Default limit
+		Status:    status,
 	}
 	storedIncidents := h.incidentStore.List(filter)
 
