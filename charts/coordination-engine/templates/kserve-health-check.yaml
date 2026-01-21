@@ -6,7 +6,6 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     argocd.argoproj.io/sync-wave: "2"
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
   labels:
     {{- include "coordination-engine.labels" . | nindent 4 }}
 spec:
