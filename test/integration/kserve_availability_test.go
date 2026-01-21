@@ -59,6 +59,8 @@ func TestKServeModelAvailability(t *testing.T) {
 
 			// Make HTTP GET request to model health endpoint
 			resp, err := client.Get(url)
+
+			// Handle errors and nil response
 			if err != nil {
 				// Check if error is DNS lookup failure (KServe not deployed)
 				if strings.Contains(err.Error(), "no such host") {
@@ -66,7 +68,9 @@ func TestKServeModelAvailability(t *testing.T) {
 					return
 				}
 				require.NoError(t, err, "Failed to reach KServe model %s - ensure InferenceService is deployed", model)
+				return // Ensure we don't continue if error handling doesn't cause test failure
 			}
+
 			require.NotNil(t, resp, "Response should not be nil")
 			defer resp.Body.Close()
 
@@ -106,6 +110,8 @@ func TestKServeModelPrediction(t *testing.T) {
 		requestBody := `{"instances": [[0.5, 0.3, 0.8]]}`
 
 		resp, err := client.Post(url, "application/json", strings.NewReader(requestBody))
+
+		// Handle errors and nil response
 		if err != nil {
 			// Check if error is DNS lookup failure (KServe not deployed)
 			if strings.Contains(err.Error(), "no such host") {
@@ -113,7 +119,9 @@ func TestKServeModelPrediction(t *testing.T) {
 				return
 			}
 			require.NoError(t, err, "Failed to make prediction request to anomaly-detector")
+			return // Ensure we don't continue if error handling doesn't cause test failure
 		}
+
 		require.NotNil(t, resp, "Response should not be nil")
 		defer resp.Body.Close()
 
