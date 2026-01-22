@@ -74,7 +74,7 @@ test:
 ## test-integration: Run integration tests
 test-integration:
 	@echo "Running integration tests..."
-	@go test -v -tags=integration -timeout 10m ./test/integration/...
+	INTEGRATION_TEST=true go test -v -tags=integration -timeout 10m ./test/integration/...
 
 ## test-e2e: Run end-to-end tests
 test-e2e:

@@ -197,6 +197,52 @@ export KSERVE_PREDICTIVE_ANALYTICS_SERVICE=predictive-analytics-predictor
 
 **⚠️ Note**: `ML_SERVICE_URL` is deprecated. Use KServe integration instead (ADR-039).
 
+## Deployment Prerequisites
+
+### KServe Model Dependencies
+
+The coordination engine requires KServe InferenceServices to be deployed and healthy before starting.
+
+**1. Verify KServe InferenceServices exist:**
+```bash
+kubectl get inferenceservice -n self-healing-platform
+
+# Expected output:
+# NAME                    URL   READY   PREV   LATEST   AGE
+# anomaly-detector        ...   True    100           5m
+# predictive-analytics    ...   True    100           5m
+```
+
+**2. Verify InferenceService pods are running:**
+```bash
+kubectl get pods -n self-healing-platform -l serving.kserve.io/inferenceservice
+
+# Expected: All pods in Running state with 2/2 containers ready
+```
+
+**3. Verify model files are present:**
+- **PVC-based**: Ensure `model-storage-pvc` contains model subdirectories
+  ```bash
+  kubectl exec -n self-healing-platform deployment/model-uploader -- ls -la /models
+  ```
+- **S3-based**: Verify S3 bucket contains model artifacts
+
+**4. Test model endpoints manually:**
+```bash
+kubectl run -it --rm curl --image=curlimages/curl -n self-healing-platform -- \
+  curl http://predictive-analytics-predictor.self-healing-platform.svc:8080/v1/models/model
+
+# Expected: JSON response with model metadata
+```
+
+**Troubleshooting 404 Errors:**
+
+If you see "KServe model 'model' does not exist" errors:
+1. Check InferenceService status: `kubectl describe inferenceservice <name> -n self-healing-platform`
+2. Check pod logs: `kubectl logs -n self-healing-platform -l serving.kserve.io/inferenceservice=<name>`
+3. Verify model files exist in PVC or S3
+4. Ensure coordination engine deployed AFTER KServe models (ArgoCD sync wave 3)
+
 ### RBAC Setup
 
 The coordination engine requires specific Kubernetes permissions. Apply the RBAC manifests:

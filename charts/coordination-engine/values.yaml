@@ -96,18 +96,27 @@ env:
   - name: METRICS_PORT
     value: "9090"
   # KServe Integration (ADR-039) - replaces ML_SERVICE_URL
+  # IMPORTANT: KServe InferenceServices must be deployed BEFORE the coordination engine
+  # Verify: kubectl get inferenceservice -n self-healing-platform
+  # Expected: anomaly-detector (Ready), predictive-analytics (Ready)
   - name: ENABLE_KSERVE_INTEGRATION
     value: "true"
   - name: KSERVE_NAMESPACE
     value: "self-healing-platform"
   - name: KSERVE_PREDICTOR_PORT
     value: "8080"  # KServe InferenceService predictors in RawDeployment mode listen on 8080
+  # Service names follow pattern: {inferenceservice-name}-predictor
+  # NOTE: These service names are also listed in the kserve.models section below
+  # for the health check Job. Keep both sections synchronized.
   - name: KSERVE_ANOMALY_DETECTOR_SERVICE
-    value: "anomaly-detector-predictor"
+    value: "anomaly-detector-predictor"  # From InferenceService: anomaly-detector
   - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
-    value: "predictive-analytics-predictor"
+    value: "predictive-analytics-predictor"  # From InferenceService: predictive-analytics
   - name: KSERVE_TIMEOUT
     value: "10s"
+  # Prometheus integration for real-time metrics (PR #34)
+  - name: PROMETHEUS_URL
+    value: "https://thanos-querier.openshift-monitoring.svc:9091"
   # Legacy ML_SERVICE_URL (deprecated - use KServe integration instead)
   # - name: ML_SERVICE_URL
   #   value: "http://aiops-ml-service:8080"
@@ -154,3 +163,17 @@ autoscaling:
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   targetMemoryUtilizationPercentage: 80
+
+# KServe configuration for health check job
+kserve:
+  enabled: true
+  namespace: "self-healing-platform"
+  # Configurable predictor port and health path
+  predictorPort: 8080
+  healthPath: "/v1/models/model"
+  # List of KServe model services to health check before deployment
+  # NOTE: These should match the KSERVE_*_SERVICE environment variables in the env section above
+  # to ensure configuration consistency
+  models:
+    - "anomaly-detector-predictor"
+    - "predictive-analytics-predictor"
