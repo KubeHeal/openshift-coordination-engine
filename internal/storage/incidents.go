@@ -34,9 +34,12 @@ func NewIncidentStoreWithPath(dataDir string) *IncidentStore {
 		dataDir = os.Getenv("DATA_DIR")
 	}
 	if dataDir == "" {
-		dataDir = "/data"
+		dataDir = "/app/data"
 	}
 
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		fmt.Printf("Warning: Could not create data directory %s: %v\n", dataDir, err)
+	}
 	store := &IncidentStore{
 		incidents: make(map[string]*models.Incident),
 		dataFile:  filepath.Join(dataDir, "incidents.json"),
