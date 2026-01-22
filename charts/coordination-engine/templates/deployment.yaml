@@ -3,6 +3,8 @@ kind: Deployment
 metadata:
   name: {{ include "coordination-engine.fullname" . }}
   namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"  # Deploy in wave 3, AFTER KServe models in wave 2
   labels:
     {{- include "coordination-engine.labels" . | nindent 4 }}
 spec:

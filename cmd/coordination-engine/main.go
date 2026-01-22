@@ -138,6 +138,9 @@ func main() {
 	// Initialize KServe proxy client if enabled (ADR-039, ADR-040)
 	kserveProxyHandler := initKServeProxy(cfg, log)
 
+	// Verify KServe model availability on startup
+	verifyKServeModelsOnStartup(cfg, kserveProxyHandler, log)
+
 	// Create API handlers
 	healthHandler := v1.NewHealthHandler(log, k8sClients.Clientset, rbacVerifier, cfg.MLServiceURL, Version, startTime)
 	// TODO: Add MCO health monitoring to health handler in future enhancement
@@ -408,6 +411,38 @@ func initAnomalyHandler(
 		prometheusClient,
 		log,
 	)
+}
+
+// verifyKServeModelsOnStartup validates KServe model availability on startup and logs warnings
+// if models are not ready. This helps operators diagnose deployment issues early.
+// Note: This function logs warnings but does not prevent startup - the coordination engine
+// will continue to start even if models are unavailable, allowing it to serve other endpoints.
+func verifyKServeModelsOnStartup(cfg *config.Config, kserveProxyHandler *v1.KServeProxyHandler, log *logrus.Logger) {
+	if !cfg.KServe.Enabled || kserveProxyHandler == nil {
+		return
+	}
+
+	log.Info("Verifying KServe model availability...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	modelsHealthy := true
+	for _, modelName := range kserveProxyHandler.GetProxyClient().ListModels() {
+		health, err := kserveProxyHandler.GetProxyClient().CheckModelHealth(ctx, modelName)
+		if err != nil || health == nil || health.Status != "ready" {
+			log.WithFields(logrus.Fields{
+				"model": modelName,
+				"error": err,
+			}).Warn("KServe model not ready on startup - ML predictions will fail until models are deployed")
+			modelsHealthy = false
+		} else {
+			log.WithField("model", modelName).Info("KServe model is healthy and ready")
+		}
+	}
+
+	if !modelsHealthy {
+		log.Warn("Some KServe models are not ready. Deploy InferenceServices and ensure model files exist.")
+	}
 }
 
 // initKubernetesClient creates both standard and dynamic Kubernetes clients
