@@ -1,0 +1,48 @@
+{{- if .Values.kserve.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "coordination-engine.fullname" . }}-kserve-health
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+  labels:
+    {{- include "coordination-engine.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: {{ include "coordination-engine.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      containers:
+      - name: health-check
+        image: curlimages/curl:8.5.0
+        command:
+        - sh
+        - -c
+        - |
+          KSERVE_NS="{{ .Values.kserve.namespace }}"
+          KSERVE_PORT="{{ .Values.kserve.predictorPort | default 8080 }}"
+          KSERVE_PATH="{{ .Values.kserve.healthPath | default "/v1/models/model" }}"
+          MODELS="{{ join " " .Values.kserve.models }}"
+
+          echo "Checking KServe model availability in namespace: $KSERVE_NS"
+          for model in $MODELS; do
+            MAX_RETRIES=30
+            RETRY=0
+            until curl -f --connect-timeout 5 --max-time 10 http://$model.$KSERVE_NS.svc:$KSERVE_PORT$KSERVE_PATH 2>&1; do
+              RETRY=$((RETRY+1))
+              if [ $RETRY -ge $MAX_RETRIES ]; then
+                echo "ERROR: Model $model not ready after $MAX_RETRIES attempts"
+                echo "Check: kubectl get inferenceservice -n $KSERVE_NS"
+                exit 1
+              fi
+              echo "Waiting for $model to be ready... ($RETRY/$MAX_RETRIES)"
+              sleep 10
+            done
+            echo "✓ Model $model is ready"
+          done
+          echo "All KServe models are healthy"
+{{- end }}

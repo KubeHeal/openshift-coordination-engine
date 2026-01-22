@@ -350,6 +350,24 @@ func (c *ProxyClient) Predict(ctx context.Context, modelName string, instances [
 		if readErr != nil {
 			return nil, fmt.Errorf("model %s returned status %d, failed to read body: %w", modelName, resp.StatusCode, readErr)
 		}
+
+		// Add contextual help for 404 errors
+		if resp.StatusCode == http.StatusNotFound {
+			serviceName := strings.TrimSuffix(model.ServiceName, "-predictor")
+			return nil, fmt.Errorf(
+				"model %s not found (HTTP 404): KServe InferenceService may not be deployed or model files missing. "+
+					"Backend response: %s. "+
+					"Verify deployment: kubectl get inferenceservice %s -n %s && "+
+					"kubectl get pod -l serving.kserve.io/inferenceservice=%s -n %s",
+				modelName,
+				string(bodyBytes),
+				serviceName,
+				c.namespace,
+				serviceName,
+				c.namespace,
+			)
+		}
+
 		return nil, fmt.Errorf("model %s returned status %d: %s", modelName, resp.StatusCode, string(bodyBytes))
 	}
 
@@ -435,6 +453,24 @@ func (c *ProxyClient) PredictFlexible(ctx context.Context, modelName string, ins
 		if readErr != nil {
 			return nil, fmt.Errorf("model %s returned status %d, failed to read body: %w", modelName, resp.StatusCode, readErr)
 		}
+
+		// Add contextual help for 404 errors
+		if resp.StatusCode == http.StatusNotFound {
+			serviceName := strings.TrimSuffix(model.ServiceName, "-predictor")
+			return nil, fmt.Errorf(
+				"model %s not found (HTTP 404): KServe InferenceService may not be deployed or model files missing. "+
+					"Backend response: %s. "+
+					"Verify deployment: kubectl get inferenceservice %s -n %s && "+
+					"kubectl get pod -l serving.kserve.io/inferenceservice=%s -n %s",
+				modelName,
+				string(bodyBytes),
+				serviceName,
+				c.namespace,
+				serviceName,
+				c.namespace,
+			)
+		}
+
 		return nil, fmt.Errorf("model %s returned status %d: %s", modelName, resp.StatusCode, string(bodyBytes))
 	}
 

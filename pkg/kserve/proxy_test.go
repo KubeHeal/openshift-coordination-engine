@@ -1146,3 +1146,74 @@ func TestProxyClient_AutoDetect_SimpleArray(t *testing.T) {
 	require.NotNil(t, result.AnomalyResponse)
 	assert.Nil(t, result.ForecastResponse)
 }
+
+// TestProxyClient_Predict_HTTP404 tests that Predict returns enhanced error messages for 404 responses
+func TestProxyClient_Predict_HTTP404(t *testing.T) {
+	// Create mock server that returns 404
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "Model with name model does not exist"}`))
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	_, err = client.Predict(context.Background(), "test-model", [][]float64{{0.1, 0.2}})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found (HTTP 404)")
+	assert.Contains(t, err.Error(), "kubectl get inferenceservice")
+	assert.Contains(t, err.Error(), "test-service") // Should reference the InferenceService name (without -predictor)
+	assert.Contains(t, err.Error(), "test-ns")
+}
+
+// TestProxyClient_PredictFlexible_HTTP404 tests that PredictFlexible returns enhanced error messages for 404 responses
+func TestProxyClient_PredictFlexible_HTTP404(t *testing.T) {
+	// Create mock server that returns 404
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "Model with name model does not exist"}`))
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "kserve-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["analytics-model"] = &ModelInfo{
+		Name:        "analytics-model",
+		ServiceName: "analytics-predictor",
+		Namespace:   "kserve-ns",
+		URL:         server.URL,
+	}
+
+	_, err = client.PredictFlexible(context.Background(), "analytics-model", [][]float64{{1.0, 2.0}})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found (HTTP 404)")
+	assert.Contains(t, err.Error(), "kubectl get inferenceservice analytics") // Should reference InferenceService name
+	assert.Contains(t, err.Error(), "kubectl get pod")
+	assert.Contains(t, err.Error(), "kserve-ns") // Should reference the namespace
+	assert.Contains(t, err.Error(), "serving.kserve.io/inferenceservice=analytics")
+}
