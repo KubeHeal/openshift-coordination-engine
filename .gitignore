@@ -69,3 +69,5 @@ Thumbs.db
 *.bak
 *.backup
 
+
+cmd/coordination-engine/coordination-engine
