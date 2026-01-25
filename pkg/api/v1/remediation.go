@@ -20,11 +20,20 @@ type RemediationHandler struct {
 	log           *logrus.Logger
 }
 
-// NewRemediationHandler creates a new remediation handler
+// NewRemediationHandler creates a new remediation handler with in-memory incident store
 func NewRemediationHandler(orchestrator *remediation.Orchestrator, log *logrus.Logger) *RemediationHandler {
 	return &RemediationHandler{
 		orchestrator:  orchestrator,
 		incidentStore: storage.NewIncidentStore(),
+		log:           log,
+	}
+}
+
+// NewRemediationHandlerWithStore creates a new remediation handler with provided incident store
+func NewRemediationHandlerWithStore(orchestrator *remediation.Orchestrator, incidentStore *storage.IncidentStore, log *logrus.Logger) *RemediationHandler {
+	return &RemediationHandler{
+		orchestrator:  orchestrator,
+		incidentStore: incidentStore,
 		log:           log,
 	}
 }
