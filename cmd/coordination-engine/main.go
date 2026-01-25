@@ -525,9 +525,9 @@ func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.Incident
 	}
 
 	log.WithFields(logrus.Fields{
-		"data_dir":             cfg.DataDir,
-		"retention_days":       cfg.IncidentRetentionDays,
-		"loaded_incidents":     incidentStore.Count(),
+		"data_dir":         cfg.DataDir,
+		"retention_days":   cfg.IncidentRetentionDays,
+		"loaded_incidents": incidentStore.Count(),
 	}).Info("Incident store initialized with file-based persistence")
 
 	// Start background cleanup goroutine for old incidents

@@ -42,7 +42,7 @@ type Config struct {
 	KubernetesBurst int     `json:"kubernetes_burst"`
 
 	// Incident storage (ADR-014)
-	DataDir              string `json:"data_dir,omitempty"`               // Directory for persistent incident storage
+	DataDir               string `json:"data_dir,omitempty"`                // Directory for persistent incident storage
 	IncidentRetentionDays int    `json:"incident_retention_days,omitempty"` // Days to retain resolved incidents (0 = no cleanup)
 }
 

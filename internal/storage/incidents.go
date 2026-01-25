@@ -40,7 +40,7 @@ func NewIncidentStoreWithPersistence(dataDir string, log *logrus.Logger) (*Incid
 	}
 
 	// Ensure data directory exists
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
@@ -240,14 +240,16 @@ func (s *IncidentStore) saveToFileUnsafe() error {
 
 	// Atomic write pattern: write to temp file, then rename
 	tempFile := s.filePath + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0600); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
 	// Atomic rename (POSIX guarantees atomicity)
 	if err := os.Rename(tempFile, s.filePath); err != nil {
 		// Cleanup temp file on failure
-		_ = os.Remove(tempFile)
+		if removeErr := os.Remove(tempFile); removeErr != nil {
+			s.log.WithError(removeErr).Warn("Failed to remove temp file after rename failure")
+		}
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 
