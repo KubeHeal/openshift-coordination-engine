@@ -70,7 +70,13 @@ Response 202 Accepted:
 
 #### 3. List Incidents
 ```http
-GET /api/v1/incidents?namespace=production&status=active&limit=50
+GET /api/v1/incidents?namespace=production&status=active&severity=high&limit=50
+
+Query Parameters:
+- status: Filter by status ("active", "resolved", "cancelled", "all")
+- severity: Filter by severity ("low", "medium", "high", "critical", "all")
+- namespace: Filter by target namespace
+- limit: Maximum incidents to return (default: 50, max: 500)
 
 Response 200 OK:
 {
@@ -87,6 +93,11 @@ Response 200 OK:
     }
   ],
   "total": 1,
+  "filters": {
+    "status": "active",
+    "severity": "high",
+    "namespace": "production"
+  },
   "page": 1,
   "limit": 50
 }
@@ -117,6 +128,67 @@ Response 200 OK:
   "updated_at": "2025-12-18T09:50:15Z"
 }
 ```
+
+#### 5. Create Incident (Manual Tracking)
+```http
+POST /api/v1/incidents
+Content-Type: application/json
+
+{
+  "title": "High CPU usage in production",
+  "description": "payment-service CPU sustained >80% for 30 minutes. Possible memory leak.",
+  "severity": "high",
+  "target": "production",
+  "affected_resources": [
+    "deployment/payment-service",
+    "pod/payment-service-abc123"
+  ],
+  "labels": {
+    "team": "platform",
+    "escalation": "true",
+    "source": "mcp-server"
+  }
+}
+
+Response 201 Created:
+{
+  "status": "success",
+  "incident_id": "inc-a1b2c3d4",
+  "created_at": "2026-01-25T10:00:00Z",
+  "incident": {
+    "id": "inc-a1b2c3d4",
+    "title": "High CPU usage in production",
+    "description": "payment-service CPU sustained >80% for 30 minutes. Possible memory leak.",
+    "severity": "high",
+    "target": "production",
+    "status": "active",
+    "affected_resources": [
+      "deployment/payment-service",
+      "pod/payment-service-abc123"
+    ],
+    "labels": {
+      "team": "platform",
+      "escalation": "true",
+      "source": "mcp-server"
+    },
+    "created_at": "2026-01-25T10:00:00Z",
+    "updated_at": "2026-01-25T10:00:00Z"
+  },
+  "message": "Incident created successfully"
+}
+
+Error Responses:
+- 400 Bad Request: Invalid request body or missing required fields
+- 500 Internal Server Error: Failed to create incident
+```
+
+**Use Case**: MCP server creates incident from natural language query:
+- User: "High CPU in production for 30 minutes"
+- MCP: Extracts structured data → POST /api/v1/incidents
+- Engine: Creates incident, returns incident_id
+- MCP: Returns to user: "Incident inc-a1b2c3d4 created and tracking"
+
+See: [ADR-014](014-prometheus-thanos-observability-incident-management.md) for incident storage implementation
 
 ## Go Implementation
 
@@ -383,6 +455,7 @@ ENABLE_CORS=true             # Enable CORS headers
 
 - ADR-001: Go Project Architecture (HTTP routing and middleware patterns)
 - ADR-009: Python ML Service Integration (downstream dependency)
+- ADR-014: Prometheus/Thanos Observability and Incident Management (incident creation API, enhanced filtering)
 - Platform ADR-042: Go-Based Coordination Engine (overall architecture)
 
 

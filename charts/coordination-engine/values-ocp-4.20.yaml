@@ -45,3 +45,6 @@ env:
     value: "https://thanos-querier.openshift-monitoring.svc:9091"
   - name: KSERVE_TIMEOUT
     value: "10s"
+  # Prometheus integration for real-time metrics (ADR-014)
+  - name: PROMETHEUS_URL
+    value: "https://thanos-querier.openshift-monitoring.svc:9091"

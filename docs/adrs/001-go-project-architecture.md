@@ -150,7 +150,8 @@ openshift-coordination-engine/
 **internal/** - Private Implementation
 - Never imported by external projects
 - Contains business logic and internal implementations
-- Organized by functional domain (detector, coordination, remediation, integrations)
+- Organized by functional domain (detector, coordination, remediation, integrations, storage)
+  - `storage/`: In-memory and persistent data stores for incidents and workflows (ADR-014)
 
 **pkg/** - Public API
 - Can be imported by other Go projects
@@ -453,4 +454,5 @@ go mod vendor
 
 - ADR-009: Python ML Service Integration (Go HTTP client implementation)
 - ADR-011: MCP Server Integration (HTTP server and API implementation)
+- ADR-014: Prometheus/Thanos Observability and Incident Management (storage package for incident persistence)
 - Platform ADR-042: Go-Based Coordination Engine (architecture context)
