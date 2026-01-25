@@ -1,0 +1,1148 @@
+package kserve
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNewProxyClient(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	tests := []struct {
+		name        string
+		cfg         ProxyConfig
+		setupEnv    map[string]string
+		expectError bool
+		expectCount int
+	}{
+		{
+			name: "valid config with models",
+			cfg: ProxyConfig{
+				Namespace: "test-namespace",
+				Timeout:   10 * time.Second,
+			},
+			setupEnv: map[string]string{
+				"KSERVE_ANOMALY_DETECTOR_SERVICE": "anomaly-detector-predictor",
+			},
+			expectError: false,
+			expectCount: 1,
+		},
+		{
+			name: "valid config without models",
+			cfg: ProxyConfig{
+				Namespace: "test-namespace",
+			},
+			setupEnv:    map[string]string{},
+			expectError: false,
+			expectCount: 0,
+		},
+		{
+			name: "missing namespace",
+			cfg: ProxyConfig{
+				Namespace: "",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Clear and set environment variables
+			for _, env := range os.Environ() {
+				if len(env) > 7 && env[:7] == "KSERVE_" {
+					key := env[:len(env)-len(env[len("KSERVE_"):])-1]
+					if idx := len("KSERVE_"); idx < len(env) {
+						for i := idx; i < len(env); i++ {
+							if env[i] == '=' {
+								key = env[:i]
+								break
+							}
+						}
+					}
+					os.Unsetenv(key)
+				}
+			}
+
+			for key, val := range tt.setupEnv {
+				os.Setenv(key, val)
+			}
+			defer func() {
+				for key := range tt.setupEnv {
+					os.Unsetenv(key)
+				}
+			}()
+
+			client, err := NewProxyClient(tt.cfg, log)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, client)
+			assert.Equal(t, tt.expectCount, client.ModelCount())
+		})
+	}
+}
+
+func TestProxyClient_LoadModelsFromEnv(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// Set up environment variables
+	envVars := map[string]string{
+		"KSERVE_ANOMALY_DETECTOR_SERVICE":       "anomaly-detector-predictor",
+		"KSERVE_PREDICTIVE_ANALYTICS_SERVICE":   "predictive-analytics-predictor",
+		"KSERVE_DISK_FAILURE_PREDICTOR_SERVICE": "disk-failure-predictor-predictor",
+		"KSERVE_NAMESPACE":                      "should-be-ignored", // Configuration variable
+		"KSERVE_PREDICTOR_PORT":                 "should-be-ignored", // Configuration variable
+		"OTHER_ENV_VAR":                         "should-be-ignored",
+		"KSERVE_EMPTY_SERVICE":                  "", // Empty value should be skipped
+	}
+
+	for key, val := range envVars {
+		os.Setenv(key, val)
+	}
+	defer func() {
+		for key := range envVars {
+			os.Unsetenv(key)
+		}
+	}()
+
+	cfg := ProxyConfig{
+		Namespace:     "test-namespace",
+		PredictorPort: 8080,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Check expected models
+	models := client.ListModels()
+	assert.Len(t, models, 3)
+	assert.Contains(t, models, "anomaly-detector")
+	assert.Contains(t, models, "predictive-analytics")
+	assert.Contains(t, models, "disk-failure-predictor")
+
+	// Check model info - URL should now include port 8080
+	anomalyDetector, exists := client.GetModel("anomaly-detector")
+	assert.True(t, exists)
+	assert.Equal(t, "anomaly-detector", anomalyDetector.Name)
+	assert.Equal(t, "anomaly-detector-predictor", anomalyDetector.ServiceName)
+	assert.Equal(t, "test-namespace", anomalyDetector.Namespace)
+	assert.Equal(t, "http://anomaly-detector-predictor.test-namespace.svc.cluster.local:8080", anomalyDetector.URL)
+}
+
+func TestProxyClient_LoadModelsFromEnv_DefaultPort(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	os.Setenv("KSERVE_TEST_MODEL_SERVICE", "test-service")
+	defer os.Unsetenv("KSERVE_TEST_MODEL_SERVICE")
+
+	// Test that default port (8080) is used when not specified
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+		// PredictorPort not set, should default to 8080
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	model, exists := client.GetModel("test-model")
+	assert.True(t, exists)
+	assert.Equal(t, "http://test-service.test-ns.svc.cluster.local:8080", model.URL)
+}
+
+func TestProxyClient_LoadModelsFromEnv_CustomPort(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	os.Setenv("KSERVE_TEST_MODEL_SERVICE", "test-service")
+	defer os.Unsetenv("KSERVE_TEST_MODEL_SERVICE")
+
+	// Test custom port configuration
+	cfg := ProxyConfig{
+		Namespace:     "test-ns",
+		PredictorPort: 9000,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	model, exists := client.GetModel("test-model")
+	assert.True(t, exists)
+	assert.Equal(t, "http://test-service.test-ns.svc.cluster.local:9000", model.URL)
+}
+
+func TestProxyClient_GetModel(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	os.Setenv("KSERVE_TEST_MODEL_SERVICE", "test-service")
+	defer os.Unsetenv("KSERVE_TEST_MODEL_SERVICE")
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Test existing model
+	model, exists := client.GetModel("test-model")
+	assert.True(t, exists)
+	assert.Equal(t, "test-model", model.Name)
+	assert.Equal(t, "test-service", model.ServiceName)
+
+	// Test non-existent model
+	_, exists = client.GetModel("non-existent")
+	assert.False(t, exists)
+}
+
+func TestProxyClient_GetAllModels(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	os.Setenv("KSERVE_MODEL_ONE_SERVICE", "service-one")
+	os.Setenv("KSERVE_MODEL_TWO_SERVICE", "service-two")
+	defer func() {
+		os.Unsetenv("KSERVE_MODEL_ONE_SERVICE")
+		os.Unsetenv("KSERVE_MODEL_TWO_SERVICE")
+	}()
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	models := client.GetAllModels()
+	assert.Len(t, models, 2)
+}
+
+func TestProxyClient_Predict(t *testing.T) {
+	// Create mock KServe server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// KServe defaults to model name "model" when spec.predictor.model.name is not set
+		assert.Equal(t, "/v1/models/model:predict", r.URL.Path)
+		assert.Equal(t, "POST", r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		// Decode request
+		var req map[string]interface{}
+		err := json.NewDecoder(r.Body).Decode(&req)
+		assert.NoError(t, err)
+		assert.Contains(t, req, "instances")
+
+		// Send KServe v1 response
+		resp := map[string]interface{}{
+			"predictions":   []int{-1, 1, -1},
+			"model_name":    "test-model",
+			"model_version": "v1",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// Create client with mock server
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+		Timeout:   30 * time.Second,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Manually add a model pointing to the test server
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	// Make prediction
+	instances := [][]float64{
+		{0.5, 1.2, 0.8},
+		{0.3, 0.9, 1.1},
+		{2.5, 3.0, 4.0},
+	}
+
+	result, err := client.Predict(context.Background(), "test-model", instances)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Len(t, result.Predictions, 3)
+	assert.Equal(t, []int{-1, 1, -1}, result.Predictions)
+	assert.Equal(t, "test-model", result.ModelName)
+	assert.Equal(t, "v1", result.ModelVersion)
+}
+
+func TestProxyClient_Predict_ModelNotFound(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	_, err = client.Predict(context.Background(), "non-existent", [][]float64{{0.1, 0.2}})
+
+	assert.Error(t, err)
+	var notFoundErr *ModelNotFoundError
+	assert.ErrorAs(t, err, &notFoundErr)
+	assert.Equal(t, "non-existent", notFoundErr.ModelName)
+}
+
+func TestProxyClient_Predict_ServerError(t *testing.T) {
+	// Create mock server that returns an error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("Internal server error"))
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	_, err = client.Predict(context.Background(), "test-model", [][]float64{{0.1, 0.2}})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "status 500")
+}
+
+func TestProxyClient_CheckModelHealth(t *testing.T) {
+	// Create healthy mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// KServe defaults to model name "model" when spec.predictor.model.name is not set
+		assert.Equal(t, "/v1/models/model", r.URL.Path)
+		assert.Equal(t, "GET", r.Method)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"name": "model"})
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	health, err := client.CheckModelHealth(context.Background(), "test-model")
+
+	require.NoError(t, err)
+	assert.Equal(t, "test-model", health.Model)
+	assert.Equal(t, "ready", health.Status)
+	assert.Equal(t, "test-service", health.Service)
+	assert.Equal(t, "test-ns", health.Namespace)
+}
+
+func TestProxyClient_CheckModelHealth_Unhealthy(t *testing.T) {
+	// Create unhealthy mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["test-model"] = &ModelInfo{
+		Name:        "test-model",
+		ServiceName: "test-service",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	health, err := client.CheckModelHealth(context.Background(), "test-model")
+
+	require.NoError(t, err)
+	assert.Equal(t, "unavailable", health.Status)
+	assert.Contains(t, health.Message, "status 503")
+}
+
+func TestProxyClient_CheckModelHealth_NotFound(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	health, err := client.CheckModelHealth(context.Background(), "non-existent")
+
+	assert.Error(t, err)
+	var notFoundErr *ModelNotFoundError
+	assert.ErrorAs(t, err, &notFoundErr)
+	assert.Equal(t, "unknown", health.Status)
+	assert.Equal(t, "Model not registered", health.Message)
+}
+
+func TestProxyClient_HealthCheck(t *testing.T) {
+	// Create healthy mock server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["model-1"] = &ModelInfo{
+		Name: "model-1",
+		URL:  server.URL,
+	}
+	client.models["model-2"] = &ModelInfo{
+		Name: "model-2",
+		URL:  server.URL,
+	}
+
+	err = client.HealthCheck(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestProxyClient_HealthCheck_NoModels(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	err = client.HealthCheck(context.Background())
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no models registered")
+}
+
+func TestProxyClient_RefreshModels(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	os.Setenv("KSERVE_INITIAL_SERVICE", "initial-service")
+	defer os.Unsetenv("KSERVE_INITIAL_SERVICE")
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, client.ModelCount())
+	assert.Contains(t, client.ListModels(), "initial")
+
+	// Add new env var and refresh
+	os.Setenv("KSERVE_NEW_MODEL_SERVICE", "new-service")
+	defer os.Unsetenv("KSERVE_NEW_MODEL_SERVICE")
+
+	client.RefreshModels()
+
+	assert.Equal(t, 2, client.ModelCount())
+	assert.Contains(t, client.ListModels(), "new-model")
+}
+
+func TestProxyClient_Close(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Close should not panic
+	assert.NotPanics(t, func() {
+		client.Close()
+	})
+}
+
+func TestModelNotFoundError(t *testing.T) {
+	err := &ModelNotFoundError{ModelName: "test-model"}
+	assert.Equal(t, "model not found: test-model", err.Error())
+}
+
+func TestModelUnavailableError(t *testing.T) {
+	cause := assert.AnError
+	err := &ModelUnavailableError{ModelName: "test-model", Cause: cause}
+	assert.Contains(t, err.Error(), "model unavailable: test-model")
+	assert.Contains(t, err.Error(), cause.Error())
+	assert.Equal(t, cause, err.Unwrap())
+
+	// Test without cause
+	errNoCause := &ModelUnavailableError{ModelName: "test-model"}
+	assert.Equal(t, "model unavailable: test-model", errNoCause.Error())
+}
+
+func TestDetectRequest_JSON(t *testing.T) {
+	req := &DetectRequest{
+		Model: "anomaly-detector",
+		Instances: [][]float64{
+			{0.5, 1.2, 0.8},
+			{0.3, 0.9, 1.1},
+		},
+	}
+
+	jsonData, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	expected := `{"model":"anomaly-detector","instances":[[0.5,1.2,0.8],[0.3,0.9,1.1]]}`
+	assert.JSONEq(t, expected, string(jsonData))
+}
+
+func TestDetectResponse_JSON(t *testing.T) {
+	jsonData := `{
+		"predictions": [-1, 1],
+		"model_name": "anomaly-detector",
+		"model_version": "v2"
+	}`
+
+	var resp DetectResponse
+	err := json.Unmarshal([]byte(jsonData), &resp)
+	require.NoError(t, err)
+
+	assert.Equal(t, []int{-1, 1}, resp.Predictions)
+	assert.Equal(t, "anomaly-detector", resp.ModelName)
+	assert.Equal(t, "v2", resp.ModelVersion)
+}
+
+func TestForecastResponse_JSON(t *testing.T) {
+	jsonData := `{
+		"predictions": {
+			"cpu_usage": {
+				"forecast": [0.5, 0.6, 0.7],
+				"forecast_horizon": 12,
+				"confidence": [0.9, 0.88, 0.85]
+			},
+			"memory_usage": {
+				"forecast": [0.7, 0.8, 0.75],
+				"forecast_horizon": 12,
+				"confidence": [0.85, 0.82, 0.80]
+			}
+		},
+		"model_name": "predictive-analytics",
+		"model_version": "1.0.0",
+		"timestamp": "2026-01-14T15:00:00Z",
+		"lookback_window": 24
+	}`
+
+	var resp ForecastResponse
+	err := json.Unmarshal([]byte(jsonData), &resp)
+	require.NoError(t, err)
+
+	assert.Equal(t, "predictive-analytics", resp.ModelName)
+	assert.Equal(t, "1.0.0", resp.ModelVersion)
+	assert.Equal(t, "2026-01-14T15:00:00Z", resp.Timestamp)
+	assert.Equal(t, 24, resp.LookbackWindow)
+
+	// Check CPU forecast
+	cpuForecast, exists := resp.Predictions["cpu_usage"]
+	assert.True(t, exists)
+	assert.Equal(t, []float64{0.5, 0.6, 0.7}, cpuForecast.Forecast)
+	assert.Equal(t, 12, cpuForecast.ForecastHorizon)
+	assert.Equal(t, []float64{0.9, 0.88, 0.85}, cpuForecast.Confidence)
+
+	// Check memory forecast
+	memForecast, exists := resp.Predictions["memory_usage"]
+	assert.True(t, exists)
+	assert.Equal(t, []float64{0.7, 0.8, 0.75}, memForecast.Forecast)
+	assert.Equal(t, 12, memForecast.ForecastHorizon)
+	assert.Equal(t, []float64{0.85, 0.82, 0.80}, memForecast.Confidence)
+}
+
+func TestProxyClient_PredictFlexible_ForecastResponse(t *testing.T) {
+	// Create mock KServe server returning predictive-analytics format
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/models/model:predict", r.URL.Path)
+		assert.Equal(t, "POST", r.Method)
+
+		resp := map[string]interface{}{
+			"predictions": map[string]interface{}{
+				"cpu_usage": map[string]interface{}{
+					"forecast":         []float64{0.5, 0.6, 0.7},
+					"forecast_horizon": 12,
+					"confidence":       []float64{0.9, 0.88, 0.85},
+				},
+				"memory_usage": map[string]interface{}{
+					"forecast":         []float64{0.7, 0.8, 0.75},
+					"forecast_horizon": 12,
+					"confidence":       []float64{0.85, 0.82, 0.80},
+				},
+			},
+			"model_name":      "predictive-analytics",
+			"model_version":   "1.0.0",
+			"timestamp":       "2026-01-14T15:00:00Z",
+			"lookback_window": 24,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+		Timeout:   30 * time.Second,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Add predictive-analytics model pointing to test server
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name:        "predictive-analytics",
+		ServiceName: "predictive-analytics-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	// Make prediction
+	instances := [][]float64{{14.0, 2.0, 0.65, 0.72}} // hour, day_of_week, cpu_mean, mem_mean
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", instances)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+	require.NotNil(t, result.ForecastResponse)
+	assert.Nil(t, result.AnomalyResponse)
+
+	// Verify forecast content
+	forecast := result.ForecastResponse
+	assert.Equal(t, "predictive-analytics", forecast.ModelName)
+	assert.Equal(t, "1.0.0", forecast.ModelVersion)
+	assert.Equal(t, 24, forecast.LookbackWindow)
+
+	cpuForecast, exists := forecast.Predictions["cpu_usage"]
+	assert.True(t, exists)
+	assert.Equal(t, []float64{0.5, 0.6, 0.7}, cpuForecast.Forecast)
+	assert.Equal(t, 12, cpuForecast.ForecastHorizon)
+}
+
+func TestProxyClient_PredictFlexible_AnomalyResponse(t *testing.T) {
+	// Create mock KServe server returning anomaly-detector format
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions":   []int{-1, 1, -1},
+			"model_name":    "anomaly-detector",
+			"model_version": "v1",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+		Timeout:   30 * time.Second,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["anomaly-detector"] = &ModelInfo{
+		Name:        "anomaly-detector",
+		ServiceName: "anomaly-detector-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	instances := [][]float64{{0.5, 1.2, 0.8}}
+
+	result, err := client.PredictFlexible(context.Background(), "anomaly-detector", instances)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "anomaly", result.Type)
+	require.NotNil(t, result.AnomalyResponse)
+	assert.Nil(t, result.ForecastResponse)
+
+	assert.Equal(t, []int{-1, 1, -1}, result.AnomalyResponse.Predictions)
+	assert.Equal(t, "anomaly-detector", result.AnomalyResponse.ModelName)
+}
+
+func TestProxyClient_PredictFlexible_AutoDetect(t *testing.T) {
+	// Test auto-detection with unknown model name but forecast format
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": map[string]interface{}{
+				"cpu_usage": map[string]interface{}{
+					"forecast":         []float64{0.55},
+					"forecast_horizon": 1,
+					"confidence":       []float64{0.9},
+				},
+			},
+			"model_name":    "custom-model",
+			"model_version": "v1",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["custom-model"] = &ModelInfo{
+		Name: "custom-model",
+		URL:  server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "custom-model", [][]float64{{1.0}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "forecast", result.Type)
+	require.NotNil(t, result.ForecastResponse)
+}
+
+func TestProxyClient_PredictForecast(t *testing.T) {
+	// Test convenience method for forecast predictions
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": map[string]interface{}{
+				"cpu_usage": map[string]interface{}{
+					"forecast":         []float64{0.65},
+					"forecast_horizon": 1,
+					"confidence":       []float64{0.88},
+				},
+			},
+			"model_name":    "predictive-analytics",
+			"model_version": "1.0.0",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name: "predictive-analytics",
+		URL:  server.URL,
+	}
+
+	forecast, err := client.PredictForecast(context.Background(), "predictive-analytics", [][]float64{{14.0, 2.0}})
+
+	require.NoError(t, err)
+	require.NotNil(t, forecast)
+	assert.Equal(t, "predictive-analytics", forecast.ModelName)
+
+	cpuForecast, exists := forecast.Predictions["cpu_usage"]
+	assert.True(t, exists)
+	assert.Equal(t, []float64{0.65}, cpuForecast.Forecast)
+}
+
+func TestProxyClient_PredictForecast_WrongModelType(t *testing.T) {
+	// Test that PredictForecast fails when model returns anomaly format
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions":   []int{-1},
+			"model_name":    "anomaly-detector",
+			"model_version": "v1",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["anomaly-detector"] = &ModelInfo{
+		Name: "anomaly-detector",
+		URL:  server.URL,
+	}
+
+	_, err = client.PredictForecast(context.Background(), "anomaly-detector", [][]float64{{1.0}})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "did not return a forecast response")
+}
+
+// Tests for flexible forecast response parsing (Issue #31)
+
+func TestProxyClient_PredictFlexible_ArrayFormat(t *testing.T) {
+	// Test Case 1 from Issue #31: Array format (sklearn multi-output)
+	// Input: {"predictions": [[0.604, 0.675]]}
+	// Expected: Converted to nested format with cpu_usage and memory_usage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": [][]float64{{0.604, 0.675}},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+		Timeout:   30 * time.Second,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name:        "predictive-analytics",
+		ServiceName: "predictive-analytics-predictor",
+		Namespace:   "test-ns",
+		URL:         server.URL,
+	}
+
+	instances := [][]float64{{14.0, 2.0, 0.65, 0.72}}
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", instances)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+	require.NotNil(t, result.ForecastResponse)
+
+	// Verify converted format
+	forecast := result.ForecastResponse
+	assert.Equal(t, "predictive-analytics", forecast.ModelName)
+
+	cpuForecast, exists := forecast.Predictions["cpu_usage"]
+	assert.True(t, exists, "cpu_usage should exist in predictions")
+	assert.Equal(t, []float64{0.604}, cpuForecast.Forecast)
+	assert.Equal(t, 1, cpuForecast.ForecastHorizon)
+	assert.Equal(t, []float64{0.85}, cpuForecast.Confidence) // Default confidence
+
+	memForecast, exists := forecast.Predictions["memory_usage"]
+	assert.True(t, exists, "memory_usage should exist in predictions")
+	assert.Equal(t, []float64{0.675}, memForecast.Forecast)
+	assert.Equal(t, 1, memForecast.ForecastHorizon)
+	assert.Equal(t, []float64{0.85}, memForecast.Confidence)
+}
+
+func TestProxyClient_PredictFlexible_ArrayFormat_MultipleSamples(t *testing.T) {
+	// Test array format with multiple prediction samples
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions":   [][]float64{{0.5, 0.6}, {0.55, 0.65}, {0.6, 0.7}},
+			"model_version": "2.0.0",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name: "predictive-analytics",
+		URL:  server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{14.0, 2.0}})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+
+	forecast := result.ForecastResponse
+	assert.Equal(t, "2.0.0", forecast.ModelVersion)
+
+	cpuForecast := forecast.Predictions["cpu_usage"]
+	assert.Equal(t, []float64{0.5, 0.55, 0.6}, cpuForecast.Forecast)
+	assert.Equal(t, 3, cpuForecast.ForecastHorizon)
+
+	memForecast := forecast.Predictions["memory_usage"]
+	assert.Equal(t, []float64{0.6, 0.65, 0.7}, memForecast.Forecast)
+	assert.Equal(t, 3, memForecast.ForecastHorizon)
+}
+
+func TestProxyClient_PredictFlexible_ArrayFormat_SingleOutput(t *testing.T) {
+	// Test array format with single output (e.g., just CPU prediction)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": [][]float64{{0.75}, {0.78}, {0.80}},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name: "predictive-analytics",
+		URL:  server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{14.0}})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+
+	forecast := result.ForecastResponse
+	genericForecast, exists := forecast.Predictions["forecast"]
+	assert.True(t, exists, "single-output should use 'forecast' key")
+	assert.Equal(t, []float64{0.75, 0.78, 0.80}, genericForecast.Forecast)
+	assert.Equal(t, 3, genericForecast.ForecastHorizon)
+}
+
+func TestProxyClient_PredictFlexible_NestedFormat_Passthrough(t *testing.T) {
+	// Test Case 2 from Issue #31: Nested format should pass through unchanged
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": map[string]interface{}{
+				"cpu_usage": map[string]interface{}{
+					"forecast":         []float64{0.604},
+					"forecast_horizon": 1,
+					"confidence":       []float64{0.92},
+				},
+				"memory_usage": map[string]interface{}{
+					"forecast":         []float64{0.675},
+					"forecast_horizon": 1,
+					"confidence":       []float64{0.88},
+				},
+			},
+			"model_version": "1.0.0",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name: "predictive-analytics",
+		URL:  server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{14.0, 2.0}})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+
+	forecast := result.ForecastResponse
+	assert.Equal(t, "1.0.0", forecast.ModelVersion)
+
+	// Nested format preserves original confidence values
+	cpuForecast := forecast.Predictions["cpu_usage"]
+	assert.Equal(t, []float64{0.604}, cpuForecast.Forecast)
+	assert.Equal(t, []float64{0.92}, cpuForecast.Confidence) // Original confidence preserved
+
+	memForecast := forecast.Predictions["memory_usage"]
+	assert.Equal(t, []float64{0.675}, memForecast.Forecast)
+	assert.Equal(t, []float64{0.88}, memForecast.Confidence)
+}
+
+func TestProxyClient_AutoDetect_ArrayOfArrays(t *testing.T) {
+	// Test auto-detection correctly identifies array of arrays as forecast (not anomaly)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": [][]float64{{0.5, 0.6}},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Use unknown model name to trigger auto-detection
+	client.models["custom-sklearn-model"] = &ModelInfo{
+		Name: "custom-sklearn-model",
+		URL:  server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "custom-sklearn-model", [][]float64{{1.0}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "forecast", result.Type, "Array of arrays should be detected as forecast")
+	require.NotNil(t, result.ForecastResponse)
+	assert.Nil(t, result.AnomalyResponse)
+}
+
+func TestProxyClient_AutoDetect_SimpleArray(t *testing.T) {
+	// Test auto-detection correctly identifies simple array as anomaly
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": []int{-1, 1, -1},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["custom-anomaly-model"] = &ModelInfo{
+		Name: "custom-anomaly-model",
+		URL:  server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "custom-anomaly-model", [][]float64{{1.0, 2.0, 3.0}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "anomaly", result.Type, "Simple array should be detected as anomaly")
+	require.NotNil(t, result.AnomalyResponse)
+	assert.Nil(t, result.ForecastResponse)
+}

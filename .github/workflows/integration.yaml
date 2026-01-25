@@ -1,0 +1,240 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop, 'release-4.18', 'release-4.19', 'release-4.20' ]
+  pull_request:
+    branches: [ main, develop, 'release-4.18', 'release-4.19', 'release-4.20' ]
+  schedule:
+    # Run integration tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  GO_VERSION: "1.22"
+
+jobs:
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: coordination-engine-test
+          wait: 5m
+
+      - name: Install ArgoCD
+        run: |
+          kubectl create namespace argocd
+          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+          kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+
+      - name: Run integration tests
+        run: |
+          make test-integration
+        env:
+          KUBECONFIG: ${{ env.HOME }}/.kube/config
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: integration-test-results
+          path: |
+            test/integration/*.log
+            coverage/integration-coverage.out
+          retention-days: 7
+
+  argocd-integration:
+    name: ArgoCD Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: argocd-test
+          wait: 5m
+
+      - name: Install ArgoCD
+        run: |
+          kubectl create namespace argocd
+          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+          kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+
+      - name: Test ArgoCD integration
+        run: |
+          if ls ./internal/integrations/argocd_*_test.go 1> /dev/null 2>&1; then
+            go test -v -tags=integration -timeout=10m -run "TestArgoCD" ./internal/integrations
+          else
+            echo "No ArgoCD integration tests found, skipping..."
+          fi
+
+  helm-integration:
+    name: Helm Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: helm-test
+          wait: 5m
+
+      - name: Test Helm integration
+        run: |
+          if ls ./internal/remediation/helm_*_test.go 1> /dev/null 2>&1; then
+            go test -v -tags=integration -timeout=10m -run "TestHelm" ./internal/remediation
+          else
+            echo "No Helm integration tests found, skipping..."
+          fi
+
+  openshift-integration:
+    name: OpenShift Cluster Integration
+    runs-on: ubuntu-latest
+    # Only run on push to main/develop or scheduled runs (secrets not available on PRs from forks)
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install OpenShift CLI
+        run: |
+          curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar -xzf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          sudo chmod +x /usr/local/bin/oc
+          oc version --client
+
+      - name: Check OpenShift credentials
+        id: check_creds
+        run: |
+          if [ -n "${{ secrets.OPENSHIFT_TOKEN }}" ] && [ -n "${{ secrets.OPENSHIFT_SERVER }}" ]; then
+            echo "has_creds=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_creds=false" >> $GITHUB_OUTPUT
+            echo "::warning::OpenShift credentials not configured - skipping cluster tests"
+          fi
+
+      - name: Login to OpenShift cluster
+        if: steps.check_creds.outputs.has_creds == 'true'
+        run: |
+          oc login --token=${{ secrets.OPENSHIFT_TOKEN }} --server=${{ secrets.OPENSHIFT_SERVER }} --insecure-skip-tls-verify=true
+          oc whoami
+          oc cluster-info
+
+      - name: Run integration tests on OpenShift
+        if: steps.check_creds.outputs.has_creds == 'true'
+        run: |
+          export KUBECONFIG=$HOME/.kube/config
+          make test-integration
+        env:
+          ML_SERVICE_URL: ${{ secrets.ML_SERVICE_URL || 'http://localhost:8080' }}
+
+      - name: Run e2e tests on OpenShift
+        if: steps.check_creds.outputs.has_creds == 'true'
+        run: |
+          export KUBECONFIG=$HOME/.kube/config
+          make test-e2e
+
+      - name: Cleanup test resources
+        if: always() && steps.check_creds.outputs.has_creds == 'true'
+        run: |
+          # Clean up any test namespaces created during testing
+          oc delete namespace coordination-engine-e2e --ignore-not-found=true
+          oc delete namespace coordination-engine-test --ignore-not-found=true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: openshift-integration-test-results
+          path: |
+            test/integration/*.log
+            test/e2e/*.log
+            coverage/*.out
+          retention-days: 7
+
+  version-compatibility-test:
+    name: Test OCP Version Compatibility
+    # Only run on main branch to test all release branches
+    # Don't run on release branches themselves (would try to checkout other branches)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ocp_version: ['4.18', '4.19', '4.20']
+        include:
+          - ocp_version: '4.18'
+            k8s_version: 'v1.31.10'
+            client_go_version: 'v0.31.3'
+          - ocp_version: '4.19'
+            k8s_version: 'v1.32.0'
+            client_go_version: 'v0.32.0'
+          - ocp_version: '4.20'
+            k8s_version: 'v1.33.0'
+            client_go_version: 'v0.33.0'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: release-${{ matrix.ocp_version }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Display version info
+        run: |
+          echo "Testing OpenShift ${{ matrix.ocp_version }} compatibility"
+          echo "Kubernetes version: ${{ matrix.k8s_version }}"
+          echo "client-go version: ${{ matrix.client_go_version }}"
+
+      - name: Run tests for OCP ${{ matrix.ocp_version }}
+        run: make test
+
+      - name: Build binary
+        run: make build
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: version-test-results-${{ matrix.ocp_version }}
+          path: |
+            coverage/*.out
+          retention-days: 7

@@ -1,0 +1,21 @@
+apiVersion: v2
+name: coordination-engine
+description: OpenShift Coordination Engine - Multi-layer remediation orchestration
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - openshift
+  - aiops
+  - coordination
+  - remediation
+  - self-healing
+  - multi-version
+annotations:
+  # Document supported OpenShift versions
+  openshift.io/supported-versions: "4.18,4.19,4.20"
+  kubernetes.io/supported-versions: "1.31,1.32,1.33"
+home: https://github.com/tosin2013/openshift-coordination-engine
+maintainers:
+  - name: OpenShift AIOps Team
+    email: aiops@example.com

@@ -1,0 +1,80 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "coordination-engine.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "coordination-engine.labels" . | nindent 4 }}
+rules:
+# Core API resources
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps", "secrets", "events"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+- apiGroups: [""]
+  resources: ["namespaces", "nodes", "endpoints"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: [""]
+  resources: ["persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: [""]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Apps API resources
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Batch API resources
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Autoscaling resources
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch"]
+
+# Policy resources
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets"]
+  verbs: ["get", "list", "watch"]
+
+# Networking resources
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch"]
+
+# Storage resources
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+
+# Monitoring resources
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["servicemonitors", "prometheusrules"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# ArgoCD resources (for deployment detection and integration)
+- apiGroups: ["argoproj.io"]
+  resources: ["applications"]
+  verbs: ["get", "list", "watch"]
+
+# Machine configuration resources (read-only for MCO monitoring)
+- apiGroups: ["machineconfiguration.openshift.io"]
+  resources: ["machineconfigs", "machineconfigpools"]
+  verbs: ["get", "list", "watch"]
+
+# OpenShift operators (for multi-layer coordination)
+- apiGroups: ["operator.openshift.io", "config.openshift.io"]
+  resources: ["clusteroperators"]
+  verbs: ["get", "list", "watch"]
+
+{{- with .Values.rbac.rules }}
+{{- toYaml . | nindent 0 }}
+{{- end }}
+{{- end }}

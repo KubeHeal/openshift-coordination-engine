@@ -1,0 +1,73 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage/
+*.coverprofile
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.local
+*.local
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+
+# Build artifacts
+build/
+_output/
+
+# Helm charts
+charts/**/charts/
+charts/**/*.lock
+
+# Kubernetes manifests (generated)
+k8s/overlays/*/generated/
+
+# Docker
+.dockerignore
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Linux
+.directory
+
+# Backup files
+*.bak
+*.backup
+
+
+cmd/coordination-engine/coordination-engine

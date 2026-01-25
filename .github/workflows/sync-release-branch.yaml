@@ -1,0 +1,142 @@
+name: Sync Release Branch with Main
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Target release branch to sync'
+        required: true
+        default: 'release-4.20'
+        type: string
+
+jobs:
+  sync-release-branch:
+    name: Sync release-4.20 with main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine target branch
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TARGET_BRANCH="${{ inputs.target_branch }}"
+          else
+            # Default to release-4.20 (current version)
+            TARGET_BRANCH="release-4.20"
+          fi
+          echo "branch=${TARGET_BRANCH}" >> $GITHUB_OUTPUT
+          echo "Syncing main → ${TARGET_BRANCH}"
+
+      - name: Check if branch exists
+        id: check_branch
+        run: |
+          if git ls-remote --exit-code --heads origin ${{ steps.target.outputs.branch }} >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Warning: Branch ${{ steps.target.outputs.branch }} does not exist yet"
+          fi
+
+      - name: Create branch if needed
+        if: steps.check_branch.outputs.exists == 'false'
+        run: |
+          git checkout -b ${{ steps.target.outputs.branch }}
+          git push -u origin ${{ steps.target.outputs.branch }}
+          echo "Created new branch: ${{ steps.target.outputs.branch }}"
+
+      - name: Sync main to release branch
+        if: steps.check_branch.outputs.exists == 'true'
+        run: |
+          # Fetch latest
+          git fetch origin main
+          git fetch origin ${{ steps.target.outputs.branch }}
+
+          # Checkout target branch
+          git checkout ${{ steps.target.outputs.branch }}
+
+          # Attempt merge
+          if git merge origin/main --no-ff --no-edit; then
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+            echo "Merge successful"
+          else
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            echo "Merge conflict detected"
+            git merge --abort
+          fi
+        id: sync
+
+      - name: Push changes
+        if: steps.sync.outputs.merge_status == 'success'
+        run: |
+          git push origin ${{ steps.target.outputs.branch }}
+          echo "Successfully synced main → ${{ steps.target.outputs.branch }}"
+
+      - name: Create PR for conflicts
+        if: steps.sync.outputs.merge_status == 'conflict'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: sync/${{ steps.target.outputs.branch }}-${{ github.sha }}
+          base: ${{ steps.target.outputs.branch }}
+          title: "[Auto-Sync] Resolve merge conflicts: main → ${{ steps.target.outputs.branch }}"
+          body: |
+            ## ⚠️ Automatic Sync Failed - Manual Resolution Needed
+
+            This PR was automatically created because syncing `main` to `${{ steps.target.outputs.branch }}` resulted in merge conflicts.
+
+            **Action Required**: Please resolve conflicts manually and merge this PR.
+
+            ### Context
+            - **Source**: `main` branch
+            - **Target**: `${{ steps.target.outputs.branch }}`
+            - **Trigger**: Commit ${{ github.sha }}
+
+            ### Resolution Steps
+            1. Checkout this branch locally
+            2. Resolve merge conflicts
+            3. Test the changes
+            4. Merge this PR
+          labels: |
+            auto-sync
+            needs-resolution
+            release-branch
+
+      - name: Notify on success
+        if: steps.sync.outputs.merge_status == 'success'
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## ✅ Branch Sync Successful
+
+          **main** → **${{ steps.target.outputs.branch }}**
+
+          Latest changes from main have been automatically merged into ${{ steps.target.outputs.branch }}.
+
+          This will trigger a new container image build for the release branch.
+          EOF
+
+      - name: Notify on conflict
+        if: steps.sync.outputs.merge_status == 'conflict'
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## ⚠️ Manual Intervention Required
+
+          **main** → **${{ steps.target.outputs.branch }}**
+
+          Automatic sync failed due to merge conflicts. A pull request has been created for manual resolution.
+          EOF

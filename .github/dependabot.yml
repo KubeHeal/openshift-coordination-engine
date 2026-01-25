@@ -1,0 +1,111 @@
+# Dependabot configuration for automated dependency updates
+# See: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Multi-Version Release Strategy:
+# - main: Development branch, receives all dependency updates
+# - release-4.18, release-4.19, release-4.20: Version-locked branches
+#   Each has specific k8s.io/client-go versions (v0.31.3, v0.32.0, v0.33.0)
+#   and should NOT receive automatic Go module updates
+#
+# Only GitHub Actions and Docker updates are allowed on release branches.
+
+version: 2
+updates:
+  # Go modules - MAIN BRANCH ONLY
+  # Release branches have version-locked dependencies
+  - package-ecosystem: "gomod"
+    directory: "/"
+    target-branch: "main"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "tosin2013"
+    labels:
+      - "dependencies"
+      - "go"
+      - "main-only"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    # Ignore Kubernetes dependencies - managed per release branch
+    ignore:
+      - dependency-name: "k8s.io/client-go"
+      - dependency-name: "k8s.io/api"
+      - dependency-name: "k8s.io/apimachinery"
+    # Group minor and patch updates together to reduce PR noise
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions - ALL BRANCHES
+  # Workflow updates are safe across all release branches
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "tosin2013"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci(deps)"
+      include: "scope"
+
+  # Docker - ALL BRANCHES
+  # Base image security updates should apply to all branches
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "tosin2013"
+    labels:
+      - "dependencies"
+      - "docker"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+# ------------------------------------------------------------------------------
+# IMPORTANT: Multi-Version Release Branch Strategy
+# ------------------------------------------------------------------------------
+#
+# How to handle Dependabot PRs:
+#
+# 1. Go modules (gomod):
+#    - PRs only target 'main' branch
+#    - Kubernetes dependencies (k8s.io/*) are IGNORED
+#    - Manually update k8s.io dependencies when creating new release branches
+#    - NEVER merge go.mod updates to release-* branches
+#
+# 2. GitHub Actions:
+#    - PRs can be merged to ANY branch (main + all release-*)
+#    - Action updates don't affect Go dependencies
+#
+# 3. Docker:
+#    - PRs can be merged to ANY branch (main + all release-*)
+#    - Security updates should propagate to all branches
+#
+# When adding a new OpenShift version (e.g., 4.21):
+#   1. Create release-4.21 branch from main
+#   2. Manually update k8s.io/client-go to appropriate version
+#   3. No Dependabot configuration changes needed
+#
+# See docs/VERSION-STRATEGY.md for complete documentation.

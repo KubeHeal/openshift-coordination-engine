@@ -1,0 +1,32 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }}
+  $ helm get all {{ .Release.Name }}
+
+The Coordination Engine has been deployed with the following configuration:
+
+1. Get the application URL by running these commands:
+{{- if contains "ClusterIP" .Values.service.type }}
+  kubectl port-forward svc/{{ include "coordination-engine.fullname" . }} 8080:8080 -n {{ .Release.Namespace }}
+  echo "Visit http://127.0.0.1:8080 to access the application"
+{{- end }}
+
+2. Check the health endpoint:
+  curl http://localhost:8080/api/v1/health
+
+3. View metrics:
+  kubectl port-forward svc/{{ include "coordination-engine.fullname" . }} 9090:9090 -n {{ .Release.Namespace }}
+  curl http://localhost:9090/metrics
+
+4. Check pod status:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "coordination-engine.name" . }}
+
+5. View logs:
+  kubectl logs -f deployment/{{ include "coordination-engine.fullname" . }} -n {{ .Release.Namespace }}
+
+For more information, see the documentation at:
+  https://github.com/tosin2013/openshift-coordination-engine

@@ -1,0 +1,149 @@
+# golangci-lint configuration for OpenShift Coordination Engine
+# Based on ADR-001: Go Project Architecture and Standards
+
+run:
+  timeout: 5m
+  tests: true
+  build-tags:
+    - integration
+    - e2e
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  # Error handling
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  # Formatting
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/tosin2013/openshift-coordination-engine
+
+  # Complexity
+  gocyclo:
+    min-complexity: 15
+
+  # Function length
+  funlen:
+    lines: 100
+    statements: 50
+
+  # Naming conventions
+  revive:
+    enable-all-rules: false
+    rules:
+      - name: exported
+        severity: warning
+      - name: var-naming
+        severity: warning
+      - name: package-comments
+        severity: warning
+
+  # Golint replacement
+  staticcheck:
+    checks: ["all"]
+
+  # Unused code
+  unused:
+    check-exported: false
+
+  # Consistent imports
+  gci:
+    sections:
+      - standard # Standard library
+      - default  # Third-party packages
+      - prefix(github.com/tosin2013/openshift-coordination-engine) # Local packages
+
+  # Security
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104 # Errors unhandled (covered by errcheck)
+
+  # Code quality
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - whyNoLint
+      - unnamedResult
+
+linters:
+  disable-all: true
+  enable:
+    # Essential linters
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Vet examines Go source code
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Go static analysis
+    - typecheck     # Type-check Go code
+    - unused        # Check for unused code
+
+    # Code quality
+    - gocyclo       # Cyclomatic complexity
+    - gofmt         # Check code formatting
+    - goimports     # Check import formatting
+    - revive        # Golint replacement
+    - gosec         # Security issues
+    - gocritic      # Opinionated code checker
+
+    # Error handling
+    - errorlint     # Check error wrapping
+    - wrapcheck     # Check error wrapping
+
+    # Performance
+    - prealloc      # Find slice declarations that could be preallocated
+
+    # Style
+    - misspell      # Spelling mistakes
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Find unused function parameters
+
+issues:
+  # Maximum issues count per one linter
+  max-issues-per-linter: 50
+
+  # Maximum count of issues with the same text
+  max-same-issues: 3
+
+  # Exclude some linters from running on tests files
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - funlen
+        - gosec
+
+    # Exclude some staticcheck messages
+    - linters:
+        - staticcheck
+      text: "SA9003:"
+
+    # Exclude lll issues for long lines with go:generate
+    - linters:
+        - lll
+      source: "^//go:generate "
+
+  # Independently of option `exclude` we use default exclude patterns
+  exclude-use-default: false
+
+  # Show only new issues
+  new: false
+
+  # Fix found issues (if supported by the linter)
+  fix: false

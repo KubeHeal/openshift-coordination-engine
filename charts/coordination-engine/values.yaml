@@ -1,0 +1,179 @@
+# Default values for coordination-engine
+# This is a YAML-formatted file.
+
+# Number of replicas
+replicaCount: 1
+
+# Image configuration
+image:
+  repository: quay.io/takinosh/openshift-coordination-engine
+  pullPolicy: IfNotPresent
+  # Default to latest OCP 4.20 version
+  # Override with --set image.tag=ocp-4.18-latest for other versions
+  tag: "ocp-4.20-latest"
+
+# OpenShift version metadata (informational)
+openshiftVersion:
+  # Target OpenShift version for this deployment
+  # Valid values: "4.18", "4.19", "4.20"
+  target: "4.20"
+  # Corresponding Kubernetes version
+  kubernetes: "1.33"
+
+# Image pull secrets
+imagePullSecrets: []
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use
+  # If not set and create is true, a name is generated using the fullname template
+  name: "self-healing-operator"
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  fsGroup: 1001
+
+# Container security context
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+
+# Resource limits
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# Liveness probe configuration
+# Using /health endpoint (Kubernetes standard) for lightweight health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Readiness probe configuration
+# Using /health endpoint (Kubernetes standard) for lightweight health checks
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Environment variables
+env:
+  - name: LOG_LEVEL
+    value: "info"
+  - name: PORT
+    value: "8080"
+  - name: METRICS_PORT
+    value: "9090"
+  # KServe Integration (ADR-039) - replaces ML_SERVICE_URL
+  # IMPORTANT: KServe InferenceServices must be deployed BEFORE the coordination engine
+  # Verify: kubectl get inferenceservice -n self-healing-platform
+  # Expected: anomaly-detector (Ready), predictive-analytics (Ready)
+  - name: ENABLE_KSERVE_INTEGRATION
+    value: "true"
+  - name: KSERVE_NAMESPACE
+    value: "self-healing-platform"
+  - name: KSERVE_PREDICTOR_PORT
+    value: "8080"  # KServe InferenceService predictors in RawDeployment mode listen on 8080
+  # Service names follow pattern: {inferenceservice-name}-predictor
+  # NOTE: These service names are also listed in the kserve.models section below
+  # for the health check Job. Keep both sections synchronized.
+  - name: KSERVE_ANOMALY_DETECTOR_SERVICE
+    value: "anomaly-detector-predictor"  # From InferenceService: anomaly-detector
+  - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
+    value: "predictive-analytics-predictor"  # From InferenceService: predictive-analytics
+  - name: KSERVE_TIMEOUT
+    value: "10s"
+  # Prometheus integration for real-time metrics (PR #34)
+  - name: PROMETHEUS_URL
+    value: "https://thanos-querier.openshift-monitoring.svc:9091"
+  # Legacy ML_SERVICE_URL (deprecated - use KServe integration instead)
+  # - name: ML_SERVICE_URL
+  #   value: "http://aiops-ml-service:8080"
+
+# Secret environment variables
+envFrom: []
+#  - secretRef:
+#      name: argocd-token
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Prometheus ServiceMonitor (requires prometheus-operator)
+monitoring:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+
+# RBAC configuration
+rbac:
+  create: true
+  # Additional rules can be added here
+  rules: []
+
+# Network policy
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress: []
+
+# Horizontal Pod Autoscaler
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# KServe configuration for health check job
+kserve:
+  enabled: true
+  namespace: "self-healing-platform"
+  # Configurable predictor port and health path
+  predictorPort: 8080
+  healthPath: "/v1/models/model"
+  # List of KServe model services to health check before deployment
+  # NOTE: These should match the KSERVE_*_SERVICE environment variables in the env section above
+  # to ensure configuration consistency
+  models:
+    - "anomaly-detector-predictor"
+    - "predictive-analytics-predictor"
