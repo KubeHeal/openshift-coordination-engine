@@ -22,7 +22,7 @@ ARG BUILD_DATE
 ARG VCS_REF
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s -X main.Version=${VERSION}" \
-    -o bin/coordination-engine \
+    -o /tmp/coordination-engine \
     cmd/coordination-engine/main.go
 
 # Stage 2: Create minimal runtime image
@@ -46,7 +46,7 @@ RUN microdnf install -y ca-certificates && \
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /workspace/bin/coordination-engine /app/coordination-engine
+COPY --from=builder /tmp/coordination-engine /app/coordination-engine
 
 # Create non-root user
 RUN useradd -u 1001 -r -g 0 -s /sbin/nologin \
