@@ -25,6 +25,7 @@ These ADRs define the **Go implementation** of the coordination engine:
 | [011](011-mcp-server-integration.md) | MCP Server Integration | ACCEPTED | REST API contract for MCP server integration |
 | [012](012-ml-enhanced-layer-detection.md) | ML-Enhanced Layer Detection | ACCEPTED | ML-enhanced layer detection with confidence scores (Phase 6) |
 | [013](013-github-branch-protection-collaboration.md) | GitHub Branch Protection and Collaboration Workflow | ACCEPTED | Branch protection rules, code ownership, and contribution guidelines |
+| [014](014-prometheus-thanos-observability-incident-management.md) | Prometheus/Thanos Observability Integration and Incident Management | ACCEPTED | Prometheus/Thanos metrics integration, incident storage with persistence, and API enhancements for manual incident creation |
 
 **Note on numbering**: ADR-007, ADR-008, and ADR-010 are reserved numbers. These were initially planned for additional decisions but were either integrated into existing ADRs or deemed unnecessary. The numbers are kept reserved to maintain sequential reference integrity.
 
@@ -75,9 +76,15 @@ Platform ADR-042 (Go Coordination Engine)
     ├──> ADR-011 (MCP Server Integration)
     │       └──> REST API consumed by MCP server
     │
-    └──> ADR-012 (ML-Enhanced Layer Detection)
-            ├──> Enhances ADR-003 (Layer Detector)
-            └──> Uses ADR-009 (Python ML Client)
+    ├──> ADR-012 (ML-Enhanced Layer Detection)
+    │       ├──> Enhances ADR-003 (Layer Detector)
+    │       └──> Uses ADR-009 (Python ML Client)
+    │
+    └──> ADR-014 (Prometheus/Thanos Observability & Incidents)
+            ├──> Enhances ADR-009 (ML metrics source)
+            ├──> Extends ADR-011 (Incident creation API)
+            ├──> Improves ADR-012 (ML confidence with real metrics)
+            └──> Extends ADR-001 (Storage package)
 ```
 
 ## Reading Order
@@ -96,7 +103,8 @@ If you're new to the coordination engine, read ADRs in this order:
 8. **[ADR-004](004-argocd-mco-integration.md)** - ArgoCD and MCO integration
 9. **[ADR-006](006-rbac-kubernetes-client-configuration.md)** - Kubernetes client and RBAC
 10. **[ADR-009](009-python-ml-integration.md)** - Python ML service integration
-11. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection (builds on ADR-003 and ADR-009)
+11. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection
+12. **[ADR-014](014-prometheus-thanos-observability-incident-management.md)** - Prometheus/Thanos observability and incident management (builds on ADR-003 and ADR-009)
 
 ### For Platform Understanding
 
@@ -153,6 +161,18 @@ The engine uses a strategy pattern to route remediation:
 
 See: [ADR-005](005-remediation-strategies-implementation.md)
 
+### Observability and Incident Management
+
+The engine integrates with Prometheus/Thanos for real-time cluster metrics and persistent incident tracking:
+- **Thanos Querier**: `https://thanos-querier.openshift-monitoring.svc:9091`
+- **Long-term storage**: Months of historical metrics for ML training (vs. 2-7 days in Prometheus)
+- **45-feature vectors**: Real cluster data (CPU, memory, restarts, trends) for anomaly detection
+- **ML accuracy improvement**: 60-70% → 85-95% with real metrics (+20-30%)
+- **Incident tracking**: Persistent JSON storage with CRUD operations for compliance and multi-day correlation
+- **API enhancements**: Manual incident creation via `POST /api/v1/incidents`, enhanced filtering with `status=all`
+
+See: [ADR-014](014-prometheus-thanos-observability-incident-management.md)
+
 ## Package Organization
 
 Based on [ADR-001](001-go-project-architecture.md):
@@ -179,10 +199,11 @@ The MCP server calls the coordination engine via REST API:
 
 - `GET /api/v1/health` - Health check
 - `POST /api/v1/remediation/trigger` - Trigger remediation workflow
-- `GET /api/v1/incidents` - List incidents
+- `GET /api/v1/incidents?status=all&severity=high` - List incidents with enhanced filtering (ADR-014)
+- `POST /api/v1/incidents` - Create incident for manual tracking (ADR-014)
 - `GET /api/v1/workflows/{id}` - Get workflow status
 
-See: [ADR-011](011-mcp-server-integration.md), [API-CONTRACT.md](../../API-CONTRACT.md)
+See: [ADR-011](011-mcp-server-integration.md), [ADR-014](014-prometheus-thanos-observability-incident-management.md), [API-CONTRACT.md](../../API-CONTRACT.md)
 
 ### Downstream API (Python ML Service)
 
@@ -229,4 +250,4 @@ When creating new ADRs:
 
 ---
 
-*Last Updated: 2026-01-20*
+*Last Updated: 2026-01-25*
