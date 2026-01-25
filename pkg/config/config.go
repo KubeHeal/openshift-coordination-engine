@@ -157,7 +157,7 @@ const (
 	DefaultKServePredictorPort = 8080 // KServe predictors in RawDeployment mode listen on 8080
 
 	// Incident storage defaults (ADR-014)
-	DefaultDataDir              = ""  // Empty means in-memory only
+	DefaultDataDir               = "" // Empty means in-memory only
 	DefaultIncidentRetentionDays = 90 // 90 days (PCI-DSS, SOC2, HIPAA compliance)
 )
 
