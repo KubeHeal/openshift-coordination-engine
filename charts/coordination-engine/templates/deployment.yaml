@@ -53,6 +53,17 @@ spec:
         envFrom:
           {{- toYaml . | nindent 12 }}
         {{- end }}
+        {{- if .Values.persistence.enabled }}
+        volumeMounts:
+        - name: data
+          mountPath: {{ .Values.persistence.mountPath }}
+        {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "coordination-engine.fullname" . }}-data
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

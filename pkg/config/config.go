@@ -40,6 +40,10 @@ type Config struct {
 	// Performance tuning
 	KubernetesQPS   float32 `json:"kubernetes_qps"`
 	KubernetesBurst int     `json:"kubernetes_burst"`
+
+	// Incident storage (ADR-014)
+	DataDir              string `json:"data_dir,omitempty"`               // Directory for persistent incident storage
+	IncidentRetentionDays int    `json:"incident_retention_days,omitempty"` // Days to retain resolved incidents (0 = no cleanup)
 }
 
 // KServeConfig holds configuration for KServe integration (ADR-039, ADR-040)
@@ -151,6 +155,10 @@ const (
 	DefaultKServeNamespace     = "self-healing-platform"
 	DefaultKServeTimeout       = 10 * time.Second
 	DefaultKServePredictorPort = 8080 // KServe predictors in RawDeployment mode listen on 8080
+
+	// Incident storage defaults (ADR-014)
+	DefaultDataDir              = ""  // Empty means in-memory only
+	DefaultIncidentRetentionDays = 90 // 90 days (PCI-DSS, SOC2, HIPAA compliance)
 )
 
 // Valid log levels
@@ -179,6 +187,10 @@ func Load() (*Config, error) {
 		CORSAllowOrigin: getEnvAsSlice("CORS_ALLOW_ORIGIN", []string{"*"}),
 		KubernetesQPS:   getEnvAsFloat32("KUBERNETES_QPS", DefaultKubernetesQPS),
 		KubernetesBurst: getEnvAsInt("KUBERNETES_BURST", DefaultKubernetesBurst),
+
+		// Incident storage configuration (ADR-014)
+		DataDir:              getEnv("DATA_DIR", DefaultDataDir),
+		IncidentRetentionDays: getEnvAsInt("INCIDENT_RETENTION_DAYS", DefaultIncidentRetentionDays),
 
 		// KServe configuration (ADR-039, ADR-040)
 		KServe: KServeConfig{
