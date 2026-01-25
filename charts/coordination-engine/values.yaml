@@ -117,9 +117,28 @@ env:
   # Prometheus integration for real-time metrics (PR #34)
   - name: PROMETHEUS_URL
     value: "https://thanos-querier.openshift-monitoring.svc:9091"
+  # Incident storage persistence (ADR-014)
+  # Uncomment when persistence.enabled=true
+  # - name: DATA_DIR
+  #   value: "/app/data"
+  # - name: INCIDENT_RETENTION_DAYS
+  #   value: "90"
   # Legacy ML_SERVICE_URL (deprecated - use KServe integration instead)
   # - name: ML_SERVICE_URL
   #   value: "http://aiops-ml-service:8080"
+
+# Persistent storage for incident data (ADR-014)
+# When enabled, incidents will persist across pod restarts
+persistence:
+  enabled: false
+  # Storage class for the PersistentVolumeClaim
+  # Use "-" to disable dynamic provisioning (use existing PV)
+  # storageClass: "gp3"
+  storageClass: ""
+  # Size of the persistent volume
+  size: "10Gi"
+  # Mount path for the data volume
+  mountPath: "/app/data"
 
 # Secret environment variables
 envFrom: []

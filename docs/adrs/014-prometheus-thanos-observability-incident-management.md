@@ -1,7 +1,7 @@
 # ADR-014: Prometheus/Thanos Observability Integration and Incident Management
 
 ## Status
-ACCEPTED - 2026-01-25
+IMPLEMENTED - 2026-01-25
 
 ## Context
 

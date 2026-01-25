@@ -24,6 +24,7 @@ import (
 	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
 	"github.com/tosin2013/openshift-coordination-engine/internal/rbac"
 	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
+	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
 	v1 "github.com/tosin2013/openshift-coordination-engine/pkg/api/v1"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/config"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
@@ -141,11 +142,14 @@ func main() {
 	// Verify KServe model availability on startup
 	verifyKServeModelsOnStartup(cfg, kserveProxyHandler, log)
 
+	// Initialize incident store with persistence if DATA_DIR is configured (ADR-014)
+	incidentStore := initIncidentStore(cfg, log)
+
 	// Create API handlers
 	healthHandler := v1.NewHealthHandler(log, k8sClients.Clientset, rbacVerifier, cfg.MLServiceURL, Version, startTime)
 	// TODO: Add MCO health monitoring to health handler in future enhancement
 	_ = mcoClient // MCO client available for infrastructure layer operations
-	remediationHandler := v1.NewRemediationHandler(orchestrator, log)
+	remediationHandler := v1.NewRemediationHandlerWithStore(orchestrator, incidentStore, log)
 	detectionHandler := v1.NewDetectionHandler(deploymentDetector, log)
 	coordinationHandler := v1.NewCoordinationHandler(layerDetector, multiLayerPlanner, multiLayerOrchestrator, log)
 	log.Info("Coordination handler initialized")
@@ -199,6 +203,7 @@ func main() {
 	apiV1.HandleFunc("/remediation/trigger", remediationHandler.TriggerRemediation).Methods("POST")
 	apiV1.HandleFunc("/workflows/{id}", remediationHandler.GetWorkflow).Methods("GET")
 	apiV1.HandleFunc("/incidents", remediationHandler.ListIncidents).Methods("GET")
+	apiV1.HandleFunc("/incidents", remediationHandler.CreateIncident).Methods("POST")
 
 	// Recommendations endpoint (ML-powered remediation predictions)
 	apiV1.HandleFunc("/recommendations", recommendationsHandler.GetRecommendations).Methods("POST")
@@ -503,4 +508,45 @@ func initKubernetesClient(cfg *config.Config, log *logrus.Logger) (*KubernetesCl
 		DynamicClient: dynamicClient,
 		Config:        restConfig,
 	}, nil
+}
+
+// initIncidentStore initializes the incident store with persistence if DATA_DIR is configured (ADR-014)
+func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.IncidentStore {
+	if cfg.DataDir == "" {
+		log.Info("DATA_DIR not configured, using in-memory incident storage (data will be lost on restart)")
+		return storage.NewIncidentStore()
+	}
+
+	// Create incident store with file-based persistence
+	incidentStore, err := storage.NewIncidentStoreWithPersistence(cfg.DataDir, log)
+	if err != nil {
+		log.WithError(err).Error("Failed to create persistent incident store, falling back to in-memory")
+		return storage.NewIncidentStore()
+	}
+
+	log.WithFields(logrus.Fields{
+		"data_dir":             cfg.DataDir,
+		"retention_days":       cfg.IncidentRetentionDays,
+		"loaded_incidents":     incidentStore.Count(),
+	}).Info("Incident store initialized with file-based persistence")
+
+	// Start background cleanup goroutine for old incidents
+	if cfg.IncidentRetentionDays > 0 {
+		go func() {
+			// Run cleanup every 24 hours
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				if err := incidentStore.CleanupOldIncidents(cfg.IncidentRetentionDays); err != nil {
+					log.WithError(err).Error("Failed to cleanup old incidents")
+				}
+			}
+		}()
+		log.WithField("retention_days", cfg.IncidentRetentionDays).Info("Background incident cleanup enabled")
+	} else {
+		log.Info("Incident cleanup disabled (INCIDENT_RETENTION_DAYS=0)")
+	}
+
+	return incidentStore
 }
