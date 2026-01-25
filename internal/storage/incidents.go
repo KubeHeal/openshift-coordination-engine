@@ -40,7 +40,7 @@ func NewIncidentStoreWithPersistence(dataDir string, log *logrus.Logger) (*Incid
 	}
 
 	// Ensure data directory exists
-	if err := os.MkdirAll(dataDir, 0750); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
