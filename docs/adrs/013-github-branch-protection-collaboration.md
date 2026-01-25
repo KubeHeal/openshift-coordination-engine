@@ -1,7 +1,7 @@
 # ADR-013: GitHub Branch Protection and Collaboration Workflow
 
 ## Status
-ACCEPTED - 2026-01-20
+IMPLEMENTED - 2026-01-25 (Previously: ACCEPTED - 2026-01-20)
 
 ## Context
 
