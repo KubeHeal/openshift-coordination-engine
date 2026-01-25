@@ -1,7 +1,7 @@
 # ADR-002: Deployment Detection Implementation
 
 ## Status
-ACCEPTED - 2025-12-18
+IMPLEMENTED - 2026-01-25 (Previously: ACCEPTED - 2025-12-18)
 
 ## Context
 

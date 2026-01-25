@@ -1,7 +1,7 @@
 # ADR-012: ML-Enhanced Layer Detection
 
 ## Status
-ACCEPTED - 2025-12-19
+IMPLEMENTED - 2026-01-25 (Previously: ACCEPTED - 2025-12-19)
 
 ## Context
 
