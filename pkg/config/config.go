@@ -189,7 +189,7 @@ func Load() (*Config, error) {
 		KubernetesBurst: getEnvAsInt("KUBERNETES_BURST", DefaultKubernetesBurst),
 
 		// Incident storage configuration (ADR-014)
-		DataDir:              getEnv("DATA_DIR", DefaultDataDir),
+		DataDir:               getEnv("DATA_DIR", DefaultDataDir),
 		IncidentRetentionDays: getEnvAsInt("INCIDENT_RETENTION_DAYS", DefaultIncidentRetentionDays),
 
 		// KServe configuration (ADR-039, ADR-040)
