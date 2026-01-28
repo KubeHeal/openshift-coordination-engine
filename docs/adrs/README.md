@@ -26,6 +26,7 @@ These ADRs define the **Go implementation** of the coordination engine:
 | [012](012-ml-enhanced-layer-detection.md) | ML-Enhanced Layer Detection | ACCEPTED | ML-enhanced layer detection with confidence scores (Phase 6) |
 | [013](013-github-branch-protection-collaboration.md) | GitHub Branch Protection and Collaboration Workflow | ACCEPTED | Branch protection rules, code ownership, and contribution guidelines |
 | [014](014-prometheus-thanos-observability-incident-management.md) | Prometheus/Thanos Observability Integration and Incident Management | ACCEPTED | Prometheus/Thanos metrics integration, incident storage with persistence, and API enhancements for manual incident creation |
+| [015](015-kserve-inference-service-integration.md) | KServe InferenceService Integration | IMPLEMENTED | KServe proxy client for ML models, dynamic model name discovery, fixes issue #53 |
 
 **Note on numbering**: ADR-007, ADR-008, and ADR-010 are reserved numbers. These were initially planned for additional decisions but were either integrated into existing ADRs or deemed unnecessary. The numbers are kept reserved to maintain sequential reference integrity.
 
@@ -80,11 +81,16 @@ Platform ADR-042 (Go Coordination Engine)
     │       ├──> Enhances ADR-003 (Layer Detector)
     │       └──> Uses ADR-009 (Python ML Client)
     │
-    └──> ADR-014 (Prometheus/Thanos Observability & Incidents)
-            ├──> Enhances ADR-009 (ML metrics source)
-            ├──> Extends ADR-011 (Incident creation API)
-            ├──> Improves ADR-012 (ML confidence with real metrics)
-            └──> Extends ADR-001 (Storage package)
+    ├──> ADR-014 (Prometheus/Thanos Observability & Incidents)
+    │       ├──> Enhances ADR-009 (ML metrics source)
+    │       ├──> Extends ADR-011 (Incident creation API)
+    │       ├──> Improves ADR-012 (ML confidence with real metrics)
+    │       └──> Extends ADR-001 (Storage package)
+    │
+    └──> ADR-015 (KServe InferenceService Integration)
+            ├──> Alternative to ADR-009 (KServe vs legacy ML service)
+            ├──> Consumed by ADR-003 (Anomaly detection for coordination)
+            └──> Enhanced by ADR-014 (Prometheus metrics for ML)
 ```
 
 ## Reading Order
@@ -102,9 +108,10 @@ If you're new to the coordination engine, read ADRs in this order:
 7. **[ADR-005](005-remediation-strategies-implementation.md)** - Remediation strategies
 8. **[ADR-004](004-argocd-mco-integration.md)** - ArgoCD and MCO integration
 9. **[ADR-006](006-rbac-kubernetes-client-configuration.md)** - Kubernetes client and RBAC
-10. **[ADR-009](009-python-ml-integration.md)** - Python ML service integration
-11. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection
-12. **[ADR-014](014-prometheus-thanos-observability-incident-management.md)** - Prometheus/Thanos observability and incident management (builds on ADR-003 and ADR-009)
+10. **[ADR-009](009-python-ml-integration.md)** - Python ML service integration (legacy)
+11. **[ADR-015](015-kserve-inference-service-integration.md)** - KServe InferenceService integration (recommended for OpenShift AI)
+12. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection
+13. **[ADR-014](014-prometheus-thanos-observability-incident-management.md)** - Prometheus/Thanos observability and incident management (builds on ADR-003 and ADR-009)
 
 ### For Platform Understanding
 
@@ -235,7 +242,7 @@ See: [ADR-009](009-python-ml-integration.md)
 
 When creating new ADRs:
 1. Follow the [ADR template](https://github.com/joelparkerhenderson/architecture-decision-record)
-2. Number ADRs sequentially (next: ADR-014; skip reserved numbers 007, 008, 010)
+2. Number ADRs sequentially (next: ADR-016; skip reserved numbers 007, 008, 010)
 3. Reference platform ADRs where applicable
 4. Update this README with the new ADR in index table, relationship diagram, and reading order
 5. Add cross-references in "Related ADRs" section
@@ -250,4 +257,4 @@ When creating new ADRs:
 
 ---
 
-*Last Updated: 2026-01-25*
+*Last Updated: 2026-01-28*
