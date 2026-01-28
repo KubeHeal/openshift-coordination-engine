@@ -110,8 +110,15 @@ env:
   # for the health check Job. Keep both sections synchronized.
   - name: KSERVE_ANOMALY_DETECTOR_SERVICE
     value: "anomaly-detector-predictor"  # From InferenceService: anomaly-detector
+  # KServe model name for API paths (e.g., /v1/models/<model>:predict)
+  # This should match the model name configured in the InferenceService
+  - name: KSERVE_ANOMALY_DETECTOR_MODEL
+    value: "anomaly-detector"
   - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
     value: "predictive-analytics-predictor"  # From InferenceService: predictive-analytics
+  # KServe model name for API paths (e.g., /v1/models/<model>:predict)
+  - name: KSERVE_PREDICTIVE_ANALYTICS_MODEL
+    value: "predictive-analytics"
   - name: KSERVE_TIMEOUT
     value: "10s"
   # Prometheus integration for real-time metrics (PR #34)
@@ -187,12 +194,16 @@ autoscaling:
 kserve:
   enabled: true
   namespace: "self-healing-platform"
-  # Configurable predictor port and health path
+  # Configurable predictor port
+  # Note: healthPath is now dynamic per model, using the model name in the path
+  # e.g., /v1/models/anomaly-detector for anomaly-detector model
   predictorPort: 8080
-  healthPath: "/v1/models/model"
   # List of KServe model services to health check before deployment
   # NOTE: These should match the KSERVE_*_SERVICE environment variables in the env section above
   # to ensure configuration consistency
+  # Format: service-name:model-name (model-name used for health check path /v1/models/<model-name>)
   models:
-    - "anomaly-detector-predictor"
-    - "predictive-analytics-predictor"
+    - name: "anomaly-detector-predictor"
+      modelName: "anomaly-detector"
+    - name: "predictive-analytics-predictor"
+      modelName: "predictive-analytics"
