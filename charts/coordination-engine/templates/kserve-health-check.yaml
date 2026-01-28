@@ -25,24 +25,26 @@ spec:
         - |
           KSERVE_NS="{{ .Values.kserve.namespace }}"
           KSERVE_PORT="{{ .Values.kserve.predictorPort | default 8080 }}"
-          KSERVE_PATH="{{ .Values.kserve.healthPath | default "/v1/models/model" }}"
-          MODELS="{{ join " " .Values.kserve.models }}"
 
           echo "Checking KServe model availability in namespace: $KSERVE_NS"
-          for model in $MODELS; do
-            MAX_RETRIES=30
-            RETRY=0
-            until curl -f --connect-timeout 5 --max-time 10 http://$model.$KSERVE_NS.svc:$KSERVE_PORT$KSERVE_PATH 2>&1; do
-              RETRY=$((RETRY+1))
-              if [ $RETRY -ge $MAX_RETRIES ]; then
-                echo "ERROR: Model $model not ready after $MAX_RETRIES attempts"
-                echo "Check: kubectl get inferenceservice -n $KSERVE_NS"
-                exit 1
-              fi
-              echo "Waiting for $model to be ready... ($RETRY/$MAX_RETRIES)"
-              sleep 10
-            done
-            echo "✓ Model $model is ready"
+          {{- range .Values.kserve.models }}
+          # Check model: {{ .name }} with KServe model name: {{ .modelName }}
+          SERVICE_NAME="{{ .name }}"
+          MODEL_NAME="{{ .modelName }}"
+          HEALTH_PATH="/v1/models/$MODEL_NAME"
+          MAX_RETRIES=30
+          RETRY=0
+          until curl -f --connect-timeout 5 --max-time 10 http://$SERVICE_NAME.$KSERVE_NS.svc:$KSERVE_PORT$HEALTH_PATH 2>&1; do
+            RETRY=$((RETRY+1))
+            if [ $RETRY -ge $MAX_RETRIES ]; then
+              echo "ERROR: Model $SERVICE_NAME (KServe name: $MODEL_NAME) not ready after $MAX_RETRIES attempts"
+              echo "Check: kubectl get inferenceservice -n $KSERVE_NS"
+              exit 1
+            fi
+            echo "Waiting for $SERVICE_NAME to be ready... ($RETRY/$MAX_RETRIES)"
+            sleep 10
           done
+          echo "✓ Model $SERVICE_NAME (KServe name: $MODEL_NAME) is ready"
+          {{- end }}
           echo "All KServe models are healthy"
 {{- end }}

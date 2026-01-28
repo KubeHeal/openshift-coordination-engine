@@ -38,8 +38,14 @@ env:
     value: "8080"  # KServe InferenceService predictors in RawDeployment mode listen on 8080
   - name: KSERVE_ANOMALY_DETECTOR_SERVICE
     value: "anomaly-detector-predictor"
+  # KServe model name for API paths (e.g., /v1/models/<model>:predict)
+  - name: KSERVE_ANOMALY_DETECTOR_MODEL
+    value: "anomaly-detector"
   - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
     value: "predictive-analytics-predictor"
+  # KServe model name for API paths (e.g., /v1/models/<model>:predict)
+  - name: KSERVE_PREDICTIVE_ANALYTICS_MODEL
+    value: "predictive-analytics"
   - name: KSERVE_TIMEOUT
     value: "10s"
   # Prometheus integration for real-time metrics (ADR-014)
