@@ -36,6 +36,11 @@ type ModelInfo struct {
 	// ServiceName is the KServe InferenceService name (e.g., "anomaly-detector-predictor")
 	ServiceName string `json:"service_name"`
 
+	// KServeModelName is the model name used in KServe API paths (e.g., "anomaly-detector")
+	// This is read from KSERVE_*_MODEL environment variables or defaults to the logical model name.
+	// KServe uses this in endpoints like /v1/models/<KServeModelName>:predict
+	KServeModelName string `json:"kserve_model_name"`
+
 	// Namespace is the Kubernetes namespace where the model is deployed
 	Namespace string `json:"namespace"`
 
@@ -190,7 +195,10 @@ func NewProxyClient(cfg ProxyConfig, log *logrus.Logger) (*ProxyClient, error) {
 
 // loadModelsFromEnv discovers models from environment variables.
 // Pattern: KSERVE_<MODEL_NAME>_SERVICE = service-name
+// Optional: KSERVE_<MODEL_NAME>_MODEL = kserve-model-name (for KServe API paths)
 // Example: KSERVE_ANOMALY_DETECTOR_SERVICE = anomaly-detector-predictor
+//
+//	KSERVE_ANOMALY_DETECTOR_MODEL = anomaly-detector
 func (c *ProxyClient) loadModelsFromEnv() {
 	c.modelsMutex.Lock()
 	defer c.modelsMutex.Unlock()
@@ -226,21 +234,32 @@ func (c *ProxyClient) loadModelsFromEnv() {
 		modelName = strings.TrimSuffix(modelName, "_SERVICE")
 		modelName = strings.ToLower(strings.ReplaceAll(modelName, "_", "-"))
 
+		// Look for corresponding KSERVE_<MODEL_NAME>_MODEL environment variable
+		// e.g., KSERVE_ANOMALY_DETECTOR_SERVICE -> KSERVE_ANOMALY_DETECTOR_MODEL
+		modelEnvKey := strings.TrimSuffix(envKey, "_SERVICE") + "_MODEL"
+		kserveModelName := os.Getenv(modelEnvKey)
+		if kserveModelName == "" {
+			// Fallback to logical model name if MODEL env var is not set
+			kserveModelName = modelName
+		}
+
 		// Build service URL with the predictor port
 		url := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, c.namespace, c.predictorPort)
 
 		c.models[modelName] = &ModelInfo{
-			Name:        modelName,
-			ServiceName: serviceName,
-			Namespace:   c.namespace,
-			URL:         url,
+			Name:            modelName,
+			ServiceName:     serviceName,
+			KServeModelName: kserveModelName,
+			Namespace:       c.namespace,
+			URL:             url,
 		}
 
 		c.log.WithFields(logrus.Fields{
-			"model":   modelName,
-			"service": serviceName,
-			"url":     url,
-			"port":    c.predictorPort,
+			"model":             modelName,
+			"service":           serviceName,
+			"kserve_model_name": kserveModelName,
+			"url":               url,
+			"port":              c.predictorPort,
 		}).Debug("Registered KServe model from environment")
 	}
 }
@@ -303,10 +322,8 @@ func (c *ProxyClient) Predict(ctx context.Context, modelName string, instances [
 	}
 
 	// Build endpoint URL - KServe v1 protocol: /v1/models/<model>:predict
-	// Note: KServe defaults to model name "model" when spec.predictor.model.name is not set
-	// We use the hardcoded "model" name for KServe API paths, while keeping the logical
-	// model name (e.g., "anomaly-detector") for user-facing APIs and service resolution
-	endpoint := fmt.Sprintf("%s/v1/models/model:predict", model.URL)
+	// Use the KServeModelName which is read from KSERVE_*_MODEL env var or defaults to logical model name
+	endpoint := fmt.Sprintf("%s/v1/models/%s:predict", model.URL, model.KServeModelName)
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
@@ -409,7 +426,8 @@ func (c *ProxyClient) PredictFlexible(ctx context.Context, modelName string, ins
 	}
 
 	// Build endpoint URL - KServe v1 protocol: /v1/models/<model>:predict
-	endpoint := fmt.Sprintf("%s/v1/models/model:predict", model.URL)
+	// Use the KServeModelName which is read from KSERVE_*_MODEL env var or defaults to logical model name
+	endpoint := fmt.Sprintf("%s/v1/models/%s:predict", model.URL, model.KServeModelName)
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
@@ -688,8 +706,8 @@ func (c *ProxyClient) CheckModelHealth(ctx context.Context, modelName string) (*
 	}
 
 	// KServe v1 health endpoint: GET /v1/models/<model>
-	// Note: KServe defaults to model name "model" when spec.predictor.model.name is not set
-	endpoint := fmt.Sprintf("%s/v1/models/model", model.URL)
+	// Use the KServeModelName which is read from KSERVE_*_MODEL env var or defaults to logical model name
+	endpoint := fmt.Sprintf("%s/v1/models/%s", model.URL, model.KServeModelName)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, http.NoBody)
 	if err != nil {

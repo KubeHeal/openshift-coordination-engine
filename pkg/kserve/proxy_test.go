@@ -140,8 +140,60 @@ func TestProxyClient_LoadModelsFromEnv(t *testing.T) {
 	assert.True(t, exists)
 	assert.Equal(t, "anomaly-detector", anomalyDetector.Name)
 	assert.Equal(t, "anomaly-detector-predictor", anomalyDetector.ServiceName)
+	// KServeModelName should default to logical model name when _MODEL env var is not set
+	assert.Equal(t, "anomaly-detector", anomalyDetector.KServeModelName)
 	assert.Equal(t, "test-namespace", anomalyDetector.Namespace)
 	assert.Equal(t, "http://anomaly-detector-predictor.test-namespace.svc.cluster.local:8080", anomalyDetector.URL)
+}
+
+func TestProxyClient_LoadModelsFromEnv_WithModelEnvVar(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// Set up environment variables including the _MODEL env var
+	envVars := map[string]string{
+		"KSERVE_ANOMALY_DETECTOR_SERVICE":       "anomaly-detector-predictor",
+		"KSERVE_ANOMALY_DETECTOR_MODEL":         "custom-anomaly-model-name", // Custom KServe model name
+		"KSERVE_PREDICTIVE_ANALYTICS_SERVICE":   "predictive-analytics-predictor",
+		"KSERVE_PREDICTIVE_ANALYTICS_MODEL":     "predictive-analytics", // Same as logical name
+		"KSERVE_DISK_FAILURE_PREDICTOR_SERVICE": "disk-failure-predictor-predictor",
+		// No _MODEL env var for disk-failure-predictor - should fallback to logical name
+	}
+
+	for key, val := range envVars {
+		os.Setenv(key, val)
+	}
+	defer func() {
+		for key := range envVars {
+			os.Unsetenv(key)
+		}
+	}()
+
+	cfg := ProxyConfig{
+		Namespace:     "test-namespace",
+		PredictorPort: 8080,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Check anomaly-detector with custom model name
+	anomalyDetector, exists := client.GetModel("anomaly-detector")
+	assert.True(t, exists)
+	assert.Equal(t, "anomaly-detector", anomalyDetector.Name)
+	assert.Equal(t, "custom-anomaly-model-name", anomalyDetector.KServeModelName) // Uses _MODEL env var
+
+	// Check predictive-analytics with same name
+	predictiveAnalytics, exists := client.GetModel("predictive-analytics")
+	assert.True(t, exists)
+	assert.Equal(t, "predictive-analytics", predictiveAnalytics.Name)
+	assert.Equal(t, "predictive-analytics", predictiveAnalytics.KServeModelName)
+
+	// Check disk-failure-predictor without _MODEL env var (should fallback)
+	diskFailure, exists := client.GetModel("disk-failure-predictor")
+	assert.True(t, exists)
+	assert.Equal(t, "disk-failure-predictor", diskFailure.Name)
+	assert.Equal(t, "disk-failure-predictor", diskFailure.KServeModelName) // Fallback to logical name
 }
 
 func TestProxyClient_LoadModelsFromEnv_DefaultPort(t *testing.T) {
@@ -236,8 +288,8 @@ func TestProxyClient_GetAllModels(t *testing.T) {
 func TestProxyClient_Predict(t *testing.T) {
 	// Create mock KServe server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// KServe defaults to model name "model" when spec.predictor.model.name is not set
-		assert.Equal(t, "/v1/models/model:predict", r.URL.Path)
+		// Now uses dynamic model name from KServeModelName field
+		assert.Equal(t, "/v1/models/test-kserve-model:predict", r.URL.Path)
 		assert.Equal(t, "POST", r.Method)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
@@ -272,12 +324,13 @@ func TestProxyClient_Predict(t *testing.T) {
 	client, err := NewProxyClient(cfg, log)
 	require.NoError(t, err)
 
-	// Manually add a model pointing to the test server
+	// Manually add a model pointing to the test server with KServeModelName
 	client.models["test-model"] = &ModelInfo{
-		Name:        "test-model",
-		ServiceName: "test-service",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "test-model",
+		ServiceName:     "test-service",
+		KServeModelName: "test-kserve-model", // KServe model name used in API paths
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	// Make prediction
@@ -335,10 +388,11 @@ func TestProxyClient_Predict_ServerError(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["test-model"] = &ModelInfo{
-		Name:        "test-model",
-		ServiceName: "test-service",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "test-model",
+		ServiceName:     "test-service",
+		KServeModelName: "test-model",
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	_, err = client.Predict(context.Background(), "test-model", [][]float64{{0.1, 0.2}})
@@ -350,13 +404,13 @@ func TestProxyClient_Predict_ServerError(t *testing.T) {
 func TestProxyClient_CheckModelHealth(t *testing.T) {
 	// Create healthy mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// KServe defaults to model name "model" when spec.predictor.model.name is not set
-		assert.Equal(t, "/v1/models/model", r.URL.Path)
+		// Now uses dynamic model name from KServeModelName field
+		assert.Equal(t, "/v1/models/test-kserve-model", r.URL.Path)
 		assert.Equal(t, "GET", r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"name": "model"})
+		json.NewEncoder(w).Encode(map[string]string{"name": "test-kserve-model"})
 	}))
 	defer server.Close()
 
@@ -371,10 +425,11 @@ func TestProxyClient_CheckModelHealth(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["test-model"] = &ModelInfo{
-		Name:        "test-model",
-		ServiceName: "test-service",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "test-model",
+		ServiceName:     "test-service",
+		KServeModelName: "test-kserve-model", // KServe model name used in API paths
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	health, err := client.CheckModelHealth(context.Background(), "test-model")
@@ -404,10 +459,11 @@ func TestProxyClient_CheckModelHealth_Unhealthy(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["test-model"] = &ModelInfo{
-		Name:        "test-model",
-		ServiceName: "test-service",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "test-model",
+		ServiceName:     "test-service",
+		KServeModelName: "test-model",
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	health, err := client.CheckModelHealth(context.Background(), "test-model")
@@ -455,12 +511,14 @@ func TestProxyClient_HealthCheck(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["model-1"] = &ModelInfo{
-		Name: "model-1",
-		URL:  server.URL,
+		Name:            "model-1",
+		KServeModelName: "model-1",
+		URL:             server.URL,
 	}
 	client.models["model-2"] = &ModelInfo{
-		Name: "model-2",
-		URL:  server.URL,
+		Name:            "model-2",
+		KServeModelName: "model-2",
+		URL:             server.URL,
 	}
 
 	err = client.HealthCheck(context.Background())
@@ -623,7 +681,7 @@ func TestForecastResponse_JSON(t *testing.T) {
 func TestProxyClient_PredictFlexible_ForecastResponse(t *testing.T) {
 	// Create mock KServe server returning predictive-analytics format
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/models/model:predict", r.URL.Path)
+		assert.Equal(t, "/v1/models/predictive-analytics:predict", r.URL.Path)
 		assert.Equal(t, "POST", r.Method)
 
 		resp := map[string]interface{}{
@@ -664,10 +722,11 @@ func TestProxyClient_PredictFlexible_ForecastResponse(t *testing.T) {
 
 	// Add predictive-analytics model pointing to test server
 	client.models["predictive-analytics"] = &ModelInfo{
-		Name:        "predictive-analytics",
-		ServiceName: "predictive-analytics-predictor",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "predictive-analytics",
+		ServiceName:     "predictive-analytics-predictor",
+		KServeModelName: "predictive-analytics",
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	// Make prediction
@@ -696,6 +755,7 @@ func TestProxyClient_PredictFlexible_ForecastResponse(t *testing.T) {
 func TestProxyClient_PredictFlexible_AnomalyResponse(t *testing.T) {
 	// Create mock KServe server returning anomaly-detector format
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/models/anomaly-detector:predict", r.URL.Path)
 		resp := map[string]interface{}{
 			"predictions":   []int{-1, 1, -1},
 			"model_name":    "anomaly-detector",
@@ -720,10 +780,11 @@ func TestProxyClient_PredictFlexible_AnomalyResponse(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["anomaly-detector"] = &ModelInfo{
-		Name:        "anomaly-detector",
-		ServiceName: "anomaly-detector-predictor",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "anomaly-detector",
+		ServiceName:     "anomaly-detector-predictor",
+		KServeModelName: "anomaly-detector",
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	instances := [][]float64{{0.5, 1.2, 0.8}}
@@ -772,8 +833,9 @@ func TestProxyClient_PredictFlexible_AutoDetect(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["custom-model"] = &ModelInfo{
-		Name: "custom-model",
-		URL:  server.URL,
+		Name:            "custom-model",
+		KServeModelName: "custom-model",
+		URL:             server.URL,
 	}
 
 	result, err := client.PredictFlexible(context.Background(), "custom-model", [][]float64{{1.0}})
@@ -815,8 +877,9 @@ func TestProxyClient_PredictForecast(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["predictive-analytics"] = &ModelInfo{
-		Name: "predictive-analytics",
-		URL:  server.URL,
+		Name:            "predictive-analytics",
+		KServeModelName: "predictive-analytics",
+		URL:             server.URL,
 	}
 
 	forecast, err := client.PredictForecast(context.Background(), "predictive-analytics", [][]float64{{14.0, 2.0}})
@@ -856,8 +919,9 @@ func TestProxyClient_PredictForecast_WrongModelType(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["anomaly-detector"] = &ModelInfo{
-		Name: "anomaly-detector",
-		URL:  server.URL,
+		Name:            "anomaly-detector",
+		KServeModelName: "anomaly-detector",
+		URL:             server.URL,
 	}
 
 	_, err = client.PredictForecast(context.Background(), "anomaly-detector", [][]float64{{1.0}})
@@ -895,10 +959,11 @@ func TestProxyClient_PredictFlexible_ArrayFormat(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["predictive-analytics"] = &ModelInfo{
-		Name:        "predictive-analytics",
-		ServiceName: "predictive-analytics-predictor",
-		Namespace:   "test-ns",
-		URL:         server.URL,
+		Name:            "predictive-analytics",
+		ServiceName:     "predictive-analytics-predictor",
+		KServeModelName: "predictive-analytics",
+		Namespace:       "test-ns",
+		URL:             server.URL,
 	}
 
 	instances := [][]float64{{14.0, 2.0, 0.65, 0.72}}
@@ -952,8 +1017,9 @@ func TestProxyClient_PredictFlexible_ArrayFormat_MultipleSamples(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["predictive-analytics"] = &ModelInfo{
-		Name: "predictive-analytics",
-		URL:  server.URL,
+		Name:            "predictive-analytics",
+		KServeModelName: "predictive-analytics",
+		URL:             server.URL,
 	}
 
 	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{14.0, 2.0}})
@@ -998,8 +1064,9 @@ func TestProxyClient_PredictFlexible_ArrayFormat_SingleOutput(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["predictive-analytics"] = &ModelInfo{
-		Name: "predictive-analytics",
-		URL:  server.URL,
+		Name:            "predictive-analytics",
+		KServeModelName: "predictive-analytics",
+		URL:             server.URL,
 	}
 
 	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{14.0}})
@@ -1051,8 +1118,9 @@ func TestProxyClient_PredictFlexible_NestedFormat_Passthrough(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["predictive-analytics"] = &ModelInfo{
-		Name: "predictive-analytics",
-		URL:  server.URL,
+		Name:            "predictive-analytics",
+		KServeModelName: "predictive-analytics",
+		URL:             server.URL,
 	}
 
 	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{14.0, 2.0}})
@@ -1099,8 +1167,9 @@ func TestProxyClient_AutoDetect_ArrayOfArrays(t *testing.T) {
 
 	// Use unknown model name to trigger auto-detection
 	client.models["custom-sklearn-model"] = &ModelInfo{
-		Name: "custom-sklearn-model",
-		URL:  server.URL,
+		Name:            "custom-sklearn-model",
+		KServeModelName: "custom-sklearn-model",
+		URL:             server.URL,
 	}
 
 	result, err := client.PredictFlexible(context.Background(), "custom-sklearn-model", [][]float64{{1.0}})
@@ -1135,8 +1204,9 @@ func TestProxyClient_AutoDetect_SimpleArray(t *testing.T) {
 	require.NoError(t, err)
 
 	client.models["custom-anomaly-model"] = &ModelInfo{
-		Name: "custom-anomaly-model",
-		URL:  server.URL,
+		Name:            "custom-anomaly-model",
+		KServeModelName: "custom-anomaly-model",
+		URL:             server.URL,
 	}
 
 	result, err := client.PredictFlexible(context.Background(), "custom-anomaly-model", [][]float64{{1.0, 2.0, 3.0}})
