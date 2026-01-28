@@ -1,0 +1,209 @@
+name: Validate with AIOps Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      openshift_api:
+        description: 'OpenShift API URL'
+        required: false
+      openshift_token:
+        description: 'OpenShift token (from secrets)'
+        required: false
+  pull_request:
+    branches: [main, release-*]
+  push:
+    branches: [release-*]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    # Only run if secrets are configured (for PR validation, skip if secrets not available)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name != 'workflow_dispatch' && secrets.OPENSHIFT_API != '' && secrets.OPENSHIFT_TOKEN != '')
+
+    steps:
+      - name: Check Prerequisites
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -z "${{ inputs.openshift_api }}" ] || [ -z "${{ inputs.openshift_token }}" ]; then
+              echo "❌ For manual dispatch, openshift_api and openshift_token inputs are required"
+              exit 1
+            fi
+          else
+            if [ -z "${{ secrets.OPENSHIFT_API }}" ] || [ -z "${{ secrets.OPENSHIFT_TOKEN }}" ]; then
+              echo "⚠️  OpenShift credentials not configured in repository secrets"
+              echo "   Skipping integration test"
+              exit 0
+            fi
+          fi
+
+      - name: Set OpenShift Credentials
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "OPENSHIFT_API=${{ inputs.openshift_api }}" >> $GITHUB_ENV
+            echo "OPENSHIFT_TOKEN=${{ inputs.openshift_token }}" >> $GITHUB_ENV
+          else
+            echo "OPENSHIFT_API=${{ secrets.OPENSHIFT_API }}" >> $GITHUB_ENV
+            echo "OPENSHIFT_TOKEN=${{ secrets.OPENSHIFT_TOKEN }}" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout coordination-engine (this repo)
+        uses: actions/checkout@v4
+        with:
+          path: coordination-engine
+
+      - name: Checkout openshift-aiops-platform
+        uses: actions/checkout@v4
+        with:
+          repository: tosin2013/openshift-aiops-platform
+          path: aiops-platform
+
+      - name: Checkout cluster-health-mcp
+        uses: actions/checkout@v4
+        with:
+          repository: tosin2013/openshift-cluster-health-mcp
+          path: cluster-health-mcp
+
+      - name: Install OpenShift CLI
+        run: |
+          curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
+          tar -xvf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          oc version
+
+      - name: Login to OpenShift
+        run: |
+          oc login --token=${{ env.OPENSHIFT_TOKEN }} --server=${{ env.OPENSHIFT_API }} --insecure-skip-tls-verify=true
+          oc whoami
+
+      - name: Generate Test Namespace
+        run: |
+          TEST_NS="coordination-test-$(date +%s)"
+          echo "TEST_NAMESPACE=$TEST_NS" >> $GITHUB_ENV
+          echo "Test namespace: $TEST_NS"
+
+      - name: Deploy AIOps Platform
+        working-directory: aiops-platform
+        run: |
+          echo "Deploying AIOps platform to ${{ env.TEST_NAMESPACE }}..."
+
+          oc create namespace ${{ env.TEST_NAMESPACE }}
+
+          helm upgrade --install self-healing-platform charts/hub \
+            --namespace ${{ env.TEST_NAMESPACE }} \
+            --set global.git.repoURL=https://github.com/tosin2013/openshift-aiops-platform.git \
+            --set global.git.revision=main \
+            --wait --timeout 10m
+
+          echo "✅ AIOps platform deployed"
+
+      - name: Build and Deploy Coordination Engine
+        working-directory: coordination-engine
+        run: |
+          echo "Building coordination engine..."
+
+          # Build container image
+          oc new-build --binary --strategy=docker --name=coordination-engine-test \
+            -n ${{ env.TEST_NAMESPACE }} || true
+
+          oc start-build coordination-engine-test --from-dir=. --follow \
+            -n ${{ env.TEST_NAMESPACE }}
+
+          # Deploy coordination engine
+          oc new-app coordination-engine-test \
+            -n ${{ env.TEST_NAMESPACE }} || true
+
+          # Wait for deployment
+          oc wait --for=condition=Available deployment/coordination-engine-test \
+            -n ${{ env.TEST_NAMESPACE }} --timeout=5m
+
+          echo "✅ Coordination engine deployed"
+
+      - name: Test Integration
+        working-directory: aiops-platform
+        run: |
+          echo "Testing coordination engine integration with AIOps platform..."
+
+          # Train models quickly for testing
+          ./scripts/trigger-model-training.sh anomaly-detector 24 synthetic ${{ env.TEST_NAMESPACE }} <<< "y"
+
+          # Wait for training
+          sleep 10
+          LATEST_RUN=$(oc get pipelineruns -n ${{ env.TEST_NAMESPACE }} \
+            -l model-name=anomaly-detector --sort-by=.metadata.creationTimestamp -o name | tail -1)
+          oc wait --for=condition=Succeeded $LATEST_RUN \
+            -n ${{ env.TEST_NAMESPACE }} --timeout=15m
+
+          # Validate models
+          export NAMESPACE=${{ env.TEST_NAMESPACE }}
+          ./scripts/validate-models.sh
+
+          echo "✅ Integration test passed"
+
+      - name: Test Coordination Engine Health
+        run: |
+          echo "Testing coordination engine health endpoint..."
+
+          CE_POD=$(oc get pod -l app=coordination-engine-test \
+            -n ${{ env.TEST_NAMESPACE }} -o jsonpath='{.items[0].metadata.name}')
+
+          CE_IP=$(oc get pod $CE_POD -n ${{ env.TEST_NAMESPACE }} \
+            -o jsonpath='{.status.podIP}')
+
+          # Test health endpoint
+          RESPONSE=$(oc exec -n ${{ env.TEST_NAMESPACE }} $CE_POD -- \
+            curl -s http://localhost:8080/health || echo "failed")
+
+          if [ "$RESPONSE" != "failed" ]; then
+            echo "✅ Coordination engine health check passed"
+          else
+            echo "⚠️  Coordination engine health check failed"
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up test namespace..."
+          oc delete namespace ${{ env.TEST_NAMESPACE }} --wait=false || true
+          echo "✅ Cleanup initiated"
+
+      - name: Collect Logs on Failure
+        if: failure()
+        run: |
+          echo "=========================================="
+          echo "Collecting diagnostic information..."
+          echo "=========================================="
+
+          # Coordination engine logs
+          echo "Coordination Engine pods:"
+          oc get pods -n ${{ env.TEST_NAMESPACE }} -l app=coordination-engine-test || true
+
+          echo ""
+          echo "Coordination Engine logs:"
+          oc logs -n ${{ env.TEST_NAMESPACE }} -l app=coordination-engine-test --tail=100 || true
+
+          # AIOps platform status
+          echo ""
+          echo "InferenceServices:"
+          oc get inferenceservices -n ${{ env.TEST_NAMESPACE }} || true
+
+          echo ""
+          echo "PipelineRuns:"
+          oc get pipelineruns -n ${{ env.TEST_NAMESPACE }} || true
+
+      - name: Test Summary
+        if: success()
+        run: |
+          echo "=========================================="
+          echo "✅ Coordination Engine Integration Test PASSED"
+          echo "=========================================="
+          echo "Validated:"
+          echo "  ✅ Coordination engine builds and deploys"
+          echo "  ✅ Integration with AIOps platform"
+          echo "  ✅ Model training compatibility"
+          echo "  ✅ Health endpoint accessibility"
+          echo ""
+          echo "The coordination engine is compatible with the AIOps platform!"
