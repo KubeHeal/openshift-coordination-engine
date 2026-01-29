@@ -199,133 +199,175 @@ const (
 func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	// Parse and validate request
+	req, err := h.parseAndValidateRequest(r)
+	if err != nil {
+		h.handleRequestError(w, err)
+		return
+	}
+
+	h.logPredictionRequest(req)
+
+	// Validate KServe availability
+	if err := h.validateKServeAvailability(req.Model); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	// Get metrics and build prediction instances
+	cpuRollingMean, memoryRollingMean := h.getMetricsWithDefaults(ctx, req)
+	instances, featureCount := h.buildPredictionInstances(ctx, req, cpuRollingMean, memoryRollingMean)
+
+	h.logPredictionInstances(featureCount, cpuRollingMean, memoryRollingMean)
+
+	// Execute prediction
+	cpuPercent, memoryPercent, confidence, modelVersion, err := h.executePrediction(ctx, req.Model, instances, cpuRollingMean, memoryRollingMean)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	// Build and send response
+	response := h.buildPredictResponse(req, cpuPercent, memoryPercent, confidence, modelVersion, cpuRollingMean, memoryRollingMean)
+	h.logPredictionSuccess(response, cpuPercent, memoryPercent, confidence)
+	h.respondJSON(w, http.StatusOK, response)
+}
+
+// parseAndValidateRequest parses the request body and validates it
+func (h *PredictionHandler) parseAndValidateRequest(r *http.Request) (*PredictRequest, error) {
 	// Check content type
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "" && !strings.HasPrefix(contentType, "application/json") {
-		h.respondError(w, http.StatusBadRequest, "Content-Type must be application/json", "", ErrCodeInvalidRequest)
-		return
+		return nil, &requestError{message: "Content-Type must be application/json", code: ErrCodeInvalidRequest}
 	}
 
 	// Parse request
 	var req PredictRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.log.WithError(err).Debug("Invalid predict request format")
-		h.respondError(w, http.StatusBadRequest, "Invalid request format", err.Error(), ErrCodeInvalidRequest)
-		return
+		return nil, &requestError{message: "Invalid request format", details: err.Error(), code: ErrCodeInvalidRequest}
 	}
 
 	// Validate request
 	if err := h.validateRequest(&req); err != nil {
 		h.log.WithError(err).Debug("Predict request validation failed")
-		h.respondError(w, http.StatusBadRequest, err.Error(), "", ErrCodeInvalidRequest)
-		return
+		return nil, &requestError{message: err.Error(), code: ErrCodeInvalidRequest}
 	}
 
 	// Set defaults
 	h.setRequestDefaults(&req)
+	return &req, nil
+}
 
-	h.log.WithFields(logrus.Fields{
-		"hour":        req.Hour,
-		"day_of_week": req.DayOfWeek,
-		"namespace":   req.Namespace,
-		"deployment":  req.Deployment,
-		"pod":         req.Pod,
-		"scope":       req.Scope,
-		"model":       req.Model,
-	}).Info("Processing prediction request")
+// requestError represents a request validation error
+type requestError struct {
+	message string
+	details string
+	code    string
+}
 
-	// Check if KServe is available
+func (e *requestError) Error() string { return e.message }
+
+// serviceError represents a service availability error
+type serviceError struct {
+	message string
+	details string
+	code    string
+}
+
+func (e *serviceError) Error() string { return e.message }
+
+// handleRequestError handles request validation errors
+func (h *PredictionHandler) handleRequestError(w http.ResponseWriter, err error) {
+	if reqErr, ok := err.(*requestError); ok {
+		h.respondError(w, http.StatusBadRequest, reqErr.message, reqErr.details, reqErr.code)
+	}
+}
+
+// handleServiceError handles service availability errors
+func (h *PredictionHandler) handleServiceError(w http.ResponseWriter, err error) {
+	if svcErr, ok := err.(*serviceError); ok {
+		h.respondError(w, http.StatusServiceUnavailable, svcErr.message, svcErr.details, svcErr.code)
+	}
+}
+
+// validateKServeAvailability checks if KServe and the requested model are available
+func (h *PredictionHandler) validateKServeAvailability(model string) error {
 	if h.kserveClient == nil {
-		h.respondError(w, http.StatusServiceUnavailable, "KServe integration not enabled", "KServe client is not configured", ErrCodeKServeUnavailable)
-		return
+		return &serviceError{message: "KServe integration not enabled", details: "KServe client is not configured", code: ErrCodeKServeUnavailable}
 	}
-
-	// Check if model exists
-	if _, exists := h.kserveClient.GetModel(req.Model); !exists {
-		h.respondError(w, http.StatusServiceUnavailable, fmt.Sprintf("Model '%s' not available", req.Model), "Model not found in KServe", ErrCodeModelNotFound)
-		return
+	if _, exists := h.kserveClient.GetModel(model); !exists {
+		return &serviceError{message: fmt.Sprintf("Model '%s' not available", model), details: "Model not found in KServe", code: ErrCodeModelNotFound}
 	}
+	return nil
+}
 
-	// Get current metrics from Prometheus
-	cpuRollingMean, memoryRollingMean, prometheusErr := h.getScopedMetrics(ctx, &req)
+// getMetricsWithDefaults retrieves metrics from Prometheus or returns defaults
+func (h *PredictionHandler) getMetricsWithDefaults(ctx context.Context, req *PredictRequest) (cpuRollingMean, memoryRollingMean float64) {
+	cpuRollingMean, memoryRollingMean, prometheusErr := h.getScopedMetrics(ctx, req)
 	if prometheusErr != nil {
 		h.log.WithError(prometheusErr).Warn("Failed to get Prometheus metrics, using defaults")
-		cpuRollingMean = h.defaultCPURollingMean
-		memoryRollingMean = h.defaultMemoryRollingMean
+		return h.defaultCPURollingMean, h.defaultMemoryRollingMean
 	}
+	return cpuRollingMean, memoryRollingMean
+}
 
-	// Build prediction instances
-	var instances [][]float64
-	var featureCount int
-
+// buildPredictionInstances builds the feature vector for prediction
+func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *PredictRequest, cpuRollingMean, memoryRollingMean float64) ([][]float64, int) {
 	// Use feature engineering for predictive-analytics model if enabled
 	if req.Model == "predictive-analytics" && h.featureBuilder != nil && h.enableFeatureEngineering {
 		featureVector, err := h.featureBuilder.BuildFeatures(ctx, req.Namespace, req.Deployment, req.Pod)
 		if err != nil {
 			h.log.WithError(err).Warn("Feature engineering failed, falling back to raw metrics")
-			instances = h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean)
-			featureCount = 4
-		} else {
-			instances = [][]float64{featureVector.Features}
-			featureCount = featureVector.FeatureCount
-			h.log.WithFields(logrus.Fields{
-				"feature_count": featureCount,
-				"metrics":       featureVector.MetricsData,
-			}).Debug("Built engineered features for prediction")
+			return h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean), 4
 		}
-	} else {
-		// Legacy behavior: 4 raw features
-		instances = h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean)
-		featureCount = 4
+		h.log.WithFields(logrus.Fields{
+			"feature_count": featureVector.FeatureCount,
+			"metrics":       featureVector.MetricsData,
+		}).Debug("Built engineered features for prediction")
+		return [][]float64{featureVector.Features}, featureVector.FeatureCount
 	}
+	// Legacy behavior: 4 raw features
+	return h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean), 4
+}
 
-	h.log.WithFields(logrus.Fields{
-		"feature_count":       featureCount,
-		"cpu_rolling_mean":    cpuRollingMean,
-		"memory_rolling_mean": memoryRollingMean,
-		"feature_engineering": h.enableFeatureEngineering && h.featureBuilder != nil,
-	}).Debug("Prepared prediction instances")
-
-	// Call KServe model with flexible response handling
-	resp, err := h.kserveClient.PredictFlexible(ctx, req.Model, instances)
+// executePrediction calls the KServe model and processes the response
+func (h *PredictionHandler) executePrediction(ctx context.Context, model string, instances [][]float64, cpuRollingMean, memoryRollingMean float64) (cpuPercent, memoryPercent, confidence float64, modelVersion string, err error) {
+	resp, err := h.kserveClient.PredictFlexible(ctx, model, instances)
 	if err != nil {
-		h.log.WithError(err).WithField("model", req.Model).Error("KServe prediction failed")
-		h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", err.Error(), ErrCodePredictionFailed)
-		return
+		h.log.WithError(err).WithField("model", model).Error("KServe prediction failed")
+		return 0, 0, 0, "", &serviceError{message: "Prediction failed", details: err.Error(), code: ErrCodePredictionFailed}
 	}
 
-	// Process predictions based on response type
-	var cpuPercent, memoryPercent, confidence float64
-	var modelVersion string
+	return h.processKServeResponse(resp, cpuRollingMean, memoryRollingMean)
+}
 
+// processKServeResponse processes the KServe response based on its type
+func (h *PredictionHandler) processKServeResponse(resp *kserve.ModelResponse, cpuRollingMean, memoryRollingMean float64) (cpuPercent, memoryPercent, confidence float64, modelVersion string, err error) {
 	switch resp.Type {
 	case "forecast":
 		if resp.ForecastResponse == nil {
-			h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Empty forecast response from model", ErrCodePredictionFailed)
-			return
+			return 0, 0, 0, "", &serviceError{message: "Prediction failed", details: "Empty forecast response from model", code: ErrCodePredictionFailed}
 		}
 		cpuPercent, memoryPercent, confidence = h.processForecastPredictions(resp.ForecastResponse, cpuRollingMean, memoryRollingMean)
-		modelVersion = resp.ForecastResponse.ModelVersion
+		return cpuPercent, memoryPercent, confidence, resp.ForecastResponse.ModelVersion, nil
 	case "anomaly":
 		if resp.AnomalyResponse == nil {
-			h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Empty anomaly response from model", ErrCodePredictionFailed)
-			return
+			return 0, 0, 0, "", &serviceError{message: "Prediction failed", details: "Empty anomaly response from model", code: ErrCodePredictionFailed}
 		}
 		cpuPercent, memoryPercent, confidence = h.processAnomalyPredictions(resp.AnomalyResponse, cpuRollingMean, memoryRollingMean)
-		modelVersion = resp.AnomalyResponse.ModelVersion
+		return cpuPercent, memoryPercent, confidence, resp.AnomalyResponse.ModelVersion, nil
 	default:
-		h.respondError(w, http.StatusServiceUnavailable, "Prediction failed", "Unknown response format from model", ErrCodePredictionFailed)
-		return
+		return 0, 0, 0, "", &serviceError{message: "Prediction failed", details: "Unknown response format from model", code: ErrCodePredictionFailed}
 	}
+}
 
-	// Calculate target ISO timestamp
-	targetTimestamp := h.calculateTargetTimestamp(req.Hour, req.DayOfWeek)
-
-	// Build response
-	response := PredictResponse{
+// buildPredictResponse constructs the prediction response
+func (h *PredictionHandler) buildPredictResponse(req *PredictRequest, cpuPercent, memoryPercent, confidence float64, modelVersion string, cpuRollingMean, memoryRollingMean float64) PredictResponse {
+	return PredictResponse{
 		Status: "success",
 		Scope:  req.Scope,
-		Target: h.getTarget(&req),
+		Target: h.getTarget(req),
 		Predictions: PredictionValues{
 			CPUPercent:    cpuPercent,
 			MemoryPercent: memoryPercent,
@@ -344,10 +386,36 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 		TargetTime: TargetTimeInfo{
 			Hour:         req.Hour,
 			DayOfWeek:    req.DayOfWeek,
-			ISOTimestamp: targetTimestamp,
+			ISOTimestamp: h.calculateTargetTimestamp(req.Hour, req.DayOfWeek),
 		},
 	}
+}
 
+// logPredictionRequest logs the incoming prediction request
+func (h *PredictionHandler) logPredictionRequest(req *PredictRequest) {
+	h.log.WithFields(logrus.Fields{
+		"hour":        req.Hour,
+		"day_of_week": req.DayOfWeek,
+		"namespace":   req.Namespace,
+		"deployment":  req.Deployment,
+		"pod":         req.Pod,
+		"scope":       req.Scope,
+		"model":       req.Model,
+	}).Info("Processing prediction request")
+}
+
+// logPredictionInstances logs the prepared prediction instances
+func (h *PredictionHandler) logPredictionInstances(featureCount int, cpuRollingMean, memoryRollingMean float64) {
+	h.log.WithFields(logrus.Fields{
+		"feature_count":       featureCount,
+		"cpu_rolling_mean":    cpuRollingMean,
+		"memory_rolling_mean": memoryRollingMean,
+		"feature_engineering": h.enableFeatureEngineering && h.featureBuilder != nil,
+	}).Debug("Prepared prediction instances")
+}
+
+// logPredictionSuccess logs successful prediction completion
+func (h *PredictionHandler) logPredictionSuccess(response PredictResponse, cpuPercent, memoryPercent, confidence float64) {
 	h.log.WithFields(logrus.Fields{
 		"scope":          response.Scope,
 		"target":         response.Target,
@@ -355,8 +423,6 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 		"memory_percent": memoryPercent,
 		"confidence":     confidence,
 	}).Info("Prediction completed successfully")
-
-	h.respondJSON(w, http.StatusOK, response)
 }
 
 // validateRequest validates the prediction request parameters

@@ -149,7 +149,7 @@ func TestGetDefaultMetricFeatures(t *testing.T) {
 
 	assert.Len(t, features, FeaturesPerMetric)
 	// Verify structure: value, 6 lags, 16 rolling stats, diff, pct_change
-	assert.Equal(t, 0.5, features[0])                  // value
+	assert.Equal(t, 0.5, features[0])                   // value
 	assert.Equal(t, 0.0, features[FeaturesPerMetric-2]) // diff
 	assert.Equal(t, 0.0, features[FeaturesPerMetric-1]) // pct_change
 }
@@ -223,12 +223,12 @@ func TestBuildFeaturesSuccess(t *testing.T) {
 
 func TestCalculateStats(t *testing.T) {
 	tests := []struct {
-		name          string
-		points        []DataPoint
-		expectedMean  float64
-		expectedStd   float64
-		expectedMax   float64
-		expectedMin   float64
+		name         string
+		points       []DataPoint
+		expectedMean float64
+		expectedStd  float64
+		expectedMax  float64
+		expectedMin  float64
 	}{
 		{
 			name:         "empty points",
@@ -264,14 +264,14 @@ func TestCalculateStats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mean, std, max, min := calculateStats(tt.points)
+			mean, std, maxVal, minVal := calculateStats(tt.points)
 
 			assert.InDelta(t, tt.expectedMean, mean, 0.001)
 			if tt.expectedStd > 0 {
 				assert.Greater(t, std, 0.0)
 			}
-			assert.Equal(t, tt.expectedMax, max)
-			assert.Equal(t, tt.expectedMin, min)
+			assert.Equal(t, tt.expectedMax, maxVal)
+			assert.Equal(t, tt.expectedMin, minVal)
 		})
 	}
 }
