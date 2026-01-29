@@ -80,12 +80,12 @@ func NewPredictiveFeatureBuilder(provider MetricDataProvider, config PredictiveF
 		actualCount := builder.calculateTotalFeatures()
 		if actualCount != config.ExpectedFeatureCount {
 			log.WithFields(logrus.Fields{
-				"expected_features": config.ExpectedFeatureCount,
-				"actual_features":   actualCount,
-				"base_metrics":      len(predictiveBaseMetrics),
+				"expected_features":   config.ExpectedFeatureCount,
+				"actual_features":     actualCount,
+				"base_metrics":        len(predictiveBaseMetrics),
 				"features_per_metric": FeaturesPerMetric,
-				"lookback_hours":    config.LookbackHours,
-				"time_features":     TimeFeatureCount,
+				"lookback_hours":      config.LookbackHours,
+				"time_features":       TimeFeatureCount,
 			}).Warn("Feature count mismatch detected! The model may reject predictions. " +
 				"Update the Go feature engineering to match the model's training or set ExpectedFeatureCount=0 to disable this warning.")
 		}
@@ -112,13 +112,13 @@ var rollingWindows = []int{3, 6, 12, 24}
 
 // Feature names per metric (25 features each)
 var predictiveFeatureNames = []string{
-	"value",          // Current value
-	"lag_1h",         // 1-hour lag
-	"lag_2h",         // 2-hour lag
-	"lag_3h",         // 3-hour lag
-	"lag_6h",         // 6-hour lag
-	"lag_12h",        // 12-hour lag
-	"lag_24h",        // 24-hour lag
+	"value",            // Current value
+	"lag_1h",           // 1-hour lag
+	"lag_2h",           // 2-hour lag
+	"lag_3h",           // 3-hour lag
+	"lag_6h",           // 6-hour lag
+	"lag_12h",          // 12-hour lag
+	"lag_24h",          // 24-hour lag
 	"rolling_mean_3h",  // 3-hour rolling mean
 	"rolling_mean_6h",  // 6-hour rolling mean
 	"rolling_mean_12h", // 12-hour rolling mean
@@ -135,19 +135,19 @@ var predictiveFeatureNames = []string{
 	"rolling_min_6h",   // 6-hour rolling min
 	"rolling_min_12h",  // 12-hour rolling min
 	"rolling_min_24h",  // 24-hour rolling min
-	"diff",           // value - lag_1h
-	"pct_change",     // (value - lag_1h) / lag_1h
+	"diff",             // value - lag_1h
+	"pct_change",       // (value - lag_1h) / lag_1h
 }
 
 // Time-based feature names
 var timeFeatureNames = []string{
-	"hour_of_day",   // 0-23
-	"day_of_week",   // 0-6 (Monday=0)
-	"is_weekend",    // 0 or 1
-	"month",         // 1-12
-	"quarter",       // 1-4
-	"day_of_month",  // 1-31
-	"week_of_year",  // 1-53
+	"hour_of_day",       // 0-23
+	"day_of_week",       // 0-6 (Monday=0)
+	"is_weekend",        // 0 or 1
+	"month",             // 1-12
+	"quarter",           // 1-4
+	"day_of_month",      // 1-31
+	"week_of_year",      // 1-53
 	"is_business_hours", // 0 or 1 (9-17 weekdays)
 }
 
@@ -258,9 +258,9 @@ func (b *PredictiveFeatureBuilder) BuildFeatures(ctx context.Context, namespace,
 	allFeatures = append(allFeatures, staticTimeFeatures...)
 
 	b.log.WithFields(logrus.Fields{
-		"feature_count":   len(allFeatures),
-		"metrics_count":   len(predictiveBaseMetrics),
-		"lookback_hours":  b.config.LookbackHours,
+		"feature_count":  len(allFeatures),
+		"metrics_count":  len(predictiveBaseMetrics),
+		"lookback_hours": b.config.LookbackHours,
 	}).Debug("Predictive features built successfully")
 
 	return &FeatureVector{
@@ -324,19 +324,13 @@ func (b *PredictiveFeatureBuilder) buildMetricFeatures(
 		dataPoints, err := b.queryRangeForStats(ctx, baseQuery, windowStart, timestamp)
 		if err != nil || len(dataPoints) == 0 {
 			// Default values when data is unavailable
-			features = append(features, currentValue) // mean
-			features = append(features, 0.1)          // std
-			features = append(features, currentValue) // max
-			features = append(features, currentValue) // min
+			features = append(features, currentValue, 0.1, currentValue, currentValue)
 			continue
 		}
 
 		// Calculate statistics
-		mean, std, max, min := calculateStats(dataPoints)
-		features = append(features, mean)
-		features = append(features, std)
-		features = append(features, max)
-		features = append(features, min)
+		mean, std, maxVal, minVal := calculateStats(dataPoints)
+		features = append(features, mean, std, maxVal, minVal)
 	}
 
 	// 7. Diff feature (value - lag_1h)
@@ -444,11 +438,19 @@ func (b *PredictiveFeatureBuilder) queryAtTime(ctx context.Context, query string
 	dataPoints, err := b.provider.QueryRange(ctx, query, start, end, time.Minute)
 	if err != nil {
 		// Fall back to instant query if range query fails
-		return b.provider.Query(ctx, query)
+		value, queryErr := b.provider.Query(ctx, query)
+		if queryErr != nil {
+			return 0, fmt.Errorf("failed to query metric at time %s: %w", timestamp.Format(time.RFC3339), queryErr)
+		}
+		return value, nil
 	}
 
 	if len(dataPoints) == 0 {
-		return b.provider.Query(ctx, query)
+		value, queryErr := b.provider.Query(ctx, query)
+		if queryErr != nil {
+			return 0, fmt.Errorf("no data and instant query failed: %w", queryErr)
+		}
+		return value, nil
 	}
 
 	// Return the last data point
@@ -463,7 +465,11 @@ func (b *PredictiveFeatureBuilder) queryRangeForStats(
 ) ([]DataPoint, error) {
 	// Use 5-minute steps for efficiency
 	step := 5 * time.Minute
-	return b.provider.QueryRange(ctx, query, start, end, step)
+	dataPoints, err := b.provider.QueryRange(ctx, query, start, end, step)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query range for stats: %w", err)
+	}
+	return dataPoints, nil
 }
 
 // getDefaultMetricFeatures returns default features for a single metric when data is unavailable
@@ -539,24 +545,24 @@ func (b *PredictiveFeatureBuilder) getDefaultMetricsData() map[string]float64 {
 
 // Helper functions
 
-// calculateStats calculates mean, std, max, min from data points
-func calculateStats(points []DataPoint) (mean, std, max, min float64) {
+// calculateStats calculates mean, std, maxVal, minVal from data points
+func calculateStats(points []DataPoint) (mean, std, maxVal, minVal float64) {
 	if len(points) == 0 {
 		return 0, 0, 0, 0
 	}
 
 	// Calculate mean
 	sum := 0.0
-	max = points[0].Value
-	min = points[0].Value
+	maxVal = points[0].Value
+	minVal = points[0].Value
 
 	for _, p := range points {
 		sum += p.Value
-		if p.Value > max {
-			max = p.Value
+		if p.Value > maxVal {
+			maxVal = p.Value
 		}
-		if p.Value < min {
-			min = p.Value
+		if p.Value < minVal {
+			minVal = p.Value
 		}
 	}
 	mean = sum / float64(len(points))
@@ -571,7 +577,7 @@ func calculateStats(points []DataPoint) (mean, std, max, min float64) {
 		std = math.Sqrt(sumSquares / float64(len(points)))
 	}
 
-	return mean, std, max, min
+	return mean, std, maxVal, minVal
 }
 
 // joinSelectors joins label selectors with commas
