@@ -1947,10 +1947,20 @@ func (c *PrometheusClient) QueryAtTime(ctx context.Context, query string, timest
 		return 0, fmt.Errorf("prometheus client not available")
 	}
 
+	body, err := c.executeQueryAtTime(ctx, query, timestamp)
+	if err != nil {
+		return 0, err
+	}
+
+	return c.parseInstantQueryResponse(body, timestamp)
+}
+
+// executeQueryAtTime executes the HTTP request for a point-in-time query
+func (c *PrometheusClient) executeQueryAtTime(ctx context.Context, query string, timestamp time.Time) ([]byte, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/query", c.baseURL)
 	reqURL, err := url.Parse(endpoint)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse URL: %w", err)
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
 	params := url.Values{}
@@ -1960,7 +1970,7 @@ func (c *PrometheusClient) QueryAtTime(ctx context.Context, query string, timest
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), http.NoBody)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -1972,19 +1982,24 @@ func (c *PrometheusClient) QueryAtTime(ctx context.Context, query string, timest
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("failed to execute query: %w", err)
+		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 	defer closeBody(resp)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, fmt.Errorf("failed to read response body: %w", err)
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
 	}
 
+	return body, nil
+}
+
+// parseInstantQueryResponse parses the response from an instant query
+func (c *PrometheusClient) parseInstantQueryResponse(body []byte, timestamp time.Time) (float64, error) {
 	var promResp PrometheusQueryResponse
 	if err := json.Unmarshal(body, &promResp); err != nil {
 		return 0, fmt.Errorf("failed to parse response: %w", err)
@@ -1998,12 +2013,16 @@ func (c *PrometheusClient) QueryAtTime(ctx context.Context, query string, timest
 		return 0, fmt.Errorf("no data returned for query at time %s", timestamp.Format(time.RFC3339))
 	}
 
-	// Parse value
-	if len(promResp.Data.Result[0].Value) < 2 {
+	return c.extractInstantValue(promResp.Data.Result[0].Value)
+}
+
+// extractInstantValue extracts a float value from the Prometheus response value array
+func (c *PrometheusClient) extractInstantValue(value []interface{}) (float64, error) {
+	if len(value) < 2 {
 		return 0, fmt.Errorf("invalid value format in response")
 	}
 
-	valStr, ok := promResp.Data.Result[0].Value[1].(string)
+	valStr, ok := value[1].(string)
 	if !ok {
 		return 0, fmt.Errorf("value is not a string")
 	}
