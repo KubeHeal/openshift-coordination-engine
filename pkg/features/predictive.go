@@ -139,11 +139,11 @@ var predictiveFeatureNames = []string{
 
 // Time-based feature names - MUST match Python notebook exactly
 var timeFeatureNames = []string{
-	"hour",             // 0-23
-	"day_of_week",      // 0-6 (Monday=0)
-	"day_of_month",     // 1-31
-	"month",            // 1-12
-	"is_weekend",       // 0 or 1
+	"hour",              // 0-23
+	"day_of_week",       // 0-6 (Monday=0)
+	"day_of_month",      // 1-31
+	"month",             // 1-12
+	"is_weekend",        // 0 or 1
 	"is_business_hours", // 0 or 1 (9-17 weekdays)
 }
 
@@ -192,11 +192,11 @@ func (b *PredictiveFeatureBuilder) GetFeatureInfo() FeatureInfo {
 // The feature vector is structured to match the training notebook's feature engineering.
 //
 // Feature order per timestep (matches Python notebook):
-//   1. Raw metric values (5 features)
-//   2. Time features (6 features)
-//   3. Engineered metric features (25 × 5 = 125 features)
-//   Total per timestep: 5 + 6 + 125 = 136 features
-//   Total: 24 × 136 = 3264 features
+//  1. Raw metric values (5 features)
+//  2. Time features (6 features)
+//  3. Engineered metric features (25 × 5 = 125 features)
+//     Total per timestep: 5 + 6 + 125 = 136 features
+//     Total: 24 × 136 = 3264 features
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeouts
@@ -376,11 +376,11 @@ func (b *PredictiveFeatureBuilder) buildTimeFeatures(t time.Time) []float64 {
 	}
 
 	return []float64{
-		hour,        // 0-23
-		dayOfWeek,   // 0-6 (Monday=0)
-		dayOfMonth,  // 1-31
-		month,       // 1-12
-		isWeekend,   // 0 or 1
+		hour,            // 0-23
+		dayOfWeek,       // 0-6 (Monday=0)
+		dayOfMonth,      // 1-31
+		month,           // 1-12
+		isWeekend,       // 0 or 1
 		isBusinessHours, // 0 or 1 (9-17 weekdays)
 	}
 }
