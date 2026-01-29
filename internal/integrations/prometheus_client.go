@@ -1913,9 +1913,9 @@ func (c *PrometheusClient) parsePredictiveRangeResponse(body []byte, query strin
 
 	// Debug: Log response metadata
 	c.log.WithFields(logrus.Fields{
-		"query":       query,
-		"status":      promResp.Status,
-		"result_type": promResp.Data.ResultType,
+		"query":        query,
+		"status":       promResp.Status,
+		"result_type":  promResp.Data.ResultType,
 		"result_count": len(promResp.Data.Result),
 	}).Debug("Parsed Prometheus range response")
 
