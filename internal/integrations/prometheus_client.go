@@ -1874,10 +1874,26 @@ func (c *PrometheusClient) QueryRange(ctx context.Context, query string, start, 
 	params.Set("step", formatDurationForPromQL(step))
 	reqURL.RawQuery = params.Encode()
 
+	// Debug: Log the full request URL for troubleshooting
+	c.log.WithFields(logrus.Fields{
+		"url":   reqURL.String(),
+		"query": query,
+		"start": start.Format(time.RFC3339),
+		"end":   end.Format(time.RFC3339),
+		"step":  formatDurationForPromQL(step),
+	}).Debug("Executing predictive analytics range query")
+
 	body, err := c.executeRangeQuery(ctx, reqURL.String())
 	if err != nil {
+		c.log.WithError(err).WithField("query", query).Debug("Range query execution failed")
 		return nil, err
 	}
+
+	// Debug: Log response body size for troubleshooting
+	c.log.WithFields(logrus.Fields{
+		"query":         query,
+		"response_size": len(body),
+	}).Debug("Received range query response")
 
 	return c.parsePredictiveRangeResponse(body, query)
 }
@@ -1886,18 +1902,47 @@ func (c *PrometheusClient) QueryRange(ctx context.Context, query string, start, 
 func (c *PrometheusClient) parsePredictiveRangeResponse(body []byte, query string) ([]PredictiveDataPoint, error) {
 	var promResp PrometheusRangeQueryResponse
 	if err := json.Unmarshal(body, &promResp); err != nil {
+		// Debug: Log raw response body on parse failure
+		c.log.WithFields(logrus.Fields{
+			"query":         query,
+			"response_body": string(body[:min(len(body), 500)]), // First 500 chars for debugging
+			"error":         err.Error(),
+		}).Debug("Failed to parse Prometheus range response")
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	// Debug: Log response metadata
+	c.log.WithFields(logrus.Fields{
+		"query":       query,
+		"status":      promResp.Status,
+		"result_type": promResp.Data.ResultType,
+		"result_count": len(promResp.Data.Result),
+	}).Debug("Parsed Prometheus range response")
+
 	if promResp.Status != "success" {
+		c.log.WithFields(logrus.Fields{
+			"query":      query,
+			"error_type": promResp.ErrorType,
+			"error":      promResp.Error,
+		}).Debug("Prometheus query returned error status")
 		return nil, fmt.Errorf("prometheus query failed: %s - %s", promResp.ErrorType, promResp.Error)
 	}
 
 	if len(promResp.Data.Result) == 0 {
-		// Return empty slice instead of error for empty results
-		c.log.WithField("query", query).Debug("No data returned for predictive range query")
+		// Debug: Log more context for empty results
+		c.log.WithFields(logrus.Fields{
+			"query":       query,
+			"result_type": promResp.Data.ResultType,
+		}).Debug("No data returned for predictive range query - result array is empty")
 		return []PredictiveDataPoint{}, nil
 	}
+
+	// Debug: Log values count before extraction
+	valuesCount := len(promResp.Data.Result[0].Values)
+	c.log.WithFields(logrus.Fields{
+		"query":        query,
+		"values_count": valuesCount,
+	}).Debug("Extracting data points from range response")
 
 	return c.extractPredictiveDataPoints(promResp.Data.Result[0].Values), nil
 }

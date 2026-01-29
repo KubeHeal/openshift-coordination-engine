@@ -14,12 +14,19 @@ The `predictive-analytics` KServe model requires a specific feature vector struc
 
 ### Feature Count Formula
 
+The feature vector structure matches the Python training notebook exactly:
+
 ```
-Total Features = (BaseMetrics × FeaturesPerMetric × LookbackHours) + (TimeFeatures × LookbackHours) + TimeFeatures
+Total Features = LookbackHours × (BaseMetrics + TimeFeatures + FeaturesPerMetric × BaseMetrics)
 
 With defaults (24-hour lookback):
-Total = (5 × 25 × 24) + (8 × 24) + 8 = 3000 + 192 + 8 = 3200 features
+Total = 24 × (5 + 6 + 25×5) = 24 × (5 + 6 + 125) = 24 × 136 = 3264 features
 ```
+
+**Per timestep breakdown (136 features):**
+1. Raw metric values: 5 features
+2. Time features: 6 features
+3. Engineered metric features: 25 × 5 = 125 features
 
 ### Base Metrics (5)
 
@@ -65,18 +72,18 @@ var predictiveBaseMetrics = []string{
 | diff | 23 | value - lag_1h |
 | pct_change | 24 | (value - lag_1h) / lag_1h |
 
-### Time Features (8)
+### Time Features (6)
 
-| Feature | Description | Range |
-|---------|-------------|-------|
-| hour_of_day | Hour of day | 0-23 |
-| day_of_week | Day of week (Monday=0) | 0-6 |
-| is_weekend | Weekend indicator | 0 or 1 |
-| month | Month of year | 1-12 |
-| quarter | Quarter of year | 1-4 |
-| day_of_month | Day of month | 1-31 |
-| week_of_year | ISO week number | 1-53 |
-| is_business_hours | Business hours (9-17 weekdays) | 0 or 1 |
+Time features match the Python training notebook exactly:
+
+| Feature | Index | Description | Range |
+|---------|-------|-------------|-------|
+| hour | 0 | Hour of day | 0-23 |
+| day_of_week | 1 | Day of week (Monday=0) | 0-6 |
+| day_of_month | 2 | Day of month | 1-31 |
+| month | 3 | Month of year | 1-12 |
+| is_weekend | 4 | Weekend indicator | 0 or 1 |
+| is_business_hours | 5 | Business hours (9-17 weekdays) | 0 or 1 |
 
 ## Updating Feature Engineering
 
@@ -112,7 +119,7 @@ var rollingWindows = []int{3, 6, 12, 24}
 const FeaturesPerMetric = 25  // Update this number
 
 // Update time features if changed
-const TimeFeatureCount = 8    // Update this number
+const TimeFeatureCount = 6    // Update this number (must match Python notebook)
 ```
 
 ### Step 3: Update Feature Names
@@ -126,9 +133,14 @@ var predictiveFeatureNames = []string{
     // ... update to match new features
 }
 
+// Time features - must match Python notebook order exactly
 var timeFeatureNames = []string{
-    "hour_of_day",
-    // ... update to match new features
+    "hour",             // 0-23
+    "day_of_week",      // 0-6 (Monday=0)
+    "day_of_month",     // 1-31
+    "month",            // 1-12
+    "is_weekend",       // 0 or 1
+    "is_business_hours", // 0 or 1
 }
 ```
 
@@ -208,9 +220,10 @@ This error means the Go code is generating a different feature count than the mo
    log.Printf("Total features: %d", info.TotalFeatures)
    ```
 
-3. Compare with calculation:
+3. Compare with calculation (Python formula):
    ```
-   Expected = BaseMetrics × FeaturesPerMetric × LookbackHours + TimeFeatures × LookbackHours + TimeFeatures
+   Expected = LookbackHours × (BaseMetrics + TimeFeatures + FeaturesPerMetric × BaseMetrics)
+            = 24 × (5 + 6 + 25×5) = 24 × 136 = 3264
    ```
 
 ### Error: "ValueError: Input contains NaN"
@@ -279,14 +292,12 @@ base_metrics:
   - network_out
 lag_periods: [1, 2, 3, 6, 12, 24]
 rolling_windows: [3, 6, 12, 24]
-time_features:
-  - hour_of_day
+time_features:  # Must match Python notebook (6 features)
+  - hour
   - day_of_week
-  - is_weekend
-  - month
-  - quarter
   - day_of_month
-  - week_of_year
+  - month
+  - is_weekend
   - is_business_hours
 ```
 
@@ -324,7 +335,7 @@ When the ML team updates the model:
 | Constant | Location | Default |
 |----------|----------|---------|
 | `FeaturesPerMetric` | `pkg/features/predictive.go` | 25 |
-| `TimeFeatureCount` | `pkg/features/predictive.go` | 8 |
+| `TimeFeatureCount` | `pkg/features/predictive.go` | 6 |
 | `DefaultFeatureEngineeringLookbackHours` | `pkg/config/config.go` | 24 |
 
 ### Environment Variables
@@ -342,7 +353,7 @@ To enable early detection of feature mismatches, set the expected feature count:
 ```yaml
 env:
   - name: FEATURE_ENGINEERING_EXPECTED_COUNT
-    value: "3200"  # Set to your model's expected feature count
+    value: "3264"  # Set to your model's expected feature count (must match Python model)
 ```
 
 When enabled, the system logs a warning at startup if the calculated feature count doesn't match:
@@ -350,7 +361,7 @@ When enabled, the system logs a warning at startup if the calculated feature cou
 ```
 level=warning msg="Feature count mismatch detected! The model may reject predictions..."
   expected_features=3264
-  actual_features=3200
+  actual_features=<actual>
 ```
 
 This helps catch issues before they cause runtime errors.
