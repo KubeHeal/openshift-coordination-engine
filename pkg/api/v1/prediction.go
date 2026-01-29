@@ -25,9 +25,14 @@ type PredictionHandler struct {
 	featureBuilder   *features.PredictiveFeatureBuilder
 	log              *logrus.Logger
 
-	// Default values when Prometheus is not available
+	// Default values when Prometheus is not available (Issue #58)
+	// These match the 5 features expected by the predictive-analytics model:
+	// cpu_usage, memory_usage, disk_usage, network_in, network_out
 	defaultCPURollingMean    float64
 	defaultMemoryRollingMean float64
+	defaultDiskUsage         float64
+	defaultNetworkIn         float64
+	defaultNetworkOut        float64
 
 	// Feature engineering configuration
 	enableFeatureEngineering bool
@@ -38,7 +43,8 @@ type PredictionHandlerConfig struct {
 	// EnableFeatureEngineering enables the 3200+-feature vector for predictive-analytics model
 	// When enabled, the handler queries Prometheus for historical data and builds
 	// engineered features (lags, rolling stats, trends) matching the model's training.
-	// When disabled, only 4 raw features are sent (legacy behavior).
+	// When disabled, 5 raw features are sent matching the model's base metrics (Issue #58):
+	// cpu_usage, memory_usage, disk_usage, network_in, network_out
 	EnableFeatureEngineering bool
 
 	// LookbackHours is the number of hours to look back for historical data
@@ -137,6 +143,9 @@ func NewPredictionHandlerWithConfig(
 		log:                      log,
 		defaultCPURollingMean:    0.65, // 65% average CPU usage
 		defaultMemoryRollingMean: 0.72, // 72% average memory usage
+		defaultDiskUsage:         0.45, // 45% average disk usage (Issue #58)
+		defaultNetworkIn:         0.10, // 10% normalized network in (Issue #58)
+		defaultNetworkOut:        0.08, // 8% normalized network out (Issue #58)
 		enableFeatureEngineering: config.EnableFeatureEngineering,
 	}
 }
@@ -350,7 +359,8 @@ func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *P
 		featureVector, err := h.featureBuilder.BuildFeatures(ctx, req.Namespace, req.Deployment, req.Pod)
 		if err != nil {
 			h.log.WithError(err).Warn("Feature engineering failed, falling back to raw metrics")
-			return h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean), 4
+			// Issue #58: Use 5 raw metrics that match the model's training features
+			return h.buildRawMetricInstances(ctx, req)
 		}
 		h.log.WithFields(logrus.Fields{
 			"feature_count": featureVector.FeatureCount,
@@ -358,8 +368,9 @@ func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *P
 		}).Debug("Built engineered features for prediction")
 		return [][]float64{featureVector.Features}, featureVector.FeatureCount
 	}
-	// Legacy behavior: 4 raw features
-	return h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean), 4
+	// Issue #58: Use 5 raw features matching the model's expected input:
+	// [cpu_usage, memory_usage, disk_usage, network_in, network_out]
+	return h.buildRawMetricInstances(ctx, req)
 }
 
 // executePrediction calls the KServe model and processes the response
@@ -690,15 +701,74 @@ func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuR
 	return h.processAnomalyPredictions(resp, cpuRollingMean, memoryRollingMean)
 }
 
-// buildRawMetricInstances builds the legacy 4-feature instance for predictions
-// Features: [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
-func (h *PredictionHandler) buildRawMetricInstances(hour, dayOfWeek int, cpuRollingMean, memoryRollingMean float64) [][]float64 {
+// buildRawMetricInstances builds the 5-feature instance for predictions (Issue #58)
+// Features: [cpu_usage, memory_usage, disk_usage, network_in, network_out]
+// This matches the predictive-analytics model's training data features.
+func (h *PredictionHandler) buildRawMetricInstances(ctx context.Context, req *PredictRequest) ([][]float64, int) {
+	cpuUsage := h.defaultCPURollingMean
+	memoryUsage := h.defaultMemoryRollingMean
+	diskUsage := h.defaultDiskUsage
+	networkIn := h.defaultNetworkIn
+	networkOut := h.defaultNetworkOut
+
+	// Try to fetch real metrics from Prometheus if available
+	if h.prometheusClient != nil && h.prometheusClient.IsAvailable() {
+		var err error
+
+		// Fetch CPU usage
+		cpuUsage, err = h.prometheusClient.GetScopedCPURollingMean(ctx, req.Namespace, req.Deployment, req.Pod)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get CPU usage, using default")
+			cpuUsage = h.defaultCPURollingMean
+		}
+
+		// Fetch Memory usage
+		memoryUsage, err = h.prometheusClient.GetScopedMemoryRollingMean(ctx, req.Namespace, req.Deployment, req.Pod)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get memory usage, using default")
+			memoryUsage = h.defaultMemoryRollingMean
+		}
+
+		// Fetch Disk usage
+		diskUsage, err = h.prometheusClient.GetScopedDiskUsage(ctx, req.Namespace, req.Deployment, req.Pod)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get disk usage, using default")
+			diskUsage = h.defaultDiskUsage
+		}
+
+		// Fetch Network In
+		networkIn, err = h.prometheusClient.GetScopedNetworkIn(ctx, req.Namespace, req.Deployment, req.Pod)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get network in, using default")
+			networkIn = h.defaultNetworkIn
+		}
+
+		// Fetch Network Out
+		networkOut, err = h.prometheusClient.GetScopedNetworkOut(ctx, req.Namespace, req.Deployment, req.Pod)
+		if err != nil {
+			h.log.WithError(err).Debug("Failed to get network out, using default")
+			networkOut = h.defaultNetworkOut
+		}
+	}
+
+	h.log.WithFields(logrus.Fields{
+		"cpu_usage":    cpuUsage,
+		"memory_usage": memoryUsage,
+		"disk_usage":   diskUsage,
+		"network_in":   networkIn,
+		"network_out":  networkOut,
+		"namespace":    req.Namespace,
+		"deployment":   req.Deployment,
+		"pod":          req.Pod,
+	}).Debug("Built raw metric instances for prediction")
+
 	return [][]float64{{
-		float64(hour),
-		float64(dayOfWeek),
-		cpuRollingMean,
-		memoryRollingMean,
-	}}
+		cpuUsage,
+		memoryUsage,
+		diskUsage,
+		networkIn,
+		networkOut,
+	}}, 5
 }
 
 // IsFeatureEngineeringEnabled returns true if feature engineering is enabled

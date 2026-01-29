@@ -380,6 +380,133 @@ func (c *PrometheusClient) GetScopedMemoryRollingMean(ctx context.Context, names
 	return normalizedValue, nil
 }
 
+// GetScopedDiskUsage returns disk usage as a ratio (0-1) with flexible scoping
+// Supports namespace, deployment, and pod filtering (Issue #58)
+func (c *PrometheusClient) GetScopedDiskUsage(ctx context.Context, namespace, deployment, pod string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("disk_usage_scoped_%s_%s_%s", namespace, deployment, pod)
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	// Build PromQL query for disk usage ratio
+	query := c.buildScopedDiskUsageQuery(namespace, deployment, pod)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		// Try fallback query without namespace filtering (node-level disk)
+		c.log.WithError(err).Debug("Scoped disk usage query failed, trying node-level fallback")
+		fallbackQuery := `1 - avg(node_filesystem_avail_bytes{mountpoint="/"}) / avg(node_filesystem_size_bytes{mountpoint="/"})`
+		value, err = c.queryInstant(ctx, fallbackQuery)
+		if err != nil {
+			c.log.WithError(err).WithFields(logrus.Fields{
+				"namespace":  namespace,
+				"deployment": deployment,
+				"pod":        pod,
+			}).Debug("Failed to query scoped disk usage from Prometheus")
+			return 0, err
+		}
+	}
+
+	normalizedValue := clampToUnitRange(value)
+	c.setCached(cacheKey, normalizedValue)
+
+	c.log.WithFields(logrus.Fields{
+		"raw_value":        value,
+		"normalized_value": normalizedValue,
+		"namespace":        namespace,
+		"deployment":       deployment,
+		"pod":              pod,
+	}).Debug("Retrieved scoped disk usage from Prometheus")
+
+	return normalizedValue, nil
+}
+
+// GetScopedNetworkIn returns network receive rate (bytes/sec) with flexible scoping (Issue #58)
+// Returns normalized value (0-1) based on a reasonable maximum throughput (1 Gbps = 125MB/s)
+func (c *PrometheusClient) GetScopedNetworkIn(ctx context.Context, namespace, deployment, pod string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("network_in_scoped_%s_%s_%s", namespace, deployment, pod)
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	// Build PromQL query for network receive rate
+	query := c.buildScopedNetworkInQuery(namespace, deployment, pod)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		c.log.WithError(err).WithFields(logrus.Fields{
+			"namespace":  namespace,
+			"deployment": deployment,
+			"pod":        pod,
+		}).Debug("Failed to query scoped network in from Prometheus")
+		return 0, err
+	}
+
+	// Normalize to 0-1 range assuming 125MB/s (1Gbps) as max reasonable throughput
+	const maxNetworkBytesPerSec = 125000000.0 // 1 Gbps in bytes
+	normalizedValue := clampToUnitRange(value / maxNetworkBytesPerSec)
+	c.setCached(cacheKey, normalizedValue)
+
+	c.log.WithFields(logrus.Fields{
+		"raw_value":        value,
+		"normalized_value": normalizedValue,
+		"namespace":        namespace,
+		"deployment":       deployment,
+		"pod":              pod,
+	}).Debug("Retrieved scoped network in from Prometheus")
+
+	return normalizedValue, nil
+}
+
+// GetScopedNetworkOut returns network transmit rate (bytes/sec) with flexible scoping (Issue #58)
+// Returns normalized value (0-1) based on a reasonable maximum throughput (1 Gbps = 125MB/s)
+func (c *PrometheusClient) GetScopedNetworkOut(ctx context.Context, namespace, deployment, pod string) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	cacheKey := fmt.Sprintf("network_out_scoped_%s_%s_%s", namespace, deployment, pod)
+	if value, ok := c.getCached(cacheKey); ok {
+		return value, nil
+	}
+
+	// Build PromQL query for network transmit rate
+	query := c.buildScopedNetworkOutQuery(namespace, deployment, pod)
+
+	value, err := c.queryInstant(ctx, query)
+	if err != nil {
+		c.log.WithError(err).WithFields(logrus.Fields{
+			"namespace":  namespace,
+			"deployment": deployment,
+			"pod":        pod,
+		}).Debug("Failed to query scoped network out from Prometheus")
+		return 0, err
+	}
+
+	// Normalize to 0-1 range assuming 125MB/s (1Gbps) as max reasonable throughput
+	const maxNetworkBytesPerSec = 125000000.0 // 1 Gbps in bytes
+	normalizedValue := clampToUnitRange(value / maxNetworkBytesPerSec)
+	c.setCached(cacheKey, normalizedValue)
+
+	c.log.WithFields(logrus.Fields{
+		"raw_value":        value,
+		"normalized_value": normalizedValue,
+		"namespace":        namespace,
+		"deployment":       deployment,
+		"pod":              pod,
+	}).Debug("Retrieved scoped network out from Prometheus")
+
+	return normalizedValue, nil
+}
+
 // buildScopedCPUQuery constructs a PromQL query for CPU metrics normalized by cluster allocatable
 func (c *PrometheusClient) buildScopedCPUQuery(namespace, deployment, pod string) string {
 	var labelSelectors []string
@@ -488,6 +615,67 @@ func (c *PrometheusClient) buildScopedMemoryQueryFallback(namespace, deployment,
 	selector := "{" + joinSelectors(labelSelectors) + "}"
 	// Fallback: Use node memory total as denominator
 	return fmt.Sprintf(`sum(container_memory_working_set_bytes%s) / sum(node_memory_MemTotal_bytes)`, selector)
+}
+
+// buildScopedDiskUsageQuery constructs a PromQL query for disk usage ratio (Issue #58)
+// Note: Disk metrics are typically node-level, so namespace/deployment/pod filters have limited effect
+func (c *PrometheusClient) buildScopedDiskUsageQuery(namespace, deployment, pod string) string {
+	// Disk usage is typically a node-level metric
+	// For now, return node-level disk usage as the base query
+	// Future enhancement: could query container filesystem usage if available
+	return `1 - avg(node_filesystem_avail_bytes{mountpoint="/"}) / avg(node_filesystem_size_bytes{mountpoint="/"})`
+}
+
+// buildScopedNetworkInQuery constructs a PromQL query for network receive rate (Issue #58)
+func (c *PrometheusClient) buildScopedNetworkInQuery(namespace, deployment, pod string) string {
+	var labelSelectors []string
+
+	// Exclude loopback interface
+	labelSelectors = append(labelSelectors, `interface!="lo"`)
+
+	// Add namespace filter
+	if namespace != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+
+	// Add deployment filter (matches pods with deployment prefix)
+	if deployment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	// Add pod filter (exact match)
+	if pod != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+
+	selector := "{" + joinSelectors(labelSelectors) + "}"
+	return fmt.Sprintf(`sum(rate(container_network_receive_bytes_total%s[5m]))`, selector)
+}
+
+// buildScopedNetworkOutQuery constructs a PromQL query for network transmit rate (Issue #58)
+func (c *PrometheusClient) buildScopedNetworkOutQuery(namespace, deployment, pod string) string {
+	var labelSelectors []string
+
+	// Exclude loopback interface
+	labelSelectors = append(labelSelectors, `interface!="lo"`)
+
+	// Add namespace filter
+	if namespace != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`namespace=%q`, namespace))
+	}
+
+	// Add deployment filter (matches pods with deployment prefix)
+	if deployment != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+
+	// Add pod filter (exact match)
+	if pod != "" {
+		labelSelectors = append(labelSelectors, fmt.Sprintf(`pod=%q`, pod))
+	}
+
+	selector := "{" + joinSelectors(labelSelectors) + "}"
+	return fmt.Sprintf(`sum(rate(container_network_transmit_bytes_total%s[5m]))`, selector)
 }
 
 // joinSelectors joins label selectors with commas
