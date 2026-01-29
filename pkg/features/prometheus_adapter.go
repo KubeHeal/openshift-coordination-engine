@@ -3,6 +3,7 @@ package features
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
@@ -28,7 +29,7 @@ func (a *PrometheusAdapter) QueryRange(ctx context.Context, query string, start,
 	// Call the PrometheusClient's QueryRange method
 	prometheusPoints, err := a.client.QueryRange(ctx, query, start, end, step)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("prometheus range query failed: %w", err)
 	}
 
 	// Convert PredictiveDataPoint to features.DataPoint
@@ -48,7 +49,11 @@ func (a *PrometheusAdapter) Query(ctx context.Context, query string) (float64, e
 	if a.client == nil {
 		return 0, nil
 	}
-	return a.client.Query(ctx, query)
+	value, err := a.client.Query(ctx, query)
+	if err != nil {
+		return 0, fmt.Errorf("prometheus instant query failed: %w", err)
+	}
+	return value, nil
 }
 
 // IsAvailable implements MetricDataProvider.IsAvailable
