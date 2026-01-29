@@ -252,9 +252,11 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get metrics and build prediction instances
+	// Get metrics for response (used for logging and response building)
 	cpuRollingMean, memoryRollingMean := h.getMetricsWithDefaults(ctx, req)
-	instances, featureCount := h.buildPredictionInstances(ctx, req, cpuRollingMean, memoryRollingMean)
+
+	// Build prediction instances (Issue #58: uses 5 raw metrics when feature engineering is disabled)
+	instances, featureCount := h.buildPredictionInstances(ctx, req)
 
 	h.logPredictionInstances(featureCount, cpuRollingMean, memoryRollingMean)
 
@@ -353,7 +355,7 @@ func (h *PredictionHandler) getMetricsWithDefaults(ctx context.Context, req *Pre
 }
 
 // buildPredictionInstances builds the feature vector for prediction
-func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *PredictRequest, cpuRollingMean, memoryRollingMean float64) ([][]float64, int) {
+func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *PredictRequest) ([][]float64, int) {
 	// Use feature engineering for predictive-analytics model if enabled
 	if req.Model == "predictive-analytics" && h.featureBuilder != nil && h.enableFeatureEngineering {
 		featureVector, err := h.featureBuilder.BuildFeatures(ctx, req.Namespace, req.Deployment, req.Pod)
