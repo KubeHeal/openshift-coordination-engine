@@ -1216,3 +1216,143 @@ func TestProxyClient_AutoDetect_SimpleArray(t *testing.T) {
 	require.NotNil(t, result.AnomalyResponse)
 	assert.Nil(t, result.ForecastResponse)
 }
+
+func TestProxyClient_PredictFlexible_FlatArrayFormat(t *testing.T) {
+	// Test Case from Issue #56: Flat array format (sklearn server default)
+	// Input: {"predictions": [0.12351758718119261]}
+	// This is the format returned by KServe sklearn server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": []float64{0.12351758718119261},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+		Timeout:   30 * time.Second,
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name:            "predictive-analytics",
+		ServiceName:     "predictive-analytics-predictor",
+		KServeModelName: "predictive-analytics",
+		Namespace:       "test-ns",
+		URL:             server.URL,
+	}
+
+	instances := [][]float64{{0.0, 0.0}} // Simplified input
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", instances)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+	require.NotNil(t, result.ForecastResponse)
+
+	// Verify flat array is properly converted
+	forecast := result.ForecastResponse
+	assert.Equal(t, "predictive-analytics", forecast.ModelName)
+
+	genericForecast, exists := forecast.Predictions["forecast"]
+	assert.True(t, exists, "flat array should use 'forecast' key")
+	assert.Equal(t, []float64{0.12351758718119261}, genericForecast.Forecast)
+	assert.Equal(t, 1, genericForecast.ForecastHorizon)
+	assert.Equal(t, []float64{0.85}, genericForecast.Confidence) // Default confidence
+}
+
+func TestProxyClient_PredictFlexible_FlatArrayFormat_Multiple(t *testing.T) {
+	// Test flat array format with multiple prediction values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions":   []float64{0.45, 0.52, 0.61, 0.58},
+			"model_version": "1.2.0",
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	client.models["predictive-analytics"] = &ModelInfo{
+		Name:            "predictive-analytics",
+		KServeModelName: "predictive-analytics",
+		URL:             server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "predictive-analytics", [][]float64{{1.0}})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "forecast", result.Type)
+
+	forecast := result.ForecastResponse
+	assert.Equal(t, "1.2.0", forecast.ModelVersion)
+
+	genericForecast, exists := forecast.Predictions["forecast"]
+	assert.True(t, exists)
+	assert.Equal(t, []float64{0.45, 0.52, 0.61, 0.58}, genericForecast.Forecast)
+	assert.Equal(t, 4, genericForecast.ForecastHorizon)
+}
+
+func TestProxyClient_AutoDetect_FlatFloatArray(t *testing.T) {
+	// Test auto-detection correctly identifies flat float array as forecast (not anomaly)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"predictions": []float64{0.75, 0.82, 0.79},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	cfg := ProxyConfig{
+		Namespace: "test-ns",
+	}
+
+	client, err := NewProxyClient(cfg, log)
+	require.NoError(t, err)
+
+	// Use unknown model name to trigger auto-detection
+	client.models["custom-forecast-model"] = &ModelInfo{
+		Name:            "custom-forecast-model",
+		KServeModelName: "custom-forecast-model",
+		URL:             server.URL,
+	}
+
+	result, err := client.PredictFlexible(context.Background(), "custom-forecast-model", [][]float64{{1.0}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "forecast", result.Type, "Flat float array should be detected as forecast")
+	require.NotNil(t, result.ForecastResponse)
+	assert.Nil(t, result.AnomalyResponse)
+
+	forecast := result.ForecastResponse.Predictions["forecast"]
+	assert.Equal(t, []float64{0.75, 0.82, 0.79}, forecast.Forecast)
+}
