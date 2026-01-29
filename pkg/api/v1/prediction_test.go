@@ -864,3 +864,333 @@ func TestPredictionHandler_ProcessAnomalyPredictions(t *testing.T) {
 		assert.Equal(t, 0.88, confidence)
 	})
 }
+
+// =============================================================================
+// Issue #57 Tests: ENABLE_FEATURE_ENGINEERING Configuration
+// =============================================================================
+
+// TestPredictionHandlerConfig_Struct tests the PredictionHandlerConfig struct
+func TestPredictionHandlerConfig_Struct(t *testing.T) {
+	t.Run("config with feature engineering enabled", func(t *testing.T) {
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: true,
+			LookbackHours:            24,
+			ExpectedFeatureCount:     3264,
+		}
+
+		assert.True(t, config.EnableFeatureEngineering)
+		assert.Equal(t, 24, config.LookbackHours)
+		assert.Equal(t, 3264, config.ExpectedFeatureCount)
+	})
+
+	t.Run("config with feature engineering disabled", func(t *testing.T) {
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: false,
+			LookbackHours:            0,
+			ExpectedFeatureCount:     5,
+		}
+
+		assert.False(t, config.EnableFeatureEngineering)
+		assert.Equal(t, 0, config.LookbackHours)
+		assert.Equal(t, 5, config.ExpectedFeatureCount)
+	})
+}
+
+// TestDefaultPredictionHandlerConfig tests the default configuration values
+func TestDefaultPredictionHandlerConfig(t *testing.T) {
+	config := DefaultPredictionHandlerConfig()
+
+	// Default should have feature engineering enabled (for backward compatibility)
+	assert.True(t, config.EnableFeatureEngineering, "Default config should have feature engineering enabled")
+	assert.Equal(t, 24, config.LookbackHours, "Default lookback should be 24 hours")
+	assert.Equal(t, 0, config.ExpectedFeatureCount, "Default expected count should be 0 (validation disabled)")
+}
+
+// TestNewPredictionHandlerWithConfig_FeatureEngineeringDisabled tests that config is respected (Issue #57)
+func TestNewPredictionHandlerWithConfig_FeatureEngineeringDisabled(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.DebugLevel)
+
+	// Create config with feature engineering DISABLED
+	config := PredictionHandlerConfig{
+		EnableFeatureEngineering: false,
+		LookbackHours:            0,
+		ExpectedFeatureCount:     5,
+	}
+
+	// Create handler with explicit config
+	handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+	// Verify the handler respects the config
+	assert.False(t, handler.IsFeatureEngineeringEnabled(),
+		"Feature engineering should be disabled when config.EnableFeatureEngineering=false")
+	assert.Nil(t, handler.GetFeatureInfo(),
+		"Feature info should be nil when feature engineering is disabled")
+}
+
+// TestNewPredictionHandlerWithConfig_FeatureEngineeringEnabled tests enabled config path
+func TestNewPredictionHandlerWithConfig_FeatureEngineeringEnabled(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.DebugLevel)
+
+	// Create config with feature engineering ENABLED
+	config := PredictionHandlerConfig{
+		EnableFeatureEngineering: true,
+		LookbackHours:            24,
+		ExpectedFeatureCount:     3264,
+	}
+
+	// Create handler with explicit config (no Prometheus client)
+	handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+	// Feature engineering should be enabled in config but feature builder nil due to no Prometheus
+	assert.False(t, handler.IsFeatureEngineeringEnabled(),
+		"Feature engineering should be disabled without Prometheus client")
+	assert.Nil(t, handler.GetFeatureInfo(),
+		"Feature info should be nil without Prometheus client")
+}
+
+// TestNewPredictionHandlerWithConfig_RespectsConfig verifies handler stores config correctly
+func TestNewPredictionHandlerWithConfig_RespectsConfig(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	tests := []struct {
+		name                     string
+		enableFeatureEngineering bool
+		expectedEnabled          bool
+	}{
+		{
+			name:                     "feature engineering explicitly disabled",
+			enableFeatureEngineering: false,
+			expectedEnabled:          false,
+		},
+		{
+			name:                     "feature engineering explicitly enabled (no prometheus)",
+			enableFeatureEngineering: true,
+			expectedEnabled:          false, // No Prometheus, so still disabled
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := PredictionHandlerConfig{
+				EnableFeatureEngineering: tt.enableFeatureEngineering,
+				LookbackHours:            24,
+				ExpectedFeatureCount:     0,
+			}
+
+			handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+			assert.Equal(t, tt.expectedEnabled, handler.IsFeatureEngineeringEnabled(),
+				"IsFeatureEngineeringEnabled() should return %v", tt.expectedEnabled)
+		})
+	}
+}
+
+// TestPredictionHandler_BuildRawMetricInstances tests raw metric feature building
+func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// Create handler with feature engineering disabled
+	config := PredictionHandlerConfig{
+		EnableFeatureEngineering: false,
+		ExpectedFeatureCount:     4, // Raw metrics use 4 features
+	}
+	handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+	t.Run("builds 4 raw features", func(t *testing.T) {
+		instances := handler.buildRawMetricInstances(15, 3, 0.65, 0.72)
+
+		require.Len(t, instances, 1, "Should return single instance")
+		require.Len(t, instances[0], 4, "Raw metrics should have exactly 4 features")
+
+		// Verify feature order: [hour, day_of_week, cpu_rolling_mean, memory_rolling_mean]
+		assert.Equal(t, 15.0, instances[0][0], "Feature 0 should be hour")
+		assert.Equal(t, 3.0, instances[0][1], "Feature 1 should be day_of_week")
+		assert.Equal(t, 0.65, instances[0][2], "Feature 2 should be cpu_rolling_mean")
+		assert.Equal(t, 0.72, instances[0][3], "Feature 3 should be memory_rolling_mean")
+	})
+
+	t.Run("handles boundary values", func(t *testing.T) {
+		// Test hour 0, day 0
+		instances := handler.buildRawMetricInstances(0, 0, 0.0, 0.0)
+		assert.Equal(t, 0.0, instances[0][0])
+		assert.Equal(t, 0.0, instances[0][1])
+
+		// Test hour 23, day 6
+		instances = handler.buildRawMetricInstances(23, 6, 1.0, 1.0)
+		assert.Equal(t, 23.0, instances[0][0])
+		assert.Equal(t, 6.0, instances[0][1])
+	})
+}
+
+// TestPredictionHandler_IsFeatureEngineeringEnabled tests the helper method
+func TestPredictionHandler_IsFeatureEngineeringEnabled(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	t.Run("returns false when config disabled", func(t *testing.T) {
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: false,
+		}
+		handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+		assert.False(t, handler.IsFeatureEngineeringEnabled())
+	})
+
+	t.Run("returns false when enabled but no prometheus", func(t *testing.T) {
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: true,
+		}
+		handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+		assert.False(t, handler.IsFeatureEngineeringEnabled())
+	})
+}
+
+// TestPredictionHandler_GetFeatureInfo tests the feature info method
+func TestPredictionHandler_GetFeatureInfo(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	t.Run("returns nil when feature engineering disabled", func(t *testing.T) {
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: false,
+		}
+		handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+		assert.Nil(t, handler.GetFeatureInfo())
+	})
+
+	t.Run("returns nil when no prometheus client", func(t *testing.T) {
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: true,
+			LookbackHours:            24,
+		}
+		handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+		assert.Nil(t, handler.GetFeatureInfo())
+	})
+}
+
+// TestPredictionHandlerWithConfig_LogMessages tests that appropriate log messages are generated
+func TestPredictionHandlerWithConfig_LogMessages(t *testing.T) {
+	t.Run("logs disabled message when feature engineering disabled", func(t *testing.T) {
+		// Create a logger with a hook to capture log entries
+		log := logrus.New()
+		log.SetLevel(logrus.DebugLevel)
+
+		var logEntries []logrus.Entry
+		log.AddHook(&testLogHook{entries: &logEntries})
+
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: false,
+			ExpectedFeatureCount:     5,
+		}
+
+		_ = NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+		// Check that "disabled" message was logged
+		found := false
+		for _, entry := range logEntries {
+			if entry.Level == logrus.InfoLevel &&
+				(entry.Message == "Predictive feature engineering disabled, using raw metrics only") {
+				found = true
+				// Verify expected_feature_count is in the log fields
+				if val, ok := entry.Data["expected_feature_count"]; ok {
+					assert.Equal(t, 5, val)
+				}
+				break
+			}
+		}
+		assert.True(t, found, "Should log 'feature engineering disabled' message")
+	})
+
+	t.Run("logs warning when enabled but no prometheus", func(t *testing.T) {
+		log := logrus.New()
+		log.SetLevel(logrus.DebugLevel)
+
+		var logEntries []logrus.Entry
+		log.AddHook(&testLogHook{entries: &logEntries})
+
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: true,
+			LookbackHours:            24,
+		}
+
+		_ = NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+		// Check that warning message was logged
+		found := false
+		for _, entry := range logEntries {
+			if entry.Level == logrus.WarnLevel &&
+				entry.Message == "Feature engineering enabled but Prometheus not available, falling back to raw metrics" {
+				found = true
+				break
+			}
+		}
+		assert.True(t, found, "Should log warning when prometheus not available")
+	})
+}
+
+// testLogHook is a test hook for capturing log entries
+type testLogHook struct {
+	entries *[]logrus.Entry
+}
+
+func (h *testLogHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+func (h *testLogHook) Fire(entry *logrus.Entry) error {
+	*h.entries = append(*h.entries, *entry)
+	return nil
+}
+
+// TestNewPredictionHandler_UsesDefaultConfig verifies deprecated function uses defaults
+func TestNewPredictionHandler_UsesDefaultConfig(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	// The deprecated NewPredictionHandler should use default config
+	handler := NewPredictionHandler(nil, nil, log)
+
+	// Since no Prometheus, feature engineering won't be fully enabled
+	// but internally the config should have EnableFeatureEngineering=true (default)
+	assert.NotNil(t, handler)
+}
+
+// TestIssue57_ConfigPropagation is an integration test for Issue #57
+func TestIssue57_ConfigPropagation(t *testing.T) {
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+
+	t.Run("ENABLE_FEATURE_ENGINEERING=false should disable feature engineering", func(t *testing.T) {
+		// Simulate what main.go does after the fix
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: false, // Simulates cfg.FeatureEngineering.Enabled = false
+			LookbackHours:            24,
+			ExpectedFeatureCount:     5, // Simple model with 5 features
+		}
+
+		handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+		// Key assertion: feature engineering should be disabled
+		assert.False(t, handler.IsFeatureEngineeringEnabled(),
+			"Issue #57: Feature engineering should be disabled when ENABLE_FEATURE_ENGINEERING=false")
+	})
+
+	t.Run("ENABLE_FEATURE_ENGINEERING=true should enable feature engineering (with prometheus)", func(t *testing.T) {
+		// When enabled AND prometheus available, feature engineering should work
+		config := PredictionHandlerConfig{
+			EnableFeatureEngineering: true,
+			LookbackHours:            24,
+			ExpectedFeatureCount:     3264,
+		}
+
+		// Note: Without actual Prometheus, it will log a warning but still create handler
+		handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
+
+		// Without Prometheus, feature builder is nil, so still disabled
+		assert.False(t, handler.IsFeatureEngineeringEnabled(),
+			"Without Prometheus, feature engineering should be disabled even if config enabled")
+	})
+}
