@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
+	"github.com/tosin2013/openshift-coordination-engine/pkg/features"
 	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
 )
 
@@ -20,11 +21,41 @@ import (
 type PredictionHandler struct {
 	kserveClient     *kserve.ProxyClient
 	prometheusClient *integrations.PrometheusClient
+	featureBuilder   *features.PredictiveFeatureBuilder
 	log              *logrus.Logger
 
 	// Default values when Prometheus is not available
 	defaultCPURollingMean    float64
 	defaultMemoryRollingMean float64
+
+	// Feature engineering configuration
+	enableFeatureEngineering bool
+}
+
+// PredictionHandlerConfig holds configuration for the prediction handler
+type PredictionHandlerConfig struct {
+	// EnableFeatureEngineering enables the 3200+-feature vector for predictive-analytics model
+	// When enabled, the handler queries Prometheus for historical data and builds
+	// engineered features (lags, rolling stats, trends) matching the model's training.
+	// When disabled, only 4 raw features are sent (legacy behavior).
+	EnableFeatureEngineering bool
+
+	// LookbackHours is the number of hours to look back for historical data
+	LookbackHours int
+
+	// ExpectedFeatureCount is the number of features the model expects.
+	// If set (> 0), the builder will log a warning if the generated count doesn't match.
+	ExpectedFeatureCount int
+}
+
+// DefaultPredictionHandlerConfig returns the default configuration
+func DefaultPredictionHandlerConfig() PredictionHandlerConfig {
+	defaultConfig := features.DefaultPredictiveConfig()
+	return PredictionHandlerConfig{
+		EnableFeatureEngineering: true,
+		LookbackHours:            defaultConfig.LookbackHours,
+		ExpectedFeatureCount:     0, // Disabled by default
+	}
 }
 
 // NewPredictionHandler creates a new prediction handler
@@ -33,12 +64,51 @@ func NewPredictionHandler(
 	prometheusClient *integrations.PrometheusClient,
 	log *logrus.Logger,
 ) *PredictionHandler {
+	return NewPredictionHandlerWithConfig(kserveClient, prometheusClient, log, DefaultPredictionHandlerConfig())
+}
+
+// NewPredictionHandlerWithConfig creates a new prediction handler with custom configuration
+func NewPredictionHandlerWithConfig(
+	kserveClient *kserve.ProxyClient,
+	prometheusClient *integrations.PrometheusClient,
+	log *logrus.Logger,
+	config PredictionHandlerConfig,
+) *PredictionHandler {
+	var featureBuilder *features.PredictiveFeatureBuilder
+
+	// Create feature builder if feature engineering is enabled and Prometheus is available
+	if config.EnableFeatureEngineering && prometheusClient != nil {
+		adapter := features.NewPrometheusAdapter(prometheusClient)
+
+		// Build feature config from handler config
+		featureConfig := features.PredictiveFeatureConfig{
+			LookbackHours:        config.LookbackHours,
+			Enabled:              true,
+			ExpectedFeatureCount: config.ExpectedFeatureCount,
+		}
+		if featureConfig.LookbackHours == 0 {
+			featureConfig.LookbackHours = 24 // Default
+		}
+
+		featureBuilder = features.NewPredictiveFeatureBuilder(adapter, featureConfig, log)
+		log.WithFields(logrus.Fields{
+			"lookback_hours":         featureConfig.LookbackHours,
+			"feature_count":          featureBuilder.GetFeatureInfo().TotalFeatures,
+			"base_metrics":           len(features.GetPredictiveBaseMetrics()),
+			"expected_feature_count": config.ExpectedFeatureCount,
+		}).Info("Predictive feature engineering enabled")
+	} else if config.EnableFeatureEngineering {
+		log.Warn("Feature engineering enabled but Prometheus not available, falling back to raw metrics")
+	}
+
 	return &PredictionHandler{
 		kserveClient:             kserveClient,
 		prometheusClient:         prometheusClient,
+		featureBuilder:           featureBuilder,
 		log:                      log,
 		defaultCPURollingMean:    0.65, // 65% average CPU usage
 		defaultMemoryRollingMean: 0.72, // 72% average memory usage
+		enableFeatureEngineering: config.EnableFeatureEngineering,
 	}
 }
 
@@ -185,18 +255,35 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 	}
 
 	// Build prediction instances
-	// Features: [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
-	instances := [][]float64{{
-		float64(req.Hour),
-		float64(req.DayOfWeek),
-		cpuRollingMean,
-		memoryRollingMean,
-	}}
+	var instances [][]float64
+	var featureCount int
+
+	// Use feature engineering for predictive-analytics model if enabled
+	if req.Model == "predictive-analytics" && h.featureBuilder != nil && h.enableFeatureEngineering {
+		featureVector, err := h.featureBuilder.BuildFeatures(ctx, req.Namespace, req.Deployment, req.Pod)
+		if err != nil {
+			h.log.WithError(err).Warn("Feature engineering failed, falling back to raw metrics")
+			instances = h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean)
+			featureCount = 4
+		} else {
+			instances = [][]float64{featureVector.Features}
+			featureCount = featureVector.FeatureCount
+			h.log.WithFields(logrus.Fields{
+				"feature_count": featureCount,
+				"metrics":       featureVector.MetricsData,
+			}).Debug("Built engineered features for prediction")
+		}
+	} else {
+		// Legacy behavior: 4 raw features
+		instances = h.buildRawMetricInstances(req.Hour, req.DayOfWeek, cpuRollingMean, memoryRollingMean)
+		featureCount = 4
+	}
 
 	h.log.WithFields(logrus.Fields{
-		"instances":           instances,
+		"feature_count":       featureCount,
 		"cpu_rolling_mean":    cpuRollingMean,
 		"memory_rolling_mean": memoryRollingMean,
+		"feature_engineering": h.enableFeatureEngineering && h.featureBuilder != nil,
 	}).Debug("Prepared prediction instances")
 
 	// Call KServe model with flexible response handling
@@ -504,6 +591,32 @@ func (h *PredictionHandler) processAnomalyPredictions(resp *kserve.DetectRespons
 // Deprecated: Use processAnomalyPredictions or processForecastPredictions instead
 func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuRollingMean, memoryRollingMean float64) (float64, float64, float64) {
 	return h.processAnomalyPredictions(resp, cpuRollingMean, memoryRollingMean)
+}
+
+// buildRawMetricInstances builds the legacy 4-feature instance for predictions
+// Features: [hour_of_day, day_of_week, cpu_rolling_mean, memory_rolling_mean]
+func (h *PredictionHandler) buildRawMetricInstances(hour, dayOfWeek int, cpuRollingMean, memoryRollingMean float64) [][]float64 {
+	return [][]float64{{
+		float64(hour),
+		float64(dayOfWeek),
+		cpuRollingMean,
+		memoryRollingMean,
+	}}
+}
+
+// IsFeatureEngineeringEnabled returns true if feature engineering is enabled
+func (h *PredictionHandler) IsFeatureEngineeringEnabled() bool {
+	return h.enableFeatureEngineering && h.featureBuilder != nil
+}
+
+// GetFeatureInfo returns information about the feature engineering configuration
+// Returns nil if feature engineering is not enabled
+func (h *PredictionHandler) GetFeatureInfo() *features.FeatureInfo {
+	if h.featureBuilder == nil {
+		return nil
+	}
+	info := h.featureBuilder.GetFeatureInfo()
+	return &info
 }
 
 // getTarget returns the target identifier based on the request scope
