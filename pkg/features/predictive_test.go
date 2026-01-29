@@ -82,8 +82,9 @@ func TestGetFeatureInfo(t *testing.T) {
 	assert.Equal(t, FeaturesPerMetric, info.FeaturesPerMetric)
 	assert.Equal(t, 24, info.LookbackHours)
 	assert.Equal(t, TimeFeatureCount, info.TimeFeatures)
-	// Total features should be > 3000 (5 metrics × 25 features × 24 hours + time features)
-	assert.Greater(t, info.TotalFeatures, 3000)
+	assert.Equal(t, 6, info.TimeFeatures) // Verify TimeFeatureCount is 6
+	// Total features should be exactly 3264 (matching Python model)
+	assert.Equal(t, 3264, info.TotalFeatures)
 }
 
 func TestBuildTimeFeatures(t *testing.T) {
@@ -96,16 +97,16 @@ func TestBuildTimeFeatures(t *testing.T) {
 	testTime := time.Date(2026, 1, 28, 14, 30, 0, 0, time.UTC)
 	features := builder.buildTimeFeatures(testTime)
 
-	assert.Len(t, features, TimeFeatureCount)
+	assert.Len(t, features, TimeFeatureCount) // Should be 6 features
 
-	// Verify specific features
-	assert.Equal(t, 14.0, features[0]) // hour_of_day
+	// Verify specific features in Python notebook order:
+	// hour, day_of_week, day_of_month, month, is_weekend, is_business_hours
+	assert.Equal(t, 14.0, features[0]) // hour (0-23)
 	assert.Equal(t, 2.0, features[1])  // day_of_week (Wednesday = 2, Monday = 0)
-	assert.Equal(t, 0.0, features[2])  // is_weekend (Wednesday is not weekend)
-	assert.Equal(t, 1.0, features[3])  // month (January)
-	assert.Equal(t, 1.0, features[4])  // quarter
-	assert.Equal(t, 28.0, features[5]) // day_of_month
-	assert.Equal(t, 1.0, features[7])  // is_business_hours (14:00 is business hours)
+	assert.Equal(t, 28.0, features[2]) // day_of_month (1-31)
+	assert.Equal(t, 1.0, features[3])  // month (January = 1)
+	assert.Equal(t, 0.0, features[4])  // is_weekend (Wednesday is not weekend)
+	assert.Equal(t, 1.0, features[5])  // is_business_hours (14:00 is business hours)
 }
 
 func TestBuildTimeFeaturesWeekend(t *testing.T) {
@@ -118,10 +119,14 @@ func TestBuildTimeFeaturesWeekend(t *testing.T) {
 	testTime := time.Date(2026, 2, 7, 10, 0, 0, 0, time.UTC)
 	features := builder.buildTimeFeatures(testTime)
 
-	assert.Equal(t, 10.0, features[0]) // hour_of_day
+	// Verify features in Python notebook order:
+	// hour, day_of_week, day_of_month, month, is_weekend, is_business_hours
+	assert.Equal(t, 10.0, features[0]) // hour (0-23)
 	assert.Equal(t, 5.0, features[1])  // day_of_week (Saturday = 5)
-	assert.Equal(t, 1.0, features[2])  // is_weekend
-	assert.Equal(t, 0.0, features[7])  // is_business_hours (weekend, so not business hours)
+	assert.Equal(t, 7.0, features[2])  // day_of_month (7th)
+	assert.Equal(t, 2.0, features[3])  // month (February = 2)
+	assert.Equal(t, 1.0, features[4])  // is_weekend (Saturday is weekend)
+	assert.Equal(t, 0.0, features[5])  // is_business_hours (weekend, so not business hours)
 }
 
 func TestGetDefaultFeatures(t *testing.T) {
@@ -284,12 +289,13 @@ func TestCalculateTotalFeatures(t *testing.T) {
 
 	total := builder.calculateTotalFeatures()
 
-	// With default config (24 hours):
-	// Metric features: 5 metrics × 25 features × 24 hours = 3000
-	// Time features per hour: 8 × 24 = 192
-	// Static time features: 8
-	// Total: 3200
-	expected := 5*FeaturesPerMetric*24 + TimeFeatureCount*24 + TimeFeatureCount
+	// With default config (24 hours), using Python formula:
+	// lookback × (metrics + time_features + features_per_metric × metrics)
+	// = 24 × (5 + 6 + 25×5) = 24 × 136 = 3264
+	baseMetrics := 5
+	columnsPerTimestep := baseMetrics + TimeFeatureCount + (FeaturesPerMetric * baseMetrics)
+	expected := 24 * columnsPerTimestep
+	assert.Equal(t, 3264, expected, "Formula verification: should equal 3264")
 	assert.Equal(t, expected, total)
 }
 
@@ -318,9 +324,12 @@ func TestGetPredictiveFeatureNames(t *testing.T) {
 func TestGetTimeFeatureNames(t *testing.T) {
 	names := GetTimeFeatureNames()
 
-	assert.Len(t, names, TimeFeatureCount)
-	assert.Contains(t, names, "hour_of_day")
+	assert.Len(t, names, TimeFeatureCount) // Should be 6 features
+	// Verify all 6 time feature names (matching Python notebook)
+	assert.Contains(t, names, "hour")
 	assert.Contains(t, names, "day_of_week")
+	assert.Contains(t, names, "day_of_month")
+	assert.Contains(t, names, "month")
 	assert.Contains(t, names, "is_weekend")
 	assert.Contains(t, names, "is_business_hours")
 }
