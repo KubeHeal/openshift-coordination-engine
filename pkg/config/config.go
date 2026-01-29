@@ -44,6 +44,28 @@ type Config struct {
 	// Incident storage (ADR-014)
 	DataDir               string `json:"data_dir,omitempty"`                // Directory for persistent incident storage
 	IncidentRetentionDays int    `json:"incident_retention_days,omitempty"` // Days to retain resolved incidents (0 = no cleanup)
+
+	// Feature Engineering (Issue #54, ADR-016)
+	FeatureEngineering FeatureEngineeringConfig `json:"feature_engineering"`
+}
+
+// FeatureEngineeringConfig holds configuration for ML feature engineering (Issue #54)
+type FeatureEngineeringConfig struct {
+	// Enabled enables feature engineering for predictive-analytics model
+	// When true, the prediction handler builds 3200+ engineered features from Prometheus
+	// When false, only 4 raw features are sent (legacy behavior)
+	Enabled bool `json:"enabled"`
+
+	// LookbackHours is the number of hours to look back for historical data
+	// Default: 24 hours (matches model training)
+	LookbackHours int `json:"lookback_hours"`
+
+	// ExpectedFeatureCount is the number of features the model expects.
+	// If set (> 0), the system will log a warning if the generated count doesn't match.
+	// This helps detect feature engineering mismatches early.
+	// Default: 0 (validation disabled)
+	// Set to the model's StandardScaler feature count to enable validation.
+	ExpectedFeatureCount int `json:"expected_feature_count"`
 }
 
 // KServeConfig holds configuration for KServe integration (ADR-039, ADR-040)
@@ -159,6 +181,11 @@ const (
 	// Incident storage defaults (ADR-014)
 	DefaultDataDir               = "" // Empty means in-memory only
 	DefaultIncidentRetentionDays = 90 // 90 days (PCI-DSS, SOC2, HIPAA compliance)
+
+	// Feature engineering defaults (Issue #54, ADR-016)
+	DefaultFeatureEngineeringEnabled              = true // Enable by default to fix Issue #54
+	DefaultFeatureEngineeringLookbackHours        = 24   // 24-hour lookback matches model training
+	DefaultFeatureEngineeringExpectedFeatureCount = 0    // 0 = disable validation, set to model's expected count to enable
 )
 
 // Valid log levels
@@ -203,6 +230,13 @@ func Load() (*Config, error) {
 			},
 			DynamicServices: discoverKServeServicesFromEnv(),
 			Timeout:         getEnvAsDuration("KSERVE_TIMEOUT", DefaultKServeTimeout),
+		},
+
+		// Feature engineering configuration (Issue #54, ADR-016)
+		FeatureEngineering: FeatureEngineeringConfig{
+			Enabled:              getEnvAsBool("ENABLE_FEATURE_ENGINEERING", DefaultFeatureEngineeringEnabled),
+			LookbackHours:        getEnvAsInt("FEATURE_ENGINEERING_LOOKBACK_HOURS", DefaultFeatureEngineeringLookbackHours),
+			ExpectedFeatureCount: getEnvAsInt("FEATURE_ENGINEERING_EXPECTED_COUNT", DefaultFeatureEngineeringExpectedFeatureCount),
 		},
 	}
 
