@@ -97,8 +97,9 @@ func NewPredictionHandlerWithConfig(
 ) *PredictionHandler {
 	var featureBuilder *features.PredictiveFeatureBuilder
 
-	// Create feature builder if feature engineering is enabled and Prometheus is available
-	if config.EnableFeatureEngineering && prometheusClient != nil {
+	// Create feature builder based on configuration and Prometheus availability
+	switch {
+	case config.EnableFeatureEngineering && prometheusClient != nil:
 		adapter := features.NewPrometheusAdapter(prometheusClient)
 
 		// Build feature config from handler config
@@ -118,9 +119,11 @@ func NewPredictionHandlerWithConfig(
 			"base_metrics":           len(features.GetPredictiveBaseMetrics()),
 			"expected_feature_count": config.ExpectedFeatureCount,
 		}).Info("Predictive feature engineering enabled")
-	} else if config.EnableFeatureEngineering {
+
+	case config.EnableFeatureEngineering:
 		log.Warn("Feature engineering enabled but Prometheus not available, falling back to raw metrics")
-	} else {
+
+	default:
 		// Feature engineering explicitly disabled via ENABLE_FEATURE_ENGINEERING=false (Issue #57)
 		log.WithFields(logrus.Fields{
 			"expected_feature_count": config.ExpectedFeatureCount,
