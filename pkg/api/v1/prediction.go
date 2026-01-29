@@ -49,7 +49,23 @@ type PredictionHandlerConfig struct {
 	ExpectedFeatureCount int
 }
 
-// DefaultPredictionHandlerConfig returns the default configuration
+// DefaultPredictionHandlerConfig returns the default configuration.
+//
+// IMPORTANT: This function provides defaults for backward compatibility only.
+// Production deployments should use NewPredictionHandlerWithConfig() with explicit
+// configuration from environment variables (Issue #57):
+//
+//	predictionConfig := v1.PredictionHandlerConfig{
+//	    EnableFeatureEngineering: cfg.FeatureEngineering.Enabled,
+//	    LookbackHours:            cfg.FeatureEngineering.LookbackHours,
+//	    ExpectedFeatureCount:     cfg.FeatureEngineering.ExpectedFeatureCount,
+//	}
+//	handler := v1.NewPredictionHandlerWithConfig(client, prom, log, predictionConfig)
+//
+// Environment variables:
+//   - ENABLE_FEATURE_ENGINEERING: "true" or "false" (default: true)
+//   - FEATURE_ENGINEERING_LOOKBACK_HOURS: hours of historical data (default: 24)
+//   - FEATURE_ENGINEERING_EXPECTED_COUNT: expected feature count, 0 to disable validation
 func DefaultPredictionHandlerConfig() PredictionHandlerConfig {
 	defaultConfig := features.DefaultPredictiveConfig()
 	return PredictionHandlerConfig{
@@ -59,7 +75,11 @@ func DefaultPredictionHandlerConfig() PredictionHandlerConfig {
 	}
 }
 
-// NewPredictionHandler creates a new prediction handler
+// NewPredictionHandler creates a new prediction handler with default configuration.
+//
+// Deprecated: Use NewPredictionHandlerWithConfig with explicit configuration from
+// environment variables. This function uses hardcoded defaults and ignores
+// ENABLE_FEATURE_ENGINEERING environment variable. See Issue #57.
 func NewPredictionHandler(
 	kserveClient *kserve.ProxyClient,
 	prometheusClient *integrations.PrometheusClient,
@@ -100,6 +120,11 @@ func NewPredictionHandlerWithConfig(
 		}).Info("Predictive feature engineering enabled")
 	} else if config.EnableFeatureEngineering {
 		log.Warn("Feature engineering enabled but Prometheus not available, falling back to raw metrics")
+	} else {
+		// Feature engineering explicitly disabled via ENABLE_FEATURE_ENGINEERING=false (Issue #57)
+		log.WithFields(logrus.Fields{
+			"expected_feature_count": config.ExpectedFeatureCount,
+		}).Info("Predictive feature engineering disabled, using raw metrics only")
 	}
 
 	return &PredictionHandler{

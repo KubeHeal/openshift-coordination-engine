@@ -505,6 +505,9 @@ func clearEnv(t *testing.T) {
 		"ENABLE_KSERVE_INTEGRATION", "KSERVE_NAMESPACE", "KSERVE_PREDICTOR_PORT",
 		"KSERVE_ANOMALY_DETECTOR_SERVICE", "KSERVE_PREDICTIVE_ANALYTICS_SERVICE",
 		"KSERVE_TIMEOUT",
+		// Feature engineering environment variables (Issue #57)
+		"ENABLE_FEATURE_ENGINEERING", "FEATURE_ENGINEERING_LOOKBACK_HOURS",
+		"FEATURE_ENGINEERING_EXPECTED_COUNT",
 	}
 	for _, key := range envVars {
 		os.Unsetenv(key)
@@ -1008,4 +1011,133 @@ func TestValidate_WithDynamicServicesOnly(t *testing.T) {
 
 	err := cfg.Validate()
 	assert.NoError(t, err)
+}
+
+// =============================================================================
+// Feature Engineering Configuration Tests (Issue #57)
+// =============================================================================
+
+// TestFeatureEngineering_Defaults verifies default feature engineering configuration
+func TestFeatureEngineering_Defaults(t *testing.T) {
+	clearEnv(t)
+
+	// Set minimum required KServe config for validation to pass
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	defer os.Unsetenv("KSERVE_ANOMALY_DETECTOR_SERVICE")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	// Verify feature engineering defaults (Issue #57)
+	assert.True(t, cfg.FeatureEngineering.Enabled, "Feature engineering should be enabled by default")
+	assert.Equal(t, DefaultFeatureEngineeringLookbackHours, cfg.FeatureEngineering.LookbackHours)
+	assert.Equal(t, DefaultFeatureEngineeringExpectedFeatureCount, cfg.FeatureEngineering.ExpectedFeatureCount)
+}
+
+// TestFeatureEngineering_EnabledFromEnvironment verifies ENABLE_FEATURE_ENGINEERING=true is read correctly
+func TestFeatureEngineering_EnabledFromEnvironment(t *testing.T) {
+	clearEnv(t)
+
+	// Set feature engineering to explicitly enabled
+	os.Setenv("ENABLE_FEATURE_ENGINEERING", "true")
+	os.Setenv("FEATURE_ENGINEERING_LOOKBACK_HOURS", "48")
+	os.Setenv("FEATURE_ENGINEERING_EXPECTED_COUNT", "3264")
+	// Set minimum required KServe config
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	defer func() {
+		os.Unsetenv("ENABLE_FEATURE_ENGINEERING")
+		os.Unsetenv("FEATURE_ENGINEERING_LOOKBACK_HOURS")
+		os.Unsetenv("FEATURE_ENGINEERING_EXPECTED_COUNT")
+		os.Unsetenv("KSERVE_ANOMALY_DETECTOR_SERVICE")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	// Verify feature engineering is enabled with custom values
+	assert.True(t, cfg.FeatureEngineering.Enabled, "Feature engineering should be enabled")
+	assert.Equal(t, 48, cfg.FeatureEngineering.LookbackHours, "LookbackHours should be 48")
+	assert.Equal(t, 3264, cfg.FeatureEngineering.ExpectedFeatureCount, "ExpectedFeatureCount should be 3264")
+}
+
+// TestFeatureEngineering_DisabledFromEnvironment verifies ENABLE_FEATURE_ENGINEERING=false is read correctly (Issue #57)
+func TestFeatureEngineering_DisabledFromEnvironment(t *testing.T) {
+	clearEnv(t)
+
+	// Set feature engineering to disabled (Issue #57 fix verification)
+	os.Setenv("ENABLE_FEATURE_ENGINEERING", "false")
+	os.Setenv("FEATURE_ENGINEERING_EXPECTED_COUNT", "5")
+	// Set minimum required KServe config
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	defer func() {
+		os.Unsetenv("ENABLE_FEATURE_ENGINEERING")
+		os.Unsetenv("FEATURE_ENGINEERING_EXPECTED_COUNT")
+		os.Unsetenv("KSERVE_ANOMALY_DETECTOR_SERVICE")
+	}()
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
+
+	// This is the key test for Issue #57 - verify false is read correctly
+	assert.False(t, cfg.FeatureEngineering.Enabled, "Feature engineering should be DISABLED when ENABLE_FEATURE_ENGINEERING=false")
+	assert.Equal(t, 5, cfg.FeatureEngineering.ExpectedFeatureCount, "ExpectedFeatureCount should be 5 (for simple models)")
+}
+
+// TestFeatureEngineering_BooleanParsing tests various boolean input formats
+func TestFeatureEngineering_BooleanParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		expected bool
+	}{
+		{"lowercase true", "true", true},
+		{"uppercase TRUE", "TRUE", true},
+		{"number 1", "1", true},
+		{"lowercase false", "false", false},
+		{"uppercase FALSE", "FALSE", false},
+		{"number 0", "0", false},
+		{"invalid defaults to true", "invalid", true}, // Default is true
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			os.Setenv("ENABLE_FEATURE_ENGINEERING", tt.envValue)
+			os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+			defer func() {
+				os.Unsetenv("ENABLE_FEATURE_ENGINEERING")
+				os.Unsetenv("KSERVE_ANOMALY_DETECTOR_SERVICE")
+			}()
+
+			cfg, err := Load()
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.expected, cfg.FeatureEngineering.Enabled,
+				"ENABLE_FEATURE_ENGINEERING=%s should result in Enabled=%v", tt.envValue, tt.expected)
+		})
+	}
+}
+
+// TestFeatureEngineeringConfig_Struct tests the FeatureEngineeringConfig struct
+func TestFeatureEngineeringConfig_Struct(t *testing.T) {
+	// Test that the struct can be created and accessed
+	config := FeatureEngineeringConfig{
+		Enabled:              false,
+		LookbackHours:        12,
+		ExpectedFeatureCount: 5,
+	}
+
+	assert.False(t, config.Enabled)
+	assert.Equal(t, 12, config.LookbackHours)
+	assert.Equal(t, 5, config.ExpectedFeatureCount)
+}
+
+// TestFeatureEngineering_DefaultConstants verifies the default constants are set correctly
+func TestFeatureEngineering_DefaultConstants(t *testing.T) {
+	assert.True(t, DefaultFeatureEngineeringEnabled, "Default should be enabled")
+	assert.Equal(t, 24, DefaultFeatureEngineeringLookbackHours, "Default lookback should be 24 hours")
+	assert.Equal(t, 0, DefaultFeatureEngineeringExpectedFeatureCount, "Default expected count should be 0 (disabled)")
 }

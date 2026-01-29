@@ -160,6 +160,14 @@ func main() {
 	// Create recommendations handler with KServe integration for ML predictions
 	var recommendationsHandler *v1.RecommendationsHandler
 	var predictionHandler *v1.PredictionHandler
+
+	// Build prediction handler config from environment-loaded FeatureEngineering settings (Issue #57)
+	predictionConfig := v1.PredictionHandlerConfig{
+		EnableFeatureEngineering: cfg.FeatureEngineering.Enabled,
+		LookbackHours:            cfg.FeatureEngineering.LookbackHours,
+		ExpectedFeatureCount:     cfg.FeatureEngineering.ExpectedFeatureCount,
+	}
+
 	if kserveProxyHandler != nil {
 		recommendationsHandler = v1.NewRecommendationsHandler(
 			orchestrator,
@@ -167,10 +175,11 @@ func main() {
 			kserveProxyHandler.GetProxyClient(),
 			log,
 		)
-		predictionHandler = v1.NewPredictionHandler(
+		predictionHandler = v1.NewPredictionHandlerWithConfig(
 			kserveProxyHandler.GetProxyClient(),
 			prometheusClient,
 			log,
+			predictionConfig,
 		)
 	} else {
 		recommendationsHandler = v1.NewRecommendationsHandler(
@@ -179,10 +188,11 @@ func main() {
 			nil, // No KServe client
 			log,
 		)
-		predictionHandler = v1.NewPredictionHandler(
+		predictionHandler = v1.NewPredictionHandlerWithConfig(
 			nil, // No KServe client
 			prometheusClient,
 			log,
+			predictionConfig,
 		)
 	}
 
