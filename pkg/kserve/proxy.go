@@ -684,6 +684,45 @@ func (c *ProxyClient) parseAnomalyResponse(modelName string, body []byte) (*Mode
 	}, nil
 }
 
+// isLikelyAnomalyArray checks if an array of values looks like anomaly detection output.
+// Anomaly detectors typically return integer values in the range [-1, 0, 1]:
+// -1 = outlier/anomaly, 1 = inlier/normal, 0 = sometimes used as normal
+// Forecast models return float values with fractional parts.
+func isLikelyAnomalyArray(pred []interface{}) bool {
+	if len(pred) == 0 {
+		return false
+	}
+
+	// Check the first element to see if it's a typical anomaly value
+	firstVal, isFloat := pred[0].(float64)
+	if !isFloat {
+		return false
+	}
+
+	// First value should be a typical anomaly classification value
+	if firstVal != -1 && firstVal != 0 && firstVal != 1 {
+		return false
+	}
+
+	// All values must be integers in the anomaly detection range
+	for _, v := range pred {
+		fv, ok := v.(float64)
+		if !ok {
+			return false
+		}
+		// Must be an integer (no fractional part)
+		if fv != float64(int(fv)) {
+			return false
+		}
+		// Must be in typical anomaly range [-1, 1]
+		if fv < -1 || fv > 1 {
+			return false
+		}
+	}
+
+	return true
+}
+
 // parseAutoDetectResponse tries to detect and parse the response format automatically
 func (c *ProxyClient) parseAutoDetectResponse(modelName string, body []byte) (*ModelResponse, error) {
 	// First, try to unmarshal into a generic map to inspect the structure
@@ -700,57 +739,38 @@ func (c *ProxyClient) parseAutoDetectResponse(modelName string, body []byte) (*M
 	// Check if predictions is an array or object
 	switch pred := predictions.(type) {
 	case []interface{}:
-		// Could be anomaly-detector (array of ints), sklearn forecast (array of arrays),
-		// or flat float array (sklearn server default)
-		if len(pred) > 0 {
-			// Check if it's an array of arrays (sklearn multi-output forecast)
-			if _, isArray := pred[0].([]interface{}); isArray {
-				// Array of arrays format: [[cpu, mem], ...] -> forecast
-				return c.parseForecastResponse(modelName, body)
-			}
-			// Check if the first element is a float
-			if f, isFloat := pred[0].(float64); isFloat {
-				// Distinguish between anomaly (integer values like -1, 0, 1)
-				// and forecast (float values with decimal parts)
-				// Anomaly detector returns -1 or 1 (integer classification)
-				// Forecast models return values with fractional parts
-				allIntegers := true
-				for _, v := range pred {
-					if fv, ok := v.(float64); ok {
-						// Check if the value is a "clean" integer (-1, 0, 1)
-						// typical for anomaly detection
-						if fv != float64(int(fv)) {
-							allIntegers = false
-							break
-						}
-						// Also check if values are outside typical anomaly range
-						if fv < -1 || fv > 1 {
-							// Values outside [-1, 1] suggest it's a forecast
-							// (anomaly detectors typically use -1=outlier, 1=inlier or 0/1)
-							if fv != float64(int(fv)) || (fv > 1 || fv < -1) {
-								allIntegers = false
-								break
-							}
-						}
-					}
-				}
-
-				if allIntegers && (f == -1 || f == 0 || f == 1) {
-					// Likely anomaly detector output
-					return c.parseAnomalyResponse(modelName, body)
-				}
-				// Flat array of floats: [0.123, 0.456, ...] -> forecast
-				return c.parseForecastResponse(modelName, body)
-			}
-		}
-		// Simple array format with integers: [0, 1, 0, ...] -> anomaly-detector
-		return c.parseAnomalyResponse(modelName, body)
+		return c.parseArrayPredictions(modelName, body, pred)
 	case map[string]interface{}:
 		// Predictive-analytics format: predictions is a nested object
 		return c.parseForecastResponse(modelName, body)
 	default:
 		return nil, fmt.Errorf("unsupported predictions format from model %s", modelName)
 	}
+}
+
+// parseArrayPredictions handles array-type predictions, detecting whether they are
+// anomaly detection results, multi-output forecasts, or flat float arrays.
+func (c *ProxyClient) parseArrayPredictions(modelName string, body []byte, pred []interface{}) (*ModelResponse, error) {
+	if len(pred) == 0 {
+		return c.parseAnomalyResponse(modelName, body)
+	}
+
+	// Check if it's an array of arrays (sklearn multi-output forecast)
+	if _, isArray := pred[0].([]interface{}); isArray {
+		return c.parseForecastResponse(modelName, body)
+	}
+
+	// Check if it's a float array - could be anomaly or forecast
+	if _, isFloat := pred[0].(float64); isFloat {
+		if isLikelyAnomalyArray(pred) {
+			return c.parseAnomalyResponse(modelName, body)
+		}
+		// Flat array of floats: [0.123, 0.456, ...] -> forecast
+		return c.parseForecastResponse(modelName, body)
+	}
+
+	// Default to anomaly response for other array types
+	return c.parseAnomalyResponse(modelName, body)
 }
 
 // PredictForecast is a convenience method that calls PredictFlexible and returns only forecast responses.
