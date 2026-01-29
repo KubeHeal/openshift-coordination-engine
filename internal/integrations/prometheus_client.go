@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1831,4 +1832,191 @@ func (c *PrometheusClient) defaultMetricFeatures() []float64 {
 		0.0, // diff
 		0.0, // pct_change
 	}
+}
+
+// =============================================================================
+// Predictive Analytics Feature Engineering Support (Issue #54)
+// =============================================================================
+
+// PredictiveDataPoint represents a single metric observation for predictive analytics
+// This type is compatible with pkg/features.DataPoint
+type PredictiveDataPoint struct {
+	Timestamp time.Time
+	Value     float64
+}
+
+// QueryRange executes a range query and returns data points for predictive feature engineering.
+// This method implements the features.MetricDataProvider interface.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts
+//   - query: The PromQL query to execute
+//   - start: Start time for the query range
+//   - end: End time for the query range
+//   - step: Resolution step for data points
+//
+// Returns a slice of data points or an error if the query fails.
+func (c *PrometheusClient) QueryRange(ctx context.Context, query string, start, end time.Time, step time.Duration) ([]PredictiveDataPoint, error) {
+	if !c.IsAvailable() {
+		return nil, fmt.Errorf("prometheus client not available")
+	}
+
+	endpoint := fmt.Sprintf("%s/api/v1/query_range", c.baseURL)
+	reqURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("start", fmt.Sprintf("%d", start.Unix()))
+	params.Set("end", fmt.Sprintf("%d", end.Unix()))
+	params.Set("step", formatDurationForPromQL(step))
+	reqURL.RawQuery = params.Encode()
+
+	body, err := c.executeRangeQuery(ctx, reqURL.String())
+	if err != nil {
+		return nil, err
+	}
+
+	return c.parsePredictiveRangeResponse(body, query)
+}
+
+// parsePredictiveRangeResponse parses the Prometheus range query response for predictive analytics
+func (c *PrometheusClient) parsePredictiveRangeResponse(body []byte, query string) ([]PredictiveDataPoint, error) {
+	var promResp PrometheusRangeQueryResponse
+	if err := json.Unmarshal(body, &promResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if promResp.Status != "success" {
+		return nil, fmt.Errorf("prometheus query failed: %s - %s", promResp.ErrorType, promResp.Error)
+	}
+
+	if len(promResp.Data.Result) == 0 {
+		// Return empty slice instead of error for empty results
+		c.log.WithField("query", query).Debug("No data returned for predictive range query")
+		return []PredictiveDataPoint{}, nil
+	}
+
+	return c.extractPredictiveDataPoints(promResp.Data.Result[0].Values), nil
+}
+
+// extractPredictiveDataPoints extracts PredictiveDataPoints from raw Prometheus values
+func (c *PrometheusClient) extractPredictiveDataPoints(values [][]interface{}) []PredictiveDataPoint {
+	dataPoints := make([]PredictiveDataPoint, 0, len(values))
+	for _, v := range values {
+		if len(v) != 2 {
+			continue
+		}
+
+		// Parse timestamp (Unix timestamp as float)
+		ts, ok := v[0].(float64)
+		if !ok {
+			continue
+		}
+
+		// Parse value (string representation of float)
+		valStr, ok := v[1].(string)
+		if !ok {
+			continue
+		}
+
+		val, err := strconv.ParseFloat(valStr, 64)
+		if err != nil {
+			continue
+		}
+
+		// Handle NaN and Inf values
+		if math.IsNaN(val) || math.IsInf(val, 0) {
+			continue
+		}
+
+		dataPoints = append(dataPoints, PredictiveDataPoint{
+			Timestamp: time.Unix(int64(ts), 0),
+			Value:     val,
+		})
+	}
+	return dataPoints
+}
+
+// QueryAtTime executes an instant query at a specific timestamp.
+// This is useful for historical point-in-time queries for feature engineering.
+func (c *PrometheusClient) QueryAtTime(ctx context.Context, query string, timestamp time.Time) (float64, error) {
+	if !c.IsAvailable() {
+		return 0, fmt.Errorf("prometheus client not available")
+	}
+
+	endpoint := fmt.Sprintf("%s/api/v1/query", c.baseURL)
+	reqURL, err := url.Parse(endpoint)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	params := url.Values{}
+	params.Set("query", query)
+	params.Set("time", fmt.Sprintf("%d", timestamp.Unix()))
+	reqURL.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), http.NoBody)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	// Add bearer token if available (for OpenShift authentication)
+	if token := c.getServiceAccountToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer closeBody(resp)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var promResp PrometheusQueryResponse
+	if err := json.Unmarshal(body, &promResp); err != nil {
+		return 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if promResp.Status != "success" {
+		return 0, fmt.Errorf("prometheus query failed: %s - %s", promResp.ErrorType, promResp.Error)
+	}
+
+	if len(promResp.Data.Result) == 0 {
+		return 0, fmt.Errorf("no data returned for query at time %s", timestamp.Format(time.RFC3339))
+	}
+
+	// Parse value
+	if len(promResp.Data.Result[0].Value) < 2 {
+		return 0, fmt.Errorf("invalid value format in response")
+	}
+
+	valStr, ok := promResp.Data.Result[0].Value[1].(string)
+	if !ok {
+		return 0, fmt.Errorf("value is not a string")
+	}
+
+	val, err := strconv.ParseFloat(valStr, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse value: %w", err)
+	}
+
+	// Handle NaN and Inf
+	if math.IsNaN(val) || math.IsInf(val, 0) {
+		return 0, fmt.Errorf("invalid value: NaN or Inf")
+	}
+
+	return val, nil
 }
