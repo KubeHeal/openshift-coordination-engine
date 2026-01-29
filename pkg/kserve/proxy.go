@@ -516,15 +516,19 @@ func (c *ProxyClient) parseModelResponse(modelName string, body []byte) (*ModelR
 }
 
 // parseForecastResponse parses predictive-analytics model responses.
-// Supports two formats for flexibility with different model architectures:
+// Supports three formats for flexibility with different model architectures:
 //
 // Format 1 - Nested (custom wrapper output):
 //
 //	{"predictions": {"cpu_usage": {"forecast": [...], ...}, "memory_usage": {...}}}
 //
-// Format 2 - Array (standard sklearn multi-output):
+// Format 2 - Array of arrays (standard sklearn multi-output):
 //
 //	{"predictions": [[cpu_value, memory_value], ...]}
+//
+// Format 3 - Flat array (sklearn single-output, KServe sklearn server default):
+//
+//	{"predictions": [0.123, 0.456, ...]}
 func (c *ProxyClient) parseForecastResponse(modelName string, body []byte) (*ModelResponse, error) {
 	// Try Format 1: Nested structure (custom wrapper or rich model output)
 	var nestedResp struct {
@@ -553,63 +557,99 @@ func (c *ProxyClient) parseForecastResponse(modelName string, body []byte) (*Mod
 		}, nil
 	}
 
-	// Fallback to Format 2: Array structure (sklearn multi-output)
+	// Try Format 2: Array of arrays structure (sklearn multi-output)
 	var arrayResp struct {
 		Predictions  [][]float64 `json:"predictions"`
 		ModelName    string      `json:"model_name,omitempty"`
 		ModelVersion string      `json:"model_version,omitempty"`
 	}
 
-	if err := json.Unmarshal(body, &arrayResp); err != nil {
+	if err := json.Unmarshal(body, &arrayResp); err == nil && len(arrayResp.Predictions) > 0 {
+		// Convert array format to nested format
+		// Convention: [0] = CPU, [1] = Memory (per model metadata)
+		predictions := make(map[string]ForecastResult)
+
+		if len(arrayResp.Predictions[0]) >= 2 {
+			cpuForecasts := make([]float64, len(arrayResp.Predictions))
+			memForecasts := make([]float64, len(arrayResp.Predictions))
+
+			for i, pred := range arrayResp.Predictions {
+				cpuForecasts[i] = pred[0]
+				memForecasts[i] = pred[1]
+			}
+
+			predictions["cpu_usage"] = ForecastResult{
+				Forecast:        cpuForecasts,
+				ForecastHorizon: len(cpuForecasts),
+				Confidence:      []float64{0.85}, // Default confidence for sklearn models
+			}
+			predictions["memory_usage"] = ForecastResult{
+				Forecast:        memForecasts,
+				ForecastHorizon: len(memForecasts),
+				Confidence:      []float64{0.85},
+			}
+
+			c.log.WithFields(logrus.Fields{
+				"model":       modelName,
+				"format":      "array_converted",
+				"num_samples": len(arrayResp.Predictions),
+			}).Debug("Converted array forecast to nested format")
+		} else if len(arrayResp.Predictions[0]) == 1 {
+			// Handle single-output models (just CPU or a single metric)
+			forecasts := make([]float64, len(arrayResp.Predictions))
+			for i, pred := range arrayResp.Predictions {
+				forecasts[i] = pred[0]
+			}
+			predictions["forecast"] = ForecastResult{
+				Forecast:        forecasts,
+				ForecastHorizon: len(forecasts),
+				Confidence:      []float64{0.85},
+			}
+
+			c.log.WithFields(logrus.Fields{
+				"model":       modelName,
+				"format":      "array_single_converted",
+				"num_samples": len(arrayResp.Predictions),
+			}).Debug("Converted single-output array forecast to nested format")
+		}
+
+		return &ModelResponse{
+			Type: "forecast",
+			ForecastResponse: &ForecastResponse{
+				Predictions:  predictions,
+				ModelName:    modelName,
+				ModelVersion: arrayResp.ModelVersion,
+			},
+		}, nil
+	}
+
+	// Fallback to Format 3: Flat array (sklearn server default format)
+	// This handles responses like {"predictions": [0.123, 0.456, ...]}
+	var flatArrayResp struct {
+		Predictions  []float64 `json:"predictions"`
+		ModelName    string    `json:"model_name,omitempty"`
+		ModelVersion string    `json:"model_version,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &flatArrayResp); err != nil {
 		return nil, fmt.Errorf("failed to parse forecast response from model %s: %w", modelName, err)
 	}
 
-	// Convert array format to nested format
-	// Convention: [0] = CPU, [1] = Memory (per model metadata)
 	predictions := make(map[string]ForecastResult)
 
-	if len(arrayResp.Predictions) > 0 && len(arrayResp.Predictions[0]) >= 2 {
-		cpuForecasts := make([]float64, len(arrayResp.Predictions))
-		memForecasts := make([]float64, len(arrayResp.Predictions))
-
-		for i, pred := range arrayResp.Predictions {
-			cpuForecasts[i] = pred[0]
-			memForecasts[i] = pred[1]
-		}
-
-		predictions["cpu_usage"] = ForecastResult{
-			Forecast:        cpuForecasts,
-			ForecastHorizon: len(cpuForecasts),
+	if len(flatArrayResp.Predictions) > 0 {
+		// For flat array format, treat all values as a single forecast series
+		predictions["forecast"] = ForecastResult{
+			Forecast:        flatArrayResp.Predictions,
+			ForecastHorizon: len(flatArrayResp.Predictions),
 			Confidence:      []float64{0.85}, // Default confidence for sklearn models
 		}
-		predictions["memory_usage"] = ForecastResult{
-			Forecast:        memForecasts,
-			ForecastHorizon: len(memForecasts),
-			Confidence:      []float64{0.85},
-		}
 
 		c.log.WithFields(logrus.Fields{
 			"model":       modelName,
-			"format":      "array_converted",
-			"num_samples": len(arrayResp.Predictions),
-		}).Debug("Converted array forecast to nested format")
-	} else if len(arrayResp.Predictions) > 0 && len(arrayResp.Predictions[0]) == 1 {
-		// Handle single-output models (just CPU or a single metric)
-		forecasts := make([]float64, len(arrayResp.Predictions))
-		for i, pred := range arrayResp.Predictions {
-			forecasts[i] = pred[0]
-		}
-		predictions["forecast"] = ForecastResult{
-			Forecast:        forecasts,
-			ForecastHorizon: len(forecasts),
-			Confidence:      []float64{0.85},
-		}
-
-		c.log.WithFields(logrus.Fields{
-			"model":       modelName,
-			"format":      "array_single_converted",
-			"num_samples": len(arrayResp.Predictions),
-		}).Debug("Converted single-output array forecast to nested format")
+			"format":      "flat_array",
+			"num_samples": len(flatArrayResp.Predictions),
+		}).Debug("Parsed flat array forecast response")
 	}
 
 	return &ModelResponse{
@@ -617,7 +657,7 @@ func (c *ProxyClient) parseForecastResponse(modelName string, body []byte) (*Mod
 		ForecastResponse: &ForecastResponse{
 			Predictions:  predictions,
 			ModelName:    modelName,
-			ModelVersion: arrayResp.ModelVersion,
+			ModelVersion: flatArrayResp.ModelVersion,
 		},
 	}, nil
 }
@@ -660,15 +700,50 @@ func (c *ProxyClient) parseAutoDetectResponse(modelName string, body []byte) (*M
 	// Check if predictions is an array or object
 	switch pred := predictions.(type) {
 	case []interface{}:
-		// Could be anomaly-detector (array of ints) or sklearn forecast (array of arrays)
+		// Could be anomaly-detector (array of ints), sklearn forecast (array of arrays),
+		// or flat float array (sklearn server default)
 		if len(pred) > 0 {
 			// Check if it's an array of arrays (sklearn multi-output forecast)
 			if _, isArray := pred[0].([]interface{}); isArray {
 				// Array of arrays format: [[cpu, mem], ...] -> forecast
 				return c.parseForecastResponse(modelName, body)
 			}
+			// Check if the first element is a float
+			if f, isFloat := pred[0].(float64); isFloat {
+				// Distinguish between anomaly (integer values like -1, 0, 1)
+				// and forecast (float values with decimal parts)
+				// Anomaly detector returns -1 or 1 (integer classification)
+				// Forecast models return values with fractional parts
+				allIntegers := true
+				for _, v := range pred {
+					if fv, ok := v.(float64); ok {
+						// Check if the value is a "clean" integer (-1, 0, 1)
+						// typical for anomaly detection
+						if fv != float64(int(fv)) {
+							allIntegers = false
+							break
+						}
+						// Also check if values are outside typical anomaly range
+						if fv < -1 || fv > 1 {
+							// Values outside [-1, 1] suggest it's a forecast
+							// (anomaly detectors typically use -1=outlier, 1=inlier or 0/1)
+							if fv != float64(int(fv)) || (fv > 1 || fv < -1) {
+								allIntegers = false
+								break
+							}
+						}
+					}
+				}
+
+				if allIntegers && (f == -1 || f == 0 || f == 1) {
+					// Likely anomaly detector output
+					return c.parseAnomalyResponse(modelName, body)
+				}
+				// Flat array of floats: [0.123, 0.456, ...] -> forecast
+				return c.parseForecastResponse(modelName, body)
+			}
 		}
-		// Simple array format: [0, 1, 0, ...] -> anomaly-detector
+		// Simple array format with integers: [0, 1, 0, ...] -> anomaly-detector
 		return c.parseAnomalyResponse(modelName, body)
 	case map[string]interface{}:
 		// Predictive-analytics format: predictions is a nested object
