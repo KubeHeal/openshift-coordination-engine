@@ -4,6 +4,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -229,7 +230,7 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 
 	// Build and send response
 	response := h.buildPredictResponse(req, cpuPercent, memoryPercent, confidence, modelVersion, cpuRollingMean, memoryRollingMean)
-	h.logPredictionSuccess(response, cpuPercent, memoryPercent, confidence)
+	h.logPredictionSuccess(&response, cpuPercent, memoryPercent, confidence)
 	h.respondJSON(w, http.StatusOK, response)
 }
 
@@ -279,14 +280,16 @@ func (e *serviceError) Error() string { return e.message }
 
 // handleRequestError handles request validation errors
 func (h *PredictionHandler) handleRequestError(w http.ResponseWriter, err error) {
-	if reqErr, ok := err.(*requestError); ok {
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
 		h.respondError(w, http.StatusBadRequest, reqErr.message, reqErr.details, reqErr.code)
 	}
 }
 
 // handleServiceError handles service availability errors
 func (h *PredictionHandler) handleServiceError(w http.ResponseWriter, err error) {
-	if svcErr, ok := err.(*serviceError); ok {
+	var svcErr *serviceError
+	if errors.As(err, &svcErr) {
 		h.respondError(w, http.StatusServiceUnavailable, svcErr.message, svcErr.details, svcErr.code)
 	}
 }
@@ -415,7 +418,7 @@ func (h *PredictionHandler) logPredictionInstances(featureCount int, cpuRollingM
 }
 
 // logPredictionSuccess logs successful prediction completion
-func (h *PredictionHandler) logPredictionSuccess(response PredictResponse, cpuPercent, memoryPercent, confidence float64) {
+func (h *PredictionHandler) logPredictionSuccess(response *PredictResponse, cpuPercent, memoryPercent, confidence float64) {
 	h.log.WithFields(logrus.Fields{
 		"scope":          response.Scope,
 		"target":         response.Target,
