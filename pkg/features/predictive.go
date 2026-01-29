@@ -56,11 +56,9 @@ type DataPoint struct {
 // PredictiveFeatureBuilder builds feature vectors for the predictive-analytics model.
 // It generates 3264 features matching the Python model's training expectations.
 //
-// Feature breakdown:
-// - 5 base metrics × 25 features each × 24 lookback hours = 3000 features
-// - Time-based features: 8 features × 24 hours = 192 features
-// - Static time features: 8 features
-// - Total: ~3200 features (exact count depends on configuration)
+// Feature breakdown (using Python formula):
+// - Per timestep: 5 metrics + 6 time features + (25 features × 5 metrics) = 136 columns
+// - Total: 24 lookback hours × 136 columns = 3264 features
 type PredictiveFeatureBuilder struct {
 	provider MetricDataProvider
 	config   PredictiveFeatureConfig
@@ -139,15 +137,13 @@ var predictiveFeatureNames = []string{
 	"pct_change",       // (value - lag_1h) / lag_1h
 }
 
-// Time-based feature names
+// Time-based feature names - MUST match Python notebook exactly
 var timeFeatureNames = []string{
-	"hour_of_day",       // 0-23
-	"day_of_week",       // 0-6 (Monday=0)
-	"is_weekend",        // 0 or 1
-	"month",             // 1-12
-	"quarter",           // 1-4
-	"day_of_month",      // 1-31
-	"week_of_year",      // 1-53
+	"hour",             // 0-23
+	"day_of_week",      // 0-6 (Monday=0)
+	"day_of_month",     // 1-31
+	"month",            // 1-12
+	"is_weekend",       // 0 or 1
 	"is_business_hours", // 0 or 1 (9-17 weekdays)
 }
 
@@ -155,7 +151,7 @@ var timeFeatureNames = []string{
 const FeaturesPerMetric = 25
 
 // TimeFeatureCount is the number of time-based features
-const TimeFeatureCount = 8
+const TimeFeatureCount = 6
 
 // FeatureVector contains the engineered features for prediction
 type FeatureVector struct {
@@ -183,9 +179,8 @@ type FeatureInfo struct {
 
 // GetFeatureInfo returns metadata about the feature engineering configuration
 func (b *PredictiveFeatureBuilder) GetFeatureInfo() FeatureInfo {
-	totalFeatures := len(predictiveBaseMetrics)*FeaturesPerMetric*b.config.LookbackHours + TimeFeatureCount*b.config.LookbackHours + TimeFeatureCount
 	return FeatureInfo{
-		TotalFeatures:     totalFeatures,
+		TotalFeatures:     b.calculateTotalFeatures(),
 		BaseMetrics:       predictiveBaseMetrics,
 		FeaturesPerMetric: FeaturesPerMetric,
 		LookbackHours:     b.config.LookbackHours,
@@ -195,6 +190,13 @@ func (b *PredictiveFeatureBuilder) GetFeatureInfo() FeatureInfo {
 
 // BuildFeatures builds the complete feature vector for the predictive-analytics model.
 // The feature vector is structured to match the training notebook's feature engineering.
+//
+// Feature order per timestep (matches Python notebook):
+//   1. Raw metric values (5 features)
+//   2. Time features (6 features)
+//   3. Engineered metric features (25 × 5 = 125 features)
+//   Total per timestep: 5 + 6 + 125 = 136 features
+//   Total: 24 × 136 = 3264 features
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeouts
@@ -229,33 +231,43 @@ func (b *PredictiveFeatureBuilder) BuildFeatures(ctx context.Context, namespace,
 	for hourOffset := 0; hourOffset < b.config.LookbackHours; hourOffset++ {
 		timestamp := now.Add(-time.Duration(hourOffset) * time.Hour)
 
-		// Build metric features for this time step
+		// 1. Add raw metric values (5 features) - matches Python "metrics" term
+		rawMetricValues := make([]float64, len(predictiveBaseMetrics))
+		for i, metric := range predictiveBaseMetrics {
+			baseQuery := b.getMetricQuery(metric, namespace, deployment, pod)
+			value, err := b.queryAtTime(ctx, baseQuery, timestamp)
+			if err != nil {
+				b.log.WithError(err).WithFields(logrus.Fields{
+					"metric":      metric,
+					"hour_offset": hourOffset,
+				}).Debug("Failed to query raw metric value, using default")
+				value = 0.5
+			}
+			rawMetricValues[i] = value
+			// Store current value for the most recent time step
+			if hourOffset == 0 {
+				metricsData[metric] = value
+			}
+		}
+		allFeatures = append(allFeatures, rawMetricValues...)
+
+		// 2. Add time-based features (6 features)
+		timeFeatures := b.buildTimeFeatures(timestamp)
+		allFeatures = append(allFeatures, timeFeatures...)
+
+		// 3. Add engineered metric features (25 × 5 = 125 features)
 		for _, metric := range predictiveBaseMetrics {
-			metricFeatures, currentValue, err := b.buildMetricFeatures(ctx, metric, timestamp, namespace, deployment, pod)
+			metricFeatures, _, err := b.buildMetricFeatures(ctx, metric, timestamp, namespace, deployment, pod)
 			if err != nil {
 				b.log.WithError(err).WithFields(logrus.Fields{
 					"metric":      metric,
 					"hour_offset": hourOffset,
 				}).Debug("Failed to build metric features, using defaults")
 				metricFeatures = b.getDefaultMetricFeatures()
-				currentValue = 0.5
 			}
 			allFeatures = append(allFeatures, metricFeatures...)
-
-			// Store current value for the most recent time step
-			if hourOffset == 0 {
-				metricsData[metric] = currentValue
-			}
 		}
-
-		// Add time-based features for this time step
-		timeFeatures := b.buildTimeFeatures(timestamp)
-		allFeatures = append(allFeatures, timeFeatures...)
 	}
-
-	// Add static time features for the current time
-	staticTimeFeatures := b.buildTimeFeatures(now)
-	allFeatures = append(allFeatures, staticTimeFeatures...)
 
 	b.log.WithFields(logrus.Fields{
 		"feature_count":  len(allFeatures),
@@ -272,15 +284,12 @@ func (b *PredictiveFeatureBuilder) BuildFeatures(ctx context.Context, namespace,
 }
 
 // calculateTotalFeatures calculates the expected total number of features
+// Uses Python formula: lookback × (metrics + time_features + features_per_metric × metrics)
+// = 24 × (5 + 6 + 25×5) = 24 × 136 = 3264
 func (b *PredictiveFeatureBuilder) calculateTotalFeatures() int {
-	// Metric features: 5 metrics × 25 features × 24 hours = 3000
-	metricFeatures := len(predictiveBaseMetrics) * FeaturesPerMetric * b.config.LookbackHours
-	// Time features per hour: 8 features × 24 hours = 192
-	timeFeatures := TimeFeatureCount * b.config.LookbackHours
-	// Static time features: 8
-	staticFeatures := TimeFeatureCount
-
-	return metricFeatures + timeFeatures + staticFeatures
+	columnsPerTimestep := len(predictiveBaseMetrics) + TimeFeatureCount +
+		(FeaturesPerMetric * len(predictiveBaseMetrics))
+	return b.config.LookbackHours * columnsPerTimestep
 }
 
 // buildMetricFeatures builds the 25 features for a single metric at a specific time
@@ -351,31 +360,28 @@ func (b *PredictiveFeatureBuilder) buildMetricFeatures(
 }
 
 // buildTimeFeatures builds time-based features for a given timestamp
+// Returns 6 features in order matching Python notebook: hour, day_of_week, day_of_month, month, is_weekend, is_business_hours
 func (b *PredictiveFeatureBuilder) buildTimeFeatures(t time.Time) []float64 {
 	hour := float64(t.Hour())
 	dayOfWeek := float64((int(t.Weekday()) + 6) % 7) // Convert Sunday=0 to Monday=0
+	dayOfMonth := float64(t.Day())
+	month := float64(t.Month())
 	isWeekend := 0.0
 	if t.Weekday() == time.Saturday || t.Weekday() == time.Sunday {
 		isWeekend = 1.0
 	}
-	month := float64(t.Month())
-	quarter := float64((t.Month()-1)/3 + 1)
-	dayOfMonth := float64(t.Day())
-	_, weekOfYear := t.ISOWeek()
 	isBusinessHours := 0.0
 	if hour >= 9 && hour < 17 && isWeekend == 0 {
 		isBusinessHours = 1.0
 	}
 
 	return []float64{
-		hour,
-		dayOfWeek,
-		isWeekend,
-		month,
-		quarter,
-		dayOfMonth,
-		float64(weekOfYear),
-		isBusinessHours,
+		hour,        // 0-23
+		dayOfWeek,   // 0-6 (Monday=0)
+		dayOfMonth,  // 1-31
+		month,       // 1-12
+		isWeekend,   // 0 or 1
+		isBusinessHours, // 0 or 1 (9-17 weekdays)
 	}
 }
 
@@ -499,6 +505,7 @@ func (b *PredictiveFeatureBuilder) getDefaultMetricFeatures() []float64 {
 }
 
 // GetDefaultFeatures returns a complete default feature vector
+// Matches the Python formula structure: lookback × (metrics + time_features + features_per_metric × metrics)
 func (b *PredictiveFeatureBuilder) GetDefaultFeatures() *FeatureVector {
 	totalFeatures := b.calculateTotalFeatures()
 	features := make([]float64, totalFeatures)
@@ -507,22 +514,24 @@ func (b *PredictiveFeatureBuilder) GetDefaultFeatures() *FeatureVector {
 	for hourOffset := 0; hourOffset < b.config.LookbackHours; hourOffset++ {
 		timestamp := time.Now().Add(-time.Duration(hourOffset) * time.Hour)
 
-		// Default metric features
+		// 1. Raw metric values (5 features)
+		for range predictiveBaseMetrics {
+			features[idx] = 0.5 // Default raw metric value
+			idx++
+		}
+
+		// 2. Time features (6 features)
+		timeFeatures := b.buildTimeFeatures(timestamp)
+		copy(features[idx:], timeFeatures)
+		idx += len(timeFeatures)
+
+		// 3. Engineered metric features (25 × 5 = 125 features)
 		for range predictiveBaseMetrics {
 			defaultMetricFeatures := b.getDefaultMetricFeatures()
 			copy(features[idx:], defaultMetricFeatures)
 			idx += len(defaultMetricFeatures)
 		}
-
-		// Time features
-		timeFeatures := b.buildTimeFeatures(timestamp)
-		copy(features[idx:], timeFeatures)
-		idx += len(timeFeatures)
 	}
-
-	// Static time features
-	staticTimeFeatures := b.buildTimeFeatures(time.Now())
-	copy(features[idx:], staticTimeFeatures)
 
 	return &FeatureVector{
 		Features:     features,
