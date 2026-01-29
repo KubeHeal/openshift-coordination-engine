@@ -2,6 +2,7 @@ package v1
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -988,7 +989,7 @@ func TestNewPredictionHandlerWithConfig_RespectsConfig(t *testing.T) {
 	}
 }
 
-// TestPredictionHandler_BuildRawMetricInstances tests raw metric feature building
+// TestPredictionHandler_BuildRawMetricInstances tests raw metric feature building (Issue #58)
 func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
@@ -996,33 +997,83 @@ func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
 	// Create handler with feature engineering disabled
 	config := PredictionHandlerConfig{
 		EnableFeatureEngineering: false,
-		ExpectedFeatureCount:     4, // Raw metrics use 4 features
+		ExpectedFeatureCount:     5, // Issue #58: Raw metrics now use 5 features
 	}
 	handler := NewPredictionHandlerWithConfig(nil, nil, log, config)
 
-	t.Run("builds 4 raw features", func(t *testing.T) {
-		instances := handler.buildRawMetricInstances(15, 3, 0.65, 0.72)
+	t.Run("builds 5 raw features matching model expectations", func(t *testing.T) {
+		ctx := context.Background()
+		req := &PredictRequest{
+			Hour:      15,
+			DayOfWeek: 3,
+			Namespace: "test-ns",
+		}
+
+		instances, featureCount := handler.buildRawMetricInstances(ctx, req)
 
 		require.Len(t, instances, 1, "Should return single instance")
-		require.Len(t, instances[0], 4, "Raw metrics should have exactly 4 features")
+		require.Len(t, instances[0], 5, "Raw metrics should have exactly 5 features (Issue #58)")
+		assert.Equal(t, 5, featureCount, "Feature count should be 5")
 
-		// Verify feature order: [hour, day_of_week, cpu_rolling_mean, memory_rolling_mean]
-		assert.Equal(t, 15.0, instances[0][0], "Feature 0 should be hour")
-		assert.Equal(t, 3.0, instances[0][1], "Feature 1 should be day_of_week")
-		assert.Equal(t, 0.65, instances[0][2], "Feature 2 should be cpu_rolling_mean")
-		assert.Equal(t, 0.72, instances[0][3], "Feature 3 should be memory_rolling_mean")
+		// Verify feature order matches model training: [cpu_usage, memory_usage, disk_usage, network_in, network_out]
+		// Without Prometheus, these should be default values
+		assert.Equal(t, 0.65, instances[0][0], "Feature 0 should be cpu_usage (default)")
+		assert.Equal(t, 0.72, instances[0][1], "Feature 1 should be memory_usage (default)")
+		assert.Equal(t, 0.45, instances[0][2], "Feature 2 should be disk_usage (default)")
+		assert.Equal(t, 0.10, instances[0][3], "Feature 3 should be network_in (default)")
+		assert.Equal(t, 0.08, instances[0][4], "Feature 4 should be network_out (default)")
 	})
 
-	t.Run("handles boundary values", func(t *testing.T) {
-		// Test hour 0, day 0
-		instances := handler.buildRawMetricInstances(0, 0, 0.0, 0.0)
-		assert.Equal(t, 0.0, instances[0][0])
-		assert.Equal(t, 0.0, instances[0][1])
+	t.Run("returns default values when Prometheus unavailable", func(t *testing.T) {
+		ctx := context.Background()
+		req := &PredictRequest{
+			Hour:       0,
+			DayOfWeek:  0,
+			Namespace:  "another-ns",
+			Deployment: "my-app",
+			Pod:        "my-pod-xyz",
+		}
 
-		// Test hour 23, day 6
-		instances = handler.buildRawMetricInstances(23, 6, 1.0, 1.0)
-		assert.Equal(t, 23.0, instances[0][0])
-		assert.Equal(t, 6.0, instances[0][1])
+		instances, featureCount := handler.buildRawMetricInstances(ctx, req)
+
+		require.Len(t, instances, 1, "Should return single instance")
+		require.Len(t, instances[0], 5, "Should have 5 features")
+		assert.Equal(t, 5, featureCount, "Feature count should be 5")
+
+		// Verify all defaults are present
+		assert.InDelta(t, 0.65, instances[0][0], 0.001, "Default CPU usage")
+		assert.InDelta(t, 0.72, instances[0][1], 0.001, "Default memory usage")
+		assert.InDelta(t, 0.45, instances[0][2], 0.001, "Default disk usage")
+		assert.InDelta(t, 0.10, instances[0][3], 0.001, "Default network in")
+		assert.InDelta(t, 0.08, instances[0][4], 0.001, "Default network out")
+	})
+
+	t.Run("handles different scopes", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Cluster scope (no filters)
+		clusterReq := &PredictRequest{Scope: "cluster"}
+		instances, count := handler.buildRawMetricInstances(ctx, clusterReq)
+		assert.Len(t, instances[0], 5)
+		assert.Equal(t, 5, count)
+
+		// Namespace scope
+		nsReq := &PredictRequest{Scope: "namespace", Namespace: "prod"}
+		instances, count = handler.buildRawMetricInstances(ctx, nsReq)
+		assert.Len(t, instances[0], 5)
+		assert.Equal(t, 5, count)
+
+		// Deployment scope
+		deployReq := &PredictRequest{Scope: "deployment", Namespace: "prod", Deployment: "api"}
+		instances, count = handler.buildRawMetricInstances(ctx, deployReq)
+		assert.Len(t, instances[0], 5)
+		assert.Equal(t, 5, count)
+
+		// Pod scope
+		podReq := &PredictRequest{Scope: "pod", Namespace: "prod", Pod: "api-abc123"}
+		instances, count = handler.buildRawMetricInstances(ctx, podReq)
+		assert.Len(t, instances[0], 5)
+		assert.Equal(t, 5, count)
 	})
 }
 
