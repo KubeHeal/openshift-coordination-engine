@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
 )
 
 func TestPredictionHandler_HandlePredict_Validation(t *testing.T) {

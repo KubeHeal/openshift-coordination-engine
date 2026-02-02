@@ -7,7 +7,7 @@
 #
 # Prerequisites:
 #   - GitHub CLI (gh) installed and authenticated
-#   - Repository: tosin2013/openshift-coordination-engine
+#   - Repository: KubeHeal/openshift-coordination-engine
 #   - Maintainer permissions on the repository
 #
 # Usage:
@@ -21,7 +21,7 @@ set -e  # Exit on error
 set -u  # Exit on undefined variable
 
 # Configuration
-REPO="tosin2013/openshift-coordination-engine"
+REPO="KubeHeal/openshift-coordination-engine"
 BRANCHES=("main" "release-4.18" "release-4.19" "release-4.20")
 
 # Colors for output

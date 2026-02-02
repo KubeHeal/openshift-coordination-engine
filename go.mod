@@ -1,4 +1,4 @@
-module github.com/tosin2013/openshift-coordination-engine
+module github.com/KubeHeal/openshift-coordination-engine
 
 go 1.24.0
 

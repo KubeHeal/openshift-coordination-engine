@@ -1,8 +1,8 @@
 # OpenShift Coordination Engine
 
-[![CI](https://github.com/tosin2013/openshift-coordination-engine/workflows/CI/badge.svg)](https://github.com/tosin2013/openshift-coordination-engine/actions)
+[![CI](https://github.com/KubeHeal/openshift-coordination-engine/workflows/CI/badge.svg)](https://github.com/KubeHeal/openshift-coordination-engine/actions)
 [![Container](https://quay.io/repository/takinosh/openshift-coordination-engine/status)](https://quay.io/repository/takinosh/openshift-coordination-engine)
-[![Go Report Card](https://goreportcard.com/badge/github.com/tosin2013/openshift-coordination-engine)](https://goreportcard.com/report/github.com/tosin2013/openshift-coordination-engine)
+[![Go Report Card](https://goreportcard.com/badge/github.com/KubeHeal/openshift-coordination-engine)](https://goreportcard.com/report/github.com/KubeHeal/openshift-coordination-engine)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 A Go-based coordination engine for multi-layer remediation in OpenShift/Kubernetes environments. Orchestrates automated incident response across infrastructure, platform, and application layers with intelligent deployment-aware strategies.
@@ -45,7 +45,7 @@ podman run -d \
 
 ```bash
 # Add Helm repository (if available)
-helm repo add coordination-engine https://github.com/tosin2013/openshift-coordination-engine
+helm repo add coordination-engine https://github.com/KubeHeal/openshift-coordination-engine
 
 # Install with KServe integration (recommended)
 helm install coordination-engine ./charts/coordination-engine \
@@ -57,7 +57,7 @@ helm install coordination-engine ./charts/coordination-engine \
 
 ```bash
 # Clone repository
-git clone https://github.com/tosin2013/openshift-coordination-engine.git
+git clone https://github.com/KubeHeal/openshift-coordination-engine.git
 cd openshift-coordination-engine
 
 # Build
@@ -442,8 +442,8 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/tosin2013/openshift-coordination-engine/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/tosin2013/openshift-coordination-engine/discussions)
+- **Issues**: [GitHub Issues](https://github.com/KubeHeal/openshift-coordination-engine/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/KubeHeal/openshift-coordination-engine/discussions)
 
 ## Acknowledgments
 

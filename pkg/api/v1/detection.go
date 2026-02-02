@@ -8,8 +8,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/detector"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // DetectionHandler handles deployment detection API requests

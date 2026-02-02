@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
 )
 
 // KServeProxyHandler handles KServe model proxy API requests (ADR-039, ADR-040)

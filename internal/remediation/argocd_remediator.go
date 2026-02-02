@@ -8,8 +8,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // ArgoCDRemediator handles ArgoCD-managed application remediation
