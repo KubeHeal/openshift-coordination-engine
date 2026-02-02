@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 func TestRecommendationsHandler_GetRecommendations(t *testing.T) {

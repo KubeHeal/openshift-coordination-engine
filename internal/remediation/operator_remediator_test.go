@@ -10,7 +10,7 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 func TestNewOperatorRemediator(t *testing.T) {

@@ -371,7 +371,7 @@ This helps catch issues before they cause runtime errors.
 For questions about feature engineering:
 - **Go implementation**: Platform team
 - **Model training**: ML/Data Science team
-- **Issue tracking**: [GitHub Issues](https://github.com/tosin2013/openshift-coordination-engine/issues)
+- **Issue tracking**: [GitHub Issues](https://github.com/KubeHeal/openshift-coordination-engine/issues)
 
 ---
 

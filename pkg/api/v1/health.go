@@ -11,8 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/rbac"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/rbac"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // HealthHandler handles health check requests

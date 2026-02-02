@@ -8,9 +8,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
-	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // RemediationHandler handles remediation API requests

@@ -24,7 +24,7 @@ linters-settings:
     simplify: true
 
   goimports:
-    local-prefixes: github.com/tosin2013/openshift-coordination-engine
+    local-prefixes: github.com/KubeHeal/openshift-coordination-engine
 
   # Complexity
   gocyclo:
@@ -59,7 +59,7 @@ linters-settings:
     sections:
       - standard # Standard library
       - default  # Third-party packages
-      - prefix(github.com/tosin2013/openshift-coordination-engine) # Local packages
+      - prefix(github.com/KubeHeal/openshift-coordination-engine) # Local packages
 
   # Security
   gosec:

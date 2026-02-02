@@ -13,8 +13,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/capacity"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/capacity"
 )
 
 // CapacityHandler handles capacity analysis API requests

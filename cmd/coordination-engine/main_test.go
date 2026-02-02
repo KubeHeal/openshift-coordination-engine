@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/config"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/config"
 )
 
 // testConfig creates a test configuration for unit tests

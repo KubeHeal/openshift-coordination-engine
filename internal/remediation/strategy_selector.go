@@ -6,7 +6,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // StrategySelector routes remediation to the appropriate remediator based on deployment method

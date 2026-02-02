@@ -3,7 +3,7 @@ package remediation
 import (
 	"context"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // Remediator performs remediation for a specific deployment method
