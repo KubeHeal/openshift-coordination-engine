@@ -125,7 +125,7 @@ Package: `internal/integrations/prometheus_client.go` (existing implementation)
 
 **Configuration**:
 ```go
-import "github.com/tosin2013/openshift-coordination-engine/internal/integrations"
+import "github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
 
 prometheusURL := os.Getenv("PROMETHEUS_URL")
 // Example: "https://thanos-querier.openshift-monitoring.svc:9091"

@@ -29,4 +29,4 @@ The Coordination Engine has been deployed with the following configuration:
   kubectl logs -f deployment/{{ include "coordination-engine.fullname" . }} -n {{ .Release.Namespace }}
 
 For more information, see the documentation at:
-  https://github.com/tosin2013/openshift-coordination-engine
+  https://github.com/KubeHeal/openshift-coordination-engine

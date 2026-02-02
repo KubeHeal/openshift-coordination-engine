@@ -242,7 +242,7 @@ oc exec -n self-healing-platform coordination-engine-xxx -- \
 ## References
 
 - [KServe v1 Protocol](https://kserve.github.io/website/latest/modelserving/data_plane/v1_protocol/)
-- [GitHub Issue #53](https://github.com/tosin2013/openshift-coordination-engine/issues/53)
+- [GitHub Issue #53](https://github.com/KubeHeal/openshift-coordination-engine/issues/53)
 - [OpenShift AI Documentation](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed)
 
 ## Related ADRs
