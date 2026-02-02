@@ -15,8 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/detector"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 func setupDetectionHandler() *mux.Router { //nolint:unparam // returns router for test setup

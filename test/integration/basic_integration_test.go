@@ -11,9 +11,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/coordination"
-	"github.com/tosin2013/openshift-coordination-engine/internal/detector"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/coordination"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // TestDeploymentDetector_Basic tests basic deployment detector functionality

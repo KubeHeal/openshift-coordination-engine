@@ -12,8 +12,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/coordination"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/coordination"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // CoordinationHandler handles multi-layer coordination requests

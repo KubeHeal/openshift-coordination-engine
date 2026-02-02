@@ -8,9 +8,9 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/detector"
-	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // MultiLayerOrchestrator executes multi-layer remediation plans

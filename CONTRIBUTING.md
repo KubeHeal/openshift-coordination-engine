@@ -48,7 +48,7 @@ Before contributing, ensure you have the following installed:
 
 3. **Add upstream remote**:
    ```bash
-   git remote add upstream https://github.com/tosin2013/openshift-coordination-engine.git
+   git remote add upstream https://github.com/KubeHeal/openshift-coordination-engine.git
    ```
 
 4. **Verify remotes**:
@@ -56,8 +56,8 @@ Before contributing, ensure you have the following installed:
    git remote -v
    # origin    https://github.com/YOUR_USERNAME/openshift-coordination-engine.git (fetch)
    # origin    https://github.com/YOUR_USERNAME/openshift-coordination-engine.git (push)
-   # upstream  https://github.com/tosin2013/openshift-coordination-engine.git (fetch)
-   # upstream  https://github.com/tosin2013/openshift-coordination-engine.git (push)
+   # upstream  https://github.com/KubeHeal/openshift-coordination-engine.git (fetch)
+   # upstream  https://github.com/KubeHeal/openshift-coordination-engine.git (push)
    ```
 
 ### Local Setup
@@ -527,7 +527,7 @@ EOF
 
 - **Documentation**: Start with [README.md](README.md), [DEVELOPMENT.md](docs/DEVELOPMENT.md)
 - **ADRs**: Read [docs/adrs/README.md](docs/adrs/README.md) for architectural decisions
-- **Issues**: Check [existing issues](https://github.com/tosin2013/openshift-coordination-engine/issues)
+- **Issues**: Check [existing issues](https://github.com/KubeHeal/openshift-coordination-engine/issues)
 
 ### Asking Questions
 

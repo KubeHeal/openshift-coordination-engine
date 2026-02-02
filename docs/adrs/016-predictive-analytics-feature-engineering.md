@@ -262,7 +262,7 @@ Expected response includes feature info:
 
 ## References
 
-- [GitHub Issue #54](https://github.com/tosin2013/openshift-coordination-engine/issues/54)
+- [GitHub Issue #54](https://github.com/KubeHeal/openshift-coordination-engine/issues/54)
 - [ADR-015](015-kserve-inference-service-integration.md) - KServe Integration
 - [ADR-009](009-python-ml-integration.md) - Legacy Python ML Service
 - [KServe v1 Protocol](https://kserve.github.io/website/latest/modelserving/data_plane/v1_protocol/)
