@@ -51,18 +51,18 @@ jobs:
           fi
 
       - name: Checkout coordination-engine (this repo)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: coordination-engine
 
       - name: Checkout openshift-aiops-platform
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: KubeHeal/openshift-aiops-platform
           path: aiops-platform
 
       - name: Checkout cluster-health-mcp
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: KubeHeal/openshift-cluster-health-mcp
           path: cluster-health-mcp
