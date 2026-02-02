@@ -31,11 +31,16 @@ jobs:
           cluster_name: coordination-engine-test
           wait: 5m
 
-      - name: Install ArgoCD
+      - name: Install ArgoCD via Helm
         run: |
-          kubectl create namespace argocd
-          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-          kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+          helm install argocd argo/argo-cd \
+            --create-namespace \
+            --namespace argocd \
+            --version 7.7.11 \
+            --set configs.params."server\.insecure"=true \
+            --wait --timeout=5m
 
       - name: Run integration tests
         run: |
@@ -71,11 +76,16 @@ jobs:
           cluster_name: argocd-test
           wait: 5m
 
-      - name: Install ArgoCD
+      - name: Install ArgoCD via Helm
         run: |
-          kubectl create namespace argocd
-          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-          kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+          helm install argocd argo/argo-cd \
+            --create-namespace \
+            --namespace argocd \
+            --version 7.7.11 \
+            --set configs.params."server\.insecure"=true \
+            --wait --timeout=5m
 
       - name: Test ArgoCD integration
         run: |

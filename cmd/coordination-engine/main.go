@@ -19,16 +19,16 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/coordination"
-	"github.com/tosin2013/openshift-coordination-engine/internal/detector"
-	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
-	"github.com/tosin2013/openshift-coordination-engine/internal/rbac"
-	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
-	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
-	v1 "github.com/tosin2013/openshift-coordination-engine/pkg/api/v1"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/config"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/middleware"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/coordination"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/rbac"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
+	v1 "github.com/KubeHeal/openshift-coordination-engine/pkg/api/v1"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/config"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/middleware"
 )
 
 var (

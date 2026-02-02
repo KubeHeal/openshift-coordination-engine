@@ -11,11 +11,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
-	"github.com/tosin2013/openshift-coordination-engine/internal/remediation"
-	"github.com/tosin2013/openshift-coordination-engine/internal/storage"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/kserve"
-	"github.com/tosin2013/openshift-coordination-engine/pkg/models"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
 // RecommendationsHandler handles ML-powered remediation recommendations API requests

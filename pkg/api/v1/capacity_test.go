@@ -17,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/tosin2013/openshift-coordination-engine/pkg/capacity"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/capacity"
 )
 
 func TestCapacityHandler_NamespaceWithQuota(t *testing.T) {

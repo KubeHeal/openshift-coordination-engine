@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tosin2013/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
 )
 
 // PrometheusAdapter adapts the PrometheusClient to the MetricDataProvider interface.

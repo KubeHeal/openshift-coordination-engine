@@ -7,7 +7,7 @@ This guide helps you configure your GitHub repository for automated CI/CD and co
 Before pushing to GitHub, configure these secrets in your repository:
 
 ### Navigation
-1. Go to your GitHub repository: `https://github.com/tosin2013/openshift-coordination-engine`
+1. Go to your GitHub repository: `https://github.com/KubeHeal/openshift-coordination-engine`
 2. Click **Settings** → **Secrets and variables** → **Actions**
 3. Click **New repository secret**
 
@@ -36,7 +36,7 @@ Before pushing to GitHub, configure these secrets in your repository:
 - **How to get**:
   1. Go to https://codecov.io/
   2. Sign in with GitHub
-  3. Add repository `tosin2013/openshift-coordination-engine`
+  3. Add repository `KubeHeal/openshift-coordination-engine`
   4. Copy the upload token
 
 ## Setting Up Secrets
@@ -111,7 +111,7 @@ git commit -m "Initial commit: OpenShift Coordination Engine"
 git branch -M main
 
 # Add remote (replace with your repository)
-git remote add origin https://github.com/tosin2013/openshift-coordination-engine.git
+git remote add origin https://github.com/KubeHeal/openshift-coordination-engine.git
 
 # Push to GitHub
 git push -u origin main
@@ -191,9 +191,9 @@ gh run rerun RUN_ID --failed
 ```
 
 ### GitHub UI
-- View all workflows: `https://github.com/tosin2013/openshift-coordination-engine/actions`
-- View CI runs: `https://github.com/tosin2013/openshift-coordination-engine/actions/workflows/ci.yaml`
-- View releases: `https://github.com/tosin2013/openshift-coordination-engine/actions/workflows/release-quay.yaml`
+- View all workflows: `https://github.com/KubeHeal/openshift-coordination-engine/actions`
+- View CI runs: `https://github.com/KubeHeal/openshift-coordination-engine/actions/workflows/ci.yaml`
+- View releases: `https://github.com/KubeHeal/openshift-coordination-engine/actions/workflows/release-quay.yaml`
 
 ## Security Best Practices
 
@@ -218,7 +218,7 @@ Protect the following branches:
 #### Step-by-Step Instructions
 
 1. **Navigate to Branch Protection Settings**:
-   - Go to repository: `https://github.com/tosin2013/openshift-coordination-engine`
+   - Go to repository: `https://github.com/KubeHeal/openshift-coordination-engine`
    - Click **Settings** → **Branches** (left sidebar)
    - Click **Add branch protection rule**
 
@@ -281,7 +281,7 @@ gh auth login
 #### Apply Protection to Main Branch
 
 ```bash
-gh api repos/tosin2013/openshift-coordination-engine/branches/main/protection \
+gh api repos/KubeHeal/openshift-coordination-engine/branches/main/protection \
   --method PUT \
   --field required_status_checks='{"strict":true,"contexts":["Lint","Test","Build","Security Scan"]}' \
   --field enforce_admins=true \
@@ -299,7 +299,7 @@ gh api repos/tosin2013/openshift-coordination-engine/branches/main/protection \
 ```bash
 # Apply to each release branch individually
 for branch in release-4.18 release-4.19 release-4.20; do
-  gh api repos/tosin2013/openshift-coordination-engine/branches/$branch/protection \
+  gh api repos/KubeHeal/openshift-coordination-engine/branches/$branch/protection \
     --method PUT \
     --field required_status_checks='{"strict":true,"contexts":["Lint","Test","Build","Security Scan"]}' \
     --field enforce_admins=true \
@@ -321,7 +321,7 @@ Create `.github/scripts/apply-branch-protection.sh`:
 #!/bin/bash
 set -e
 
-REPO="tosin2013/openshift-coordination-engine"
+REPO="KubeHeal/openshift-coordination-engine"
 BRANCHES=("main" "release-4.18" "release-4.19" "release-4.20")
 
 PROTECTION_CONFIG='{
@@ -383,10 +383,10 @@ After applying branch protection:
 1. **Check Protection Status**:
    ```bash
    # View protection for main
-   gh api repos/tosin2013/openshift-coordination-engine/branches/main/protection | jq
+   gh api repos/KubeHeal/openshift-coordination-engine/branches/main/protection | jq
 
    # View protection for release branch
-   gh api repos/tosin2013/openshift-coordination-engine/branches/release-4.18/protection | jq
+   gh api repos/KubeHeal/openshift-coordination-engine/branches/release-4.18/protection | jq
    ```
 
 2. **Test with Sample PR**:
@@ -517,7 +517,7 @@ As collaborators join and gain maintainer status:
 1. **Add to Repository Collaborators**:
    ```bash
    # Grant write access
-   gh api repos/tosin2013/openshift-coordination-engine/collaborators/NEW_USERNAME \
+   gh api repos/KubeHeal/openshift-coordination-engine/collaborators/NEW_USERNAME \
      --method PUT \
      --field permission=push
    ```
