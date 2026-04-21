@@ -32,6 +32,16 @@ type TrendingInfo struct {
 	DaysUntil85Percent      int            `json:"days_until_85_percent"`
 	ProjectedExhaustionDate string         `json:"projected_exhaustion_date,omitempty"`
 	Confidence              float64        `json:"confidence"`
+
+	// ForecastedExhaustionDays is the estimated days until the fastest-growing resource
+	// hits 100% of its limit (vs 85% used by DaysUntil85Percent).
+	// -1 means usage is stable or no limit is set.
+	ForecastedExhaustionDays int `json:"forecasted_exhaustion_days"`
+
+	// RecommendedReplicaIncrease is the suggested number of additional replicas to add
+	// to keep the resource below 70% utilisation after scaling.
+	// 0 means no scaling action recommended.
+	RecommendedReplicaIncrease int `json:"recommended_replica_increase"`
 }
 
 // DataPoint represents a single metric data point
@@ -272,6 +282,43 @@ func AnalyzeTrend(cpuDataPoints, memoryDataPoints []DataPoint, currentCPU, cpuLi
 	// Set projected exhaustion date
 	if result.DaysUntil85Percent >= 0 {
 		result.ProjectedExhaustionDate = CalculateProjectedExhaustionDate(result.DaysUntil85Percent)
+	}
+
+	// ForecastedExhaustionDays: days until 100% of limit (more urgent signal than 85%)
+	result.ForecastedExhaustionDays = -1
+	if result.CPU != nil && result.CPU.DailyChangePercent > 0 && cpuLimit > 0 {
+		days := DaysUntilThreshold(currentCPU, cpuLimit, result.CPU.DailyChangePercent, 1.0)
+		if days >= 0 && (result.ForecastedExhaustionDays < 0 || days < result.ForecastedExhaustionDays) {
+			result.ForecastedExhaustionDays = days
+		}
+	}
+	if result.Memory != nil && result.Memory.DailyChangePercent > 0 && memoryLimit > 0 {
+		days := DaysUntilThreshold(currentMemory, memoryLimit, result.Memory.DailyChangePercent, 1.0)
+		if days >= 0 && (result.ForecastedExhaustionDays < 0 || days < result.ForecastedExhaustionDays) {
+			result.ForecastedExhaustionDays = days
+		}
+	}
+
+	// RecommendedReplicaIncrease: suggest +N replicas when exhaustion is within 30 days.
+	// Formula: find the smallest N such that current_usage / (current_replicas + N) < 0.70.
+	// We approximate current_replicas as 1 when unknown, so the formula simplifies to
+	// N = ceil(current_usage / 0.70) - 1 for the resource under most pressure.
+	result.RecommendedReplicaIncrease = 0
+	if result.ForecastedExhaustionDays >= 0 && result.ForecastedExhaustionDays <= 30 {
+		maxUsageFraction := 0.0
+		if cpuLimit > 0 {
+			maxUsageFraction = math.Max(maxUsageFraction, currentCPU/cpuLimit)
+		}
+		if memoryLimit > 0 {
+			maxUsageFraction = math.Max(maxUsageFraction, currentMemory/memoryLimit)
+		}
+		if maxUsageFraction > 0.70 {
+			// N replicas needed to bring utilisation below 70%
+			neededReplicas := int(math.Ceil(maxUsageFraction / 0.70))
+			if neededReplicas > 1 {
+				result.RecommendedReplicaIncrease = neededReplicas - 1
+			}
+		}
 	}
 
 	return result

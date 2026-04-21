@@ -27,6 +27,11 @@ These ADRs define the **Go implementation** of the coordination engine:
 | [013](013-github-branch-protection-collaboration.md) | GitHub Branch Protection and Collaboration Workflow | ACCEPTED | Branch protection rules, code ownership, and contribution guidelines |
 | [014](014-prometheus-thanos-observability-incident-management.md) | Prometheus/Thanos Observability Integration and Incident Management | ACCEPTED | Prometheus/Thanos metrics integration, incident storage with persistence, and API enhancements for manual incident creation |
 | [015](015-kserve-inference-service-integration.md) | KServe InferenceService Integration | IMPLEMENTED | KServe proxy client for ML models, dynamic model name discovery, fixes issue #53 |
+| [016](016-predictive-analytics-feature-engineering.md) | Predictive Analytics Feature Engineering | IMPLEMENTED | 3264-feature vector for predictive-analytics model, lookback window, time features |
+| [017](017-http-application-signal-integration.md) | HTTP Application Signal Integration for Anomaly Detection | ACCEPTED | Enriched signals (throttle rate, HTTP error rate, P99 latency) added to anomaly response |
+| [018](018-disk-exhaustion-memory-leak-detection.md) | Disk Exhaustion ETA and Memory Leak Slope Detection | ACCEPTED | Deterministic disk-full ETA and memory leak classification without ML models |
+| [019](019-rightsizing-recommendation-engine.md) | VPA-style Right-Sizing Recommendation Engine | ACCEPTED | P95 usage vs requests/limits comparison for per-container CPU/memory recommendations |
+| [020](020-cpu-throttle-detection-cfs-metrics.md) | CPU Throttle Detection via cgroup CFS Metrics | ACCEPTED | Real CFS throttle rate replacing heuristic cpu_throttling label |
 
 **Note on numbering**: ADR-007, ADR-008, and ADR-010 are reserved numbers. These were initially planned for additional decisions but were either integrated into existing ADRs or deemed unnecessary. The numbers are kept reserved to maintain sequential reference integrity.
 

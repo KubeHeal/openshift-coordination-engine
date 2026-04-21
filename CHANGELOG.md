@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-21
+
+### Added — AIOps Use Case Gap Closure
+
+- **Anomaly detection enrichment** (ADR-017): `EnrichedSignals` object added to anomaly response with optional `cpu_throttle_rate`, `http_error_rate`, and `http_response_time_p99_ms` signals. All signals gracefully return `null` when Prometheus metrics are unavailable (no Istio required for throttle detection).
+- **Disk exhaustion ETA** (ADR-018): New `GET /api/v1/predict/disk-exhaustion` endpoint computes days-until-full per filesystem using 7-day `deriv()` on `node_filesystem_avail_bytes`. Returns urgency classification (critical/warning/info/stable) and projected exhaustion date.
+- **Memory leak detection** (ADR-018): New `GET /api/v1/predict/memory-leak` endpoint applies 24-hour slope analysis on `container_memory_working_set_bytes` to classify containers as leaking or normal.
+- **Right-sizing recommendations** (ADR-019): New `GET /api/v1/recommendations/rightsizing` endpoint compares P95 CPU/memory usage (30-day window) against current `requests` and `limits`. Returns per-container `recommendedRequest` and `recommendedLimit` with 20%/50% headroom, plus sizing classification (over-provisioned / under-provisioned / right-sized).
+- **CPU throttle detection** (ADR-020): Real CFS-based throttle rate from `container_cpu_cfs_throttled_seconds_total / container_cpu_cfs_periods_total` replaces the previous heuristic `cpu_throttling` label. `ThrottlingDetected = true` when rate > 25%.
+- **Capacity forecasting output** (use case 5): `TrendingInfo` now includes `ForecastedExhaustionDays` (days to 100% limit) and `RecommendedReplicaIncrease` (suggested replica count increase when exhaustion < 30 days) in all `/api/v1/capacity/*` responses.
+
+### ADRs
+
+- [ADR-017](docs/adrs/017-http-application-signal-integration.md): HTTP Application Signal Integration
+- [ADR-018](docs/adrs/018-disk-exhaustion-memory-leak-detection.md): Disk Exhaustion ETA and Memory Leak Slope Detection
+- [ADR-019](docs/adrs/019-rightsizing-recommendation-engine.md): VPA-style Right-Sizing Recommendation Engine
+- [ADR-020](docs/adrs/020-cpu-throttle-detection-cfs-metrics.md): CPU Throttle Detection via cgroup CFS Metrics
+
 ## [1.0.0] - 2026-04-21
 
 ### Added
@@ -30,5 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - CI pipeline now uses Go 1.24 to match `go.mod` toolchain requirement (previously pinned to 1.21)
 
-[Unreleased]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/KubeHeal/openshift-coordination-engine/releases/tag/v1.0.0

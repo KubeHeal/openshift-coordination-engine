@@ -62,15 +62,43 @@ type AnomalyAnalyzeRequest struct {
 
 // AnomalyAnalyzeResponse represents the response for anomaly analysis
 type AnomalyAnalyzeResponse struct {
-	Status            string          `json:"status"`
-	TimeRange         string          `json:"time_range"`
-	Scope             AnomalyScope    `json:"scope"`
-	ModelUsed         string          `json:"model_used"`
-	AnomaliesDetected int             `json:"anomalies_detected"`
-	Anomalies         []AnomalyResult `json:"anomalies"`
-	Summary           AnomalySummary  `json:"summary"`
-	Recommendation    string          `json:"recommendation"`
-	Features          FeatureInfo     `json:"features"`
+	Status            string           `json:"status"`
+	TimeRange         string           `json:"time_range"`
+	Scope             AnomalyScope     `json:"scope"`
+	ModelUsed         string           `json:"model_used"`
+	AnomaliesDetected int              `json:"anomalies_detected"`
+	Anomalies         []AnomalyResult  `json:"anomalies"`
+	Summary           AnomalySummary   `json:"summary"`
+	Recommendation    string           `json:"recommendation"`
+	Features          FeatureInfo      `json:"features"`
+	EnrichedSignals   *EnrichedSignals `json:"enriched_signals,omitempty"`
+}
+
+// EnrichedSignals contains optional application-level signals that supplement
+// the core infrastructure anomaly detection (ADR-017).
+// These signals are collected independently of the KServe feature vector and
+// are available when Prometheus has service-mesh or HTTP metrics.
+type EnrichedSignals struct {
+	// CPUThrottleRate is the ratio of throttled CPU time (0.0–1.0).
+	// Source: container_cpu_cfs_throttled_seconds_total / container_cpu_cfs_periods_total
+	// Nil when cAdvisor CFS metrics are not available in Prometheus.
+	CPUThrottleRate *float64 `json:"cpu_throttle_rate,omitempty"`
+
+	// HTTPErrorRate is the fraction of requests returning 5xx status codes.
+	// Source: rate(container_http_requests_total{status=~"5.."}[5m]) / rate(container_http_requests_total[5m])
+	// Nil when HTTP metrics are not available (requires Istio/OSSm or instrumented apps).
+	HTTPErrorRate *float64 `json:"http_error_rate,omitempty"`
+
+	// HTTPResponseTimeP99Ms is the 99th-percentile HTTP response time in milliseconds.
+	// Source: histogram_quantile(0.99, istio_request_duration_milliseconds_bucket)
+	// Nil when Istio metrics are not available.
+	HTTPResponseTimeP99Ms *float64 `json:"http_response_time_p99_ms,omitempty"`
+
+	// ThrottlingDetected is true when CPUThrottleRate exceeds 25%.
+	ThrottlingDetected bool `json:"throttling_detected"`
+
+	// HTTPDegraded is true when error rate > 5% or P99 latency > 1000ms.
+	HTTPDegraded bool `json:"http_degraded"`
 }
 
 // AnomalyScope describes the scope of the anomaly analysis
@@ -230,6 +258,9 @@ func (h *AnomalyHandler) AnalyzeAnomalies(w http.ResponseWriter, r *http.Request
 
 	// Process predictions and build response
 	response := h.buildAnalysisResponse(&req, resp, features, metricsData)
+
+	// Enrich with optional application-level signals (ADR-017)
+	response.EnrichedSignals = h.collectEnrichedSignals(ctx, req.Namespace, req.Pod, req.Deployment)
 
 	h.log.WithFields(logrus.Fields{
 		"anomalies_detected": response.AnomaliesDetected,
@@ -769,6 +800,96 @@ func (h *AnomalyHandler) respondError(w http.ResponseWriter, statusCode int, mes
 // SetPrometheusClient sets the Prometheus client (useful for testing)
 func (h *AnomalyHandler) SetPrometheusClient(client *integrations.PrometheusClient) {
 	h.prometheusClient = client
+}
+
+// collectEnrichedSignals queries optional application-level signals (ADR-017).
+// All signals gracefully return nil when the underlying metrics are unavailable.
+func (h *AnomalyHandler) collectEnrichedSignals(ctx context.Context, namespace, pod, deployment string) *EnrichedSignals {
+	if h.prometheusClient == nil || !h.prometheusClient.IsAvailable() {
+		return nil
+	}
+
+	signals := &EnrichedSignals{}
+	hasAny := false
+
+	// --- CPU Throttle Rate (ADR-020) ---
+	// container_cpu_cfs_throttled_seconds_total / container_cpu_cfs_periods_total
+	throttleQuery := h.buildScopedQuery(
+		`sum(rate(container_cpu_cfs_throttled_seconds_total{container!=""}[5m]))`,
+		namespace, pod, deployment,
+	)
+	periodsQuery := h.buildScopedQuery(
+		`sum(rate(container_cpu_cfs_periods_total{container!=""}[5m]))`,
+		namespace, pod, deployment,
+	)
+	throttled := h.queryPromQLWithDefault(ctx, throttleQuery, -1)
+	periods := h.queryPromQLWithDefault(ctx, periodsQuery, -1)
+	if throttled >= 0 && periods > 0 {
+		rate := throttled / periods
+		signals.CPUThrottleRate = &rate
+		signals.ThrottlingDetected = rate > 0.25
+		hasAny = true
+	}
+
+	// --- HTTP Error Rate (ADR-017, optional — requires Istio or instrumented apps) ---
+	httpErrQuery := h.buildScopedQuery(
+		`sum(rate(container_http_requests_total{status=~"5.."}[5m])) / sum(rate(container_http_requests_total[5m]))`,
+		namespace, pod, deployment,
+	)
+	errRate := h.queryPromQLWithDefault(ctx, httpErrQuery, -1)
+	if errRate >= 0 {
+		signals.HTTPErrorRate = &errRate
+		hasAny = true
+		if errRate > 0.05 {
+			signals.HTTPDegraded = true
+		}
+	}
+
+	// --- HTTP P99 Response Time in ms (ADR-017, optional — requires Istio) ---
+	p99Query := h.buildScopedQuery(
+		`histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket[5m])) by (le))`,
+		namespace, pod, deployment,
+	)
+	p99 := h.queryPromQLWithDefault(ctx, p99Query, -1)
+	if p99 >= 0 {
+		signals.HTTPResponseTimeP99Ms = &p99
+		hasAny = true
+		if p99 > 1000 {
+			signals.HTTPDegraded = true
+		}
+	}
+
+	if !hasAny {
+		return nil
+	}
+	return signals
+}
+
+// buildScopedQuery appends namespace/pod/deployment filters to a PromQL base query
+// by injecting them into the innermost label set.  The base query must end with `}`.
+// If no scope is given the base query is returned unchanged.
+func (h *AnomalyHandler) buildScopedQuery(baseQuery, namespace, pod, deployment string) string {
+	if namespace == "" && pod == "" && deployment == "" {
+		return baseQuery
+	}
+	// Inject selectors before the closing brace of the innermost metric selector.
+	// This is a simple heuristic: find the last `}` and insert before it.
+	idx := strings.LastIndex(baseQuery, "}")
+	if idx < 0 {
+		return baseQuery
+	}
+	var parts []string
+	if namespace != "" {
+		parts = append(parts, fmt.Sprintf("namespace=%q", namespace))
+	}
+	if pod != "" {
+		parts = append(parts, fmt.Sprintf("pod=%q", pod))
+	}
+	if deployment != "" {
+		parts = append(parts, fmt.Sprintf(`pod=~"%s-.*"`, deployment))
+	}
+	injection := "," + strings.Join(parts, ",")
+	return baseQuery[:idx] + injection + baseQuery[idx:]
 }
 
 // GetBaseMetrics returns the list of base metrics used for feature engineering

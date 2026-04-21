@@ -241,6 +241,14 @@ func main() {
 	anomalyHandler.RegisterRoutes(router)
 	log.Info("Anomaly analysis API endpoint registered: POST /api/v1/anomalies/analyze")
 
+	// Disk exhaustion and memory-leak prediction endpoints (ADR-018)
+	diskExhaustionHandler := v1.NewDiskExhaustionHandler(prometheusClient, log)
+	diskExhaustionHandler.RegisterRoutes(router)
+
+	// Right-sizing recommendations endpoint (ADR-019)
+	rightSizingHandler := v1.NewRightSizingHandler(prometheusClient, log)
+	rightSizingHandler.RegisterRoutes(router)
+
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
 		kserveProxyHandler.RegisterRoutes(router)
