@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Planned — v1.2.0 (Tracked Issues)
+- File-based incident persistence for ML training dataset — [#70](https://github.com/KubeHeal/openshift-coordination-engine/issues/70) `good first issue`
+- OpenAPI/Swagger spec generation via `swaggo/swag` — [#71](https://github.com/KubeHeal/openshift-coordination-engine/issues/71)
+- Deep RCA v2 endpoint (Istio + NetworkPolicy + pod events) — [#72](https://github.com/KubeHeal/openshift-coordination-engine/issues/72)
+
+### Planned — Infrastructure
+- CI gate: verify GA on v1.0.0 + v1.1.0 tags, enforce branch protection — [#68](https://github.com/KubeHeal/openshift-coordination-engine/issues/68)
+- RELEASE.md: versioning policy and Quay release checklist — [#69](https://github.com/KubeHeal/openshift-coordination-engine/issues/69)
+
 ## [1.1.0] - 2026-04-21
 
 ### Added — AIOps Use Case Gap Closure
