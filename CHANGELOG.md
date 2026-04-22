@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned — Infrastructure
 - CI gate: verify GA on v1.0.0 + v1.1.0 tags, enforce branch protection — [#68](https://github.com/KubeHeal/openshift-coordination-engine/issues/68)
 - RELEASE.md: versioning policy and Quay release checklist — [#69](https://github.com/KubeHeal/openshift-coordination-engine/issues/69)
+- OCP 4.21 support: add `release-4.21` branch, update CI matrix, validate on Kubernetes 1.34; move 4.18 to maintenance-only
 
 ## [1.1.0] - 2026-04-21
 

@@ -6,16 +6,18 @@ on:
       - 'release-4.18'
       - 'release-4.19'
       - 'release-4.20'
+      - 'release-4.21'
   workflow_dispatch:
     inputs:
       release_branch:
-        description: 'Release branch to build (e.g., release-4.18)'
+        description: 'Release branch to build (e.g., release-4.21)'
         required: true
         type: choice
         options:
-          - release-4.18
-          - release-4.19
+          - release-4.21
           - release-4.20
+          - release-4.19
+          - release-4.18
 
 env:
   REGISTRY: quay.io
