@@ -19,14 +19,14 @@ The Coordination Engine uses **Semantic Versioning** (`MAJOR.MINOR.PATCH`):
 ### Rolling 3-Version Support Matrix
 
 The engine is tested and supported against the three most recent OpenShift release trains.
-OCP 4.21 is now GA (April 2026) — the active window has shifted to 4.19 / 4.20 / 4.21.
+OCP 4.22 is now GA (June 2026) — the active window has shifted to 4.20 / 4.21 / 4.22.
 
 | OCP Version | Kubernetes | Status |
 |-------------|------------|--------|
-| 4.21        | 1.34       | Active (current) |
+| 4.22        | 1.35       | Active (current) |
+| 4.21        | 1.34       | Active |
 | 4.20        | 1.33       | Active |
-| 4.19        | 1.32       | Active |
-| 4.18        | 1.31       | Maintenance — dropping when 4.22 releases |
+| 4.19        | 1.32       | Maintenance — dropping when 4.23 releases |
 
 Older versions may work but receive no backport PRs.
 
@@ -37,10 +37,10 @@ Older versions may work but receive no backport PRs.
 ```
 main          ← integration branch (CI must be green before merge)
 develop       ← feature work (optional; used for long-running feature sets)
-release-4.19  ← patch backports for OCP 4.19 train
 release-4.20  ← patch backports for OCP 4.20 train
-release-4.21  ← patch backports for OCP 4.21 train (current)
-release-4.18  ← maintenance only (no new features)
+release-4.21  ← patch backports for OCP 4.21 train
+release-4.22  ← patch backports for OCP 4.22 train (current)
+release-4.19  ← maintenance only (no new features)
 ```
 
 `release-4.x` branches are synced from `main` automatically by `.github/workflows/sync-release-branch.yaml`
@@ -138,12 +138,12 @@ git push origin release-4.21
 ### 6. Quay Image Publish
 
 The `release-quay.yaml` workflow publishes to Quay automatically when a push lands on
-`release-4.18`, `release-4.19`, `release-4.20`, or `release-4.21`, or when triggered manually:
+`release-4.20`, `release-4.21`, or `release-4.22`, or when triggered manually:
 
 ```bash
 # Manual trigger via GitHub CLI
 gh workflow run release-quay.yaml --repo KubeHeal/openshift-coordination-engine \
-  -f ref=release-4.21
+  -f ref=release-4.22
 ```
 
 Verify the image at: `quay.io/kubeheal/openshift-coordination-engine:<tag>`
