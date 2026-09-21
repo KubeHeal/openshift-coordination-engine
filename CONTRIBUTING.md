@@ -30,7 +30,7 @@ We are committed to providing a welcoming and professional environment for all c
 
 Before contributing, ensure you have the following installed:
 
-- **Go 1.21+**: [Install Go](https://go.dev/doc/install)
+- **Go 1.26+**: [Install Go](https://go.dev/doc/install)
 - **Docker**: [Install Docker](https://docs.docker.com/get-docker/)
 - **Kubernetes cluster**: Local (kind, minikube, k3s) or OpenShift cluster
 - **kubectl**: [Install kubectl](https://kubernetes.io/docs/tasks/tools/)
