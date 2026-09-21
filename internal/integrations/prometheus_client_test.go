@@ -283,12 +283,13 @@ func TestPrometheusClient_CalculateTrend(t *testing.T) {
 			analysis := client.CalculateTrend(tt.data, tt.threshold)
 			assert.Equal(t, tt.expectedDirection, analysis.Direction)
 
-			if tt.expectedDirection == "increasing" {
+			switch tt.expectedDirection {
+			case "increasing":
 				assert.Greater(t, analysis.DailyChangePercent, 0.0)
 				if tt.threshold > 0 && tt.data.Current < tt.threshold {
 					assert.GreaterOrEqual(t, analysis.DaysUntilThreshold, 0)
 				}
-			} else if tt.expectedDirection == "decreasing" {
+			case "decreasing":
 				assert.Less(t, analysis.DailyChangePercent, 0.0)
 				assert.Equal(t, -1, analysis.DaysUntilThreshold)
 			}
