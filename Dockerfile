@@ -1,7 +1,7 @@
 # Dockerfile for OpenShift Coordination Engine (Go)
 
 # Stage 1: Build the Go binary
-FROM registry.access.redhat.com/ubi9/go-toolset:9.7 AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /workspace
 
@@ -39,8 +39,9 @@ LABEL name="coordination-engine" \
       io.k8s.display-name="Coordination Engine" \
       io.openshift.tags="aiops,coordination,remediation,openshift"
 
-# Install ca-certificates for HTTPS calls
-RUN microdnf install -y ca-certificates && \
+# Apply all available security patches, then install ca-certificates for HTTPS calls
+RUN microdnf update -y && \
+    microdnf install -y ca-certificates && \
     microdnf clean all
 
 WORKDIR /app
