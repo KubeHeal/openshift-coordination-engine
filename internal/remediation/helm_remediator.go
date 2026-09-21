@@ -134,7 +134,7 @@ func (hr *HelmRemediator) getReleaseStatus(ctx context.Context, releaseName, nam
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, "helm", "status", releaseName, //nolint:gosec // G204: args are not user-controlled
+	cmd := exec.CommandContext(timeoutCtx, "helm", "status", releaseName, // #nosec G204 -- args are not user-controlled
 		"-n", namespace,
 		"-o", "json",
 	)

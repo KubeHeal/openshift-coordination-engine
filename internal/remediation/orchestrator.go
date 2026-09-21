@@ -74,7 +74,7 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 
 	// Execute remediation in background — context.Background is intentional: the
 	// workflow outlives the HTTP request that triggered it.
-	go o.executeWorkflow(context.Background(), workflow, deploymentInfo, issue) //nolint:gosec // G118: background goroutine must not use request-scoped context
+	go o.executeWorkflow(context.Background(), workflow, deploymentInfo, issue) // #nosec G118 -- background goroutine must not use request-scoped context
 
 	return workflow, nil
 }
