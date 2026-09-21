@@ -6,12 +6,12 @@ This document describes the multi-version release strategy for the OpenShift Coo
 
 ## Version Support Matrix
 
-| Component | OCP 4.18 | OCP 4.19 | OCP 4.20 |
+| Component | OCP 4.20 | OCP 4.21 | OCP 4.22 |
 |-----------|----------|----------|----------|
-| **Kubernetes** | 1.31 | 1.32 | 1.33 |
-| **client-go** | v0.31.3 | v0.32.0 | v0.33.0 |
-| **Release Branch** | `release-4.18` | `release-4.19` | `release-4.20` |
-| **Container Tag** | `ocp-4.18-*` | `ocp-4.19-*` | `ocp-4.20-*` |
+| **Kubernetes** | 1.33 | 1.34 | 1.35 |
+| **client-go** | v0.33.0 | v0.34.0 | v0.35.0 |
+| **Release Branch** | `release-4.20` | `release-4.21` | `release-4.22` |
+| **Container Tag** | `ocp-4.20-*` | `ocp-4.21-*` | `ocp-4.22-*` |
 | **Status** | Supported | Supported | Current |
 
 ## Branch Strategy
@@ -20,29 +20,29 @@ This document describes the multi-version release strategy for the OpenShift Coo
 
 1. **main**: Primary development branch
    - All new features developed here
-   - Auto-syncs to `release-4.20` (current version)
+   - Auto-syncs to `release-4.22` (current version)
    - No direct container builds
 
-2. **release-4.20** (Current Release)
-   - Matches latest stable OpenShift (4.20)
+2. **release-4.22** (Current Release)
+   - Matches latest stable OpenShift (4.22)
    - Auto-synced from `main` via GitHub Actions
-   - Triggers container builds: `ocp-4.20-latest`, `ocp-4.20-<sha>`
+   - Triggers container builds: `ocp-4.22-latest`, `ocp-4.22-<sha>`
 
-3. **release-4.19** (Stable)
+3. **release-4.21** (Stable)
    - Cherry-pick bug fixes from `main`
    - Manual updates for critical security patches
-   - Triggers container builds: `ocp-4.19-latest`, `ocp-4.19-<sha>`
+   - Triggers container builds: `ocp-4.21-latest`, `ocp-4.21-<sha>`
 
-4. **release-4.18** (Legacy Support)
+4. **release-4.20** (Legacy Support)
    - Critical bug fixes only
    - Security patches only
-   - Triggers container builds: `ocp-4.18-latest`, `ocp-4.18-<sha>`
+   - Triggers container builds: `ocp-4.20-latest`, `ocp-4.20-<sha>`
 
 ### Automated Sync Workflow
 
 **Trigger**: Every push to `main`
 
-**Action**: Automatically merge `main` → `release-4.20`
+**Action**: Automatically merge `main` → `release-4.22`
 
 **Conflict Resolution**:
 - If merge succeeds: Changes pushed automatically
@@ -57,18 +57,18 @@ quay.io/takinosh/openshift-coordination-engine:<tag>
 ```
 
 **Tags**:
-- `ocp-4.18-latest`: Latest build for OCP 4.18 (from `release-4.18`)
-- `ocp-4.18-a1b2c3d`: Specific commit SHA on `release-4.18`
-- `ocp-4.19-latest`: Latest build for OCP 4.19 (from `release-4.19`)
-- `ocp-4.19-d4e5f6g`: Specific commit SHA on `release-4.19`
 - `ocp-4.20-latest`: Latest build for OCP 4.20 (from `release-4.20`)
-- `ocp-4.20-g7h8i9j`: Specific commit SHA on `release-4.20`
+- `ocp-4.20-a1b2c3d`: Specific commit SHA on `release-4.20`
+- `ocp-4.21-latest`: Latest build for OCP 4.21 (from `release-4.21`)
+- `ocp-4.21-d4e5f6g`: Specific commit SHA on `release-4.21`
+- `ocp-4.22-latest`: Latest build for OCP 4.22 (from `release-4.22`)
+- `ocp-4.22-g7h8i9j`: Specific commit SHA on `release-4.22`
 
 ### Build Triggers
 
 **Workflow**: `.github/workflows/release-quay.yaml`
 
-**Trigger Branches**: `release-4.18`, `release-4.19`, `release-4.20` (NOT `main`)
+**Trigger Branches**: `release-4.20`, `release-4.21`, `release-4.22` (NOT `main`)
 
 **Build Process**:
 1. Extract OpenShift version from branch name
@@ -81,81 +81,81 @@ quay.io/takinosh/openshift-coordination-engine:<tag>
 
 ## Maintenance Procedures
 
-### Adding Support for New OpenShift Version (e.g., 4.21)
+### Adding Support for New OpenShift Version (e.g., 4.23)
 
-When OpenShift 4.21 is released:
+When OpenShift 4.23 is released:
 
 1. **Update Support Matrix**
    ```bash
-   # New matrix will be: 4.19, 4.20, 4.21
-   # Drop support for 4.18
+   # New matrix will be: 4.21, 4.22, 4.23
+   # Drop support for 4.20
    ```
 
 2. **Create New Release Branch**
    ```bash
    git checkout main
    git pull origin main
-   git checkout -b release-4.21
+   git checkout -b release-4.23
 
    # Update go.mod
-   go get k8s.io/client-go@v0.34.0
-   go get k8s.io/api@v0.34.0
-   go get k8s.io/apimachinery@v0.34.0
+   go get k8s.io/client-go@v0.36.0
+   go get k8s.io/api@v0.36.0
+   go get k8s.io/apimachinery@v0.36.0
    go mod tidy
 
    # Commit and push
    git add go.mod go.sum
-   git commit -m "chore: initialize release-4.21 for OpenShift 4.21 (k8s 1.34)"
-   git push -u origin release-4.21
+   git commit -m "chore: initialize release-4.23 for OpenShift 4.23 (k8s 1.36)"
+   git push -u origin release-4.23
    ```
 
 3. **Update Auto-Sync Workflow**
    - Edit `.github/workflows/sync-release-branch.yaml`
-   - Change default sync target from `release-4.20` to `release-4.21`
+   - Change default sync target from `release-4.22` to `release-4.23`
 
 4. **Update Release Workflow**
    - Edit `.github/workflows/release-quay.yaml`
-   - Add `release-4.21` to trigger branches
+   - Add `release-4.23` to trigger branches
 
 5. **Update CI Workflow**
    - Edit `.github/workflows/ci.yaml`
-   - Add `release-4.21` to trigger branches
+   - Add `release-4.23` to trigger branches
 
 6. **Create Helm Values Override**
-   - Create `charts/coordination-engine/values-ocp-4.21.yaml`
-   - Set `image.tag: "ocp-4.21-latest"`
+   - Create `charts/coordination-engine/values-ocp-4.23.yaml`
+   - Set `image.tag: "ocp-4.23-latest"`
 
 7. **Update Documentation**
    - Update README.md support matrix
    - Update VERSION-STRATEGY.md (this file)
    - Add migration notes if needed
 
-8. **Archive Old Version (4.18)**
-   - Update README.md to mark 4.18 as "End of Support"
-   - Remove 4.18 from CI/release workflows
+8. **Archive Old Version (4.20)**
+   - Update README.md to mark 4.20 as "End of Support"
+   - Remove 4.20 from CI/release workflows
 
 ### Cherry-Picking Bug Fixes to Older Versions
 
-**Scenario**: Bug fix merged to `main` needs to go to `release-4.19` and `release-4.18`
+**Scenario**: Bug fix merged to `main` needs to go to `release-4.21` and `release-4.20`
 
 ```bash
 # Identify commit SHA from main
 git log main --oneline | grep "fix: resolve memory leak"
 # Example: a1b2c3d fix: resolve memory leak in health checker
 
-# Cherry-pick to release-4.19
-git checkout release-4.19
-git pull origin release-4.19
+# Cherry-pick to release-4.21
+git checkout release-4.21
+git pull origin release-4.21
 git cherry-pick a1b2c3d
 # Resolve conflicts if any
-git push origin release-4.19
+git push origin release-4.21
 
-# Cherry-pick to release-4.18
-git checkout release-4.18
-git pull origin release-4.18
+# Cherry-pick to release-4.20
+git checkout release-4.20
+git pull origin release-4.20
 git cherry-pick a1b2c3d
 # Resolve conflicts if any
-git push origin release-4.18
+git push origin release-4.20
 ```
 
 **Result**: Both branches will trigger new container builds automatically.
@@ -169,17 +169,17 @@ git push origin release-4.18
 ```bash
 # Check cluster version first
 oc version
-# Output: Server Version: 4.19.5
+# Output: Server Version: 4.22.1
 
 # Deploy matching image
 helm install coordination-engine ./charts/coordination-engine \
-  --set image.tag=ocp-4.19-latest \
+  --set image.tag=ocp-4.22-latest \
   --namespace self-healing-platform
 ```
 
 ### Upgrading Deployments
 
-**Scenario**: Upgrading from OCP 4.19 → 4.20
+**Scenario**: Upgrading from OCP 4.21 → 4.22
 
 ```bash
 # Step 1: Upgrade OpenShift cluster (separate process)
@@ -187,7 +187,7 @@ helm install coordination-engine ./charts/coordination-engine \
 
 # Step 2: Upgrade coordination-engine deployment
 helm upgrade coordination-engine ./charts/coordination-engine \
-  --set image.tag=ocp-4.20-latest \
+  --set image.tag=ocp-4.22-latest \
   --reuse-values \
   --namespace self-healing-platform
 
@@ -206,7 +206,7 @@ helm rollback coordination-engine -n self-healing-platform
 
 # Or explicitly set previous version
 helm upgrade coordination-engine ./charts/coordination-engine \
-  --set image.tag=ocp-4.20-a1b2c3d \
+  --set image.tag=ocp-4.22-a1b2c3d \
   --namespace self-healing-platform
 ```
 

@@ -3,21 +3,19 @@ name: Build and Push to Quay.io
 on:
   push:
     branches:
-      - 'release-4.18'
-      - 'release-4.19'
       - 'release-4.20'
       - 'release-4.21'
+      - 'release-4.22'
   workflow_dispatch:
     inputs:
       release_branch:
-        description: 'Release branch to build (e.g., release-4.21)'
+        description: 'Release branch to build (e.g., release-4.22)'
         required: true
         type: choice
         options:
+          - release-4.22
           - release-4.21
           - release-4.20
-          - release-4.19
-          - release-4.18
 
 env:
   REGISTRY: quay.io
