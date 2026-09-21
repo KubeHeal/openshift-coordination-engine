@@ -19,7 +19,7 @@ A Go-based coordination engine for multi-layer remediation in OpenShift/Kubernet
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.26+
 - Kubernetes 1.28+ or OpenShift 4.14+
 - kubectl/oc CLI configured
 
@@ -397,7 +397,7 @@ The coordination engine exposes Prometheus metrics on port 9090:
 - `coordination_engine_argocd_sync_total` - ArgoCD sync operations
 - `coordination_engine_ml_layer_detection_total` - ML-enhanced detections
 
-See [Monitoring Guide](docs/MONITORING.md) for complete metrics reference.
+See [DESIGN_DOC.md](DESIGN_DOC.md) section 8 for metrics details.
 
 ## Troubleshooting
 
@@ -448,7 +448,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 - [API Reference](docs/API.md)
 - [RBAC Configuration](docs/RBAC.md)
 - [Development Guide](CLAUDE.md)
-- [Implementation Status](docs/IMPLEMENTATION-PLAN.md)
+- [Software Design Document](DESIGN_DOC.md)
 
 ## Support
 

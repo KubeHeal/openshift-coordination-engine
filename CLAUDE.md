@@ -216,5 +216,5 @@ See `MIGRATION-GUIDE.md` for migration steps and `API-CONTRACT.md` for detailed 
 - Use `logrus` or `zap` for structured logging (JSON format)
 - Use `prometheus/client_golang` for metrics
 - Use `testify` for assertions, `ginkgo/gomega` for BDD-style tests
-- Go version: 1.21+
+- Go version: 1.26+
 - Follow standard Go project layout (cmd, internal, pkg)
