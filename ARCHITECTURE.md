@@ -1,35 +1,30 @@
-# Go Coordination Engine Architecture
+# Architecture
 
-## High-Level Architecture
+This file is a pointer to the full software design document.
+
+For the complete arc42 architecture documentation, including system context, building block
+views, runtime sequences, deployment diagrams, and crosscutting concepts, see
+**[DESIGN_DOC.md](DESIGN_DOC.md)**.
+
+For architectural decision records, see **[docs/adrs/README.md](docs/adrs/README.md)**.
+
+## Quick reference
 
 ```mermaid
-graph TB
-    MCP[MCP Server]
-    GoEngine[Go Coordination Engine]
-    PythonML[Python ML Service]
-    K8s[Kubernetes API]
-    ArgoCD[ArgoCD]
-    MCO[MCO]
-
-    MCP -->|REST| GoEngine
-    GoEngine -->|REST| PythonML
-    GoEngine -->|client-go| K8s
-    GoEngine -->|HTTP| ArgoCD
-    GoEngine -->|Monitor| MCO
+flowchart TB
+  mcp([MCP Server]) -->|"REST /api/v1"| engine[Coordination Engine]
+  engine -->|"client-go"| k8s[(Kubernetes API)]
+  engine -->|"HTTP"| argo[ArgoCD]
+  engine -->|"dynamic client"| mco[MCO]
+  engine -->|"PromQL"| prom[(Prometheus / Thanos)]
+  engine -->|"KServe v1"| kserve[KServe InferenceServices]
 ```
 
-## Responsibilities
+**Responsibilities:**
 
-- **Go Engine**: orchestration, remediation, multi-layer coordination
-- **Python ML**: anomaly detection, predictions, pattern recognition
-- **MCP Server**: natural language interface on top of Go engine
+- **Coordination Engine** (this repo): Orchestration, remediation planning, multi-layer coordination.
+- **KServe InferenceServices**: User-deployed ML models for anomaly detection and predictions.
+- **MCP Server**: Natural language interface that consumes this engine via REST.
 
-## Repositories
-
-- Platform: `/home/lab-user/openshift-aiops-platform`
-- MCP Server: `/home/lab-user/openshift-cluster-health-mcp`
-- Go Engine Stub (here): `openshift-coordination-engine/`
-
-See `API-CONTRACT.md` for integration details.
-
-
+For details on each component, integration boundary, and quality requirement, read
+[DESIGN_DOC.md](DESIGN_DOC.md).

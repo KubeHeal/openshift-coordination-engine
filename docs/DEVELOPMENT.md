@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go**: 1.21+ (matches ADR-036 MCP server standard)
+- **Go**: 1.26+ (see `go.mod` for exact version)
 - **Docker/Podman**: For building container images
 - **kubectl/oc**: For Kubernetes/OpenShift access
 - **make**: Build automation
