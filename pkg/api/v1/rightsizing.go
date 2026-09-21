@@ -45,18 +45,18 @@ type ContainerRightSizingRecommendation struct {
 	Container string `json:"container"`
 
 	// CPU fields (all in cores)
-	CurrentCPURequest    string  `json:"current_cpu_request"`
-	CurrentCPULimit      string  `json:"current_cpu_limit"`
-	P95CPUUsageCores     float64 `json:"p95_cpu_usage_cores"`
-	RecommendedCPUReq    string  `json:"recommended_cpu_request"`
-	RecommendedCPULimit  string  `json:"recommended_cpu_limit"`
+	CurrentCPURequest   string  `json:"current_cpu_request"`
+	CurrentCPULimit     string  `json:"current_cpu_limit"`
+	P95CPUUsageCores    float64 `json:"p95_cpu_usage_cores"`
+	RecommendedCPUReq   string  `json:"recommended_cpu_request"`
+	RecommendedCPULimit string  `json:"recommended_cpu_limit"`
 
 	// Memory fields (all in bytes)
-	CurrentMemoryRequest    string  `json:"current_memory_request"`
-	CurrentMemoryLimit      string  `json:"current_memory_limit"`
-	P95MemoryUsageBytes     float64 `json:"p95_memory_usage_bytes"`
-	RecommendedMemoryReq    string  `json:"recommended_memory_request"`
-	RecommendedMemoryLimit  string  `json:"recommended_memory_limit"`
+	CurrentMemoryRequest   string  `json:"current_memory_request"`
+	CurrentMemoryLimit     string  `json:"current_memory_limit"`
+	P95MemoryUsageBytes    float64 `json:"p95_memory_usage_bytes"`
+	RecommendedMemoryReq   string  `json:"recommended_memory_request"`
+	RecommendedMemoryLimit string  `json:"recommended_memory_limit"`
 
 	// Classification
 	// Sizing is "over-provisioned", "under-provisioned", or "right-sized".
@@ -70,14 +70,14 @@ type ContainerRightSizingRecommendation struct {
 
 // RightSizingResponse is the response body for GET /api/v1/recommendations/rightsizing.
 type RightSizingResponse struct {
-	Status          string                                `json:"status"`
-	Timestamp       time.Time                             `json:"timestamp"`
-	Namespace       string                                `json:"namespace,omitempty"`
-	AnalysisWindow  string                                `json:"analysis_window"`
-	Recommendations []ContainerRightSizingRecommendation  `json:"recommendations"`
-	OverProvisioned int                                   `json:"over_provisioned_count"`
+	Status           string                               `json:"status"`
+	Timestamp        time.Time                            `json:"timestamp"`
+	Namespace        string                               `json:"namespace,omitempty"`
+	AnalysisWindow   string                               `json:"analysis_window"`
+	Recommendations  []ContainerRightSizingRecommendation `json:"recommendations"`
+	OverProvisioned  int                                  `json:"over_provisioned_count"`
 	UnderProvisioned int                                  `json:"under_provisioned_count"`
-	RightSized      int                                   `json:"right_sized_count"`
+	RightSized       int                                  `json:"right_sized_count"`
 }
 
 // GetRightSizingRecommendations handles GET /api/v1/recommendations/rightsizing
@@ -113,12 +113,13 @@ func (h *RightSizingHandler) GetRightSizingRecommendations(w http.ResponseWriter
 	}
 
 	over, under, right := 0, 0, 0
-	for _, rec := range recs {
-		if rec.CPUSizing == "over-provisioned" || rec.MemorySizing == "over-provisioned" {
+	for i := range recs {
+		switch {
+		case recs[i].CPUSizing == "over-provisioned" || recs[i].MemorySizing == "over-provisioned":
 			over++
-		} else if rec.CPUSizing == "under-provisioned" || rec.MemorySizing == "under-provisioned" {
+		case recs[i].CPUSizing == "under-provisioned" || recs[i].MemorySizing == "under-provisioned":
 			under++
-		} else {
+		default:
 			right++
 		}
 	}
@@ -185,8 +186,14 @@ func (h *RightSizingHandler) computeRecommendations(ctx context.Context, namespa
 		scope, scope,
 	)
 
-	p95CPU := h.queryOrDefault(ctx, fmt.Sprintf("avg(%s)", p95CPUQuery), 0)
-	p95Mem := h.queryOrDefault(ctx, fmt.Sprintf("avg(%s)", p95MemQuery), 0)
+	p95CPU, err := h.prometheusClient.Query(ctx, fmt.Sprintf("avg(%s)", p95CPUQuery))
+	if err != nil {
+		return nil, fmt.Errorf("querying P95 CPU usage: %w", err)
+	}
+	p95Mem, err := h.prometheusClient.Query(ctx, fmt.Sprintf("avg(%s)", p95MemQuery))
+	if err != nil {
+		return nil, fmt.Errorf("querying P95 memory usage: %w", err)
+	}
 	cpuReq := h.queryOrDefault(ctx, cpuReqQuery, 0.1)
 	cpuLim := h.queryOrDefault(ctx, cpuLimQuery, 0.2)
 	memReq := h.queryOrDefault(ctx, memReqQuery, 128*1024*1024)
@@ -209,22 +216,22 @@ func (h *RightSizingHandler) computeRecommendations(ctx context.Context, namespa
 	memSizing := classifySizing(memReq, p95Mem)
 
 	rec := ContainerRightSizingRecommendation{
-		Namespace:            namespace,
-		Pod:                  pod,
-		Container:            "(aggregated)",
-		CurrentCPURequest:    formatCores(cpuReq),
-		CurrentCPULimit:      formatCores(cpuLim),
-		P95CPUUsageCores:     math.Round(p95CPU*1000) / 1000,
-		RecommendedCPUReq:    formatCores(recCPUReq),
-		RecommendedCPULimit:  formatCores(recCPULim),
-		CurrentMemoryRequest: formatBytes(int64(memReq)),
-		CurrentMemoryLimit:   formatBytes(int64(memLim)),
-		P95MemoryUsageBytes:  p95Mem,
-		RecommendedMemoryReq: formatBytes(int64(recMemReq)),
+		Namespace:              namespace,
+		Pod:                    pod,
+		Container:              "(aggregated)",
+		CurrentCPURequest:      formatCores(cpuReq),
+		CurrentCPULimit:        formatCores(cpuLim),
+		P95CPUUsageCores:       math.Round(p95CPU*1000) / 1000,
+		RecommendedCPUReq:      formatCores(recCPUReq),
+		RecommendedCPULimit:    formatCores(recCPULim),
+		CurrentMemoryRequest:   formatBytes(int64(memReq)),
+		CurrentMemoryLimit:     formatBytes(int64(memLim)),
+		P95MemoryUsageBytes:    p95Mem,
+		RecommendedMemoryReq:   formatBytes(int64(recMemReq)),
 		RecommendedMemoryLimit: formatBytes(int64(recMemLim)),
-		CPUSizing:            cpuSizing,
-		MemorySizing:         memSizing,
-		ThrottleRatePct:      throttlePtr,
+		CPUSizing:              cpuSizing,
+		MemorySizing:           memSizing,
+		ThrottleRatePct:        throttlePtr,
 	}
 	return []ContainerRightSizingRecommendation{rec}, nil
 }
