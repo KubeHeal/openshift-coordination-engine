@@ -9,7 +9,8 @@ run:
     - e2e
 
 output:
-  format: colored-line-number
+  formats:
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
 
@@ -51,8 +52,7 @@ linters-settings:
     checks: ["all"]
 
   # Unused code
-  unused:
-    check-exported: false
+  unused: {}
 
   # Consistent imports
   gci:

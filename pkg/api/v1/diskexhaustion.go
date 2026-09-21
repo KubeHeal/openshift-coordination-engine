@@ -352,8 +352,8 @@ func (h *DiskExhaustionHandler) respondJSON(w http.ResponseWriter, statusCode in
 
 func (h *DiskExhaustionHandler) respondError(w http.ResponseWriter, statusCode int, message string) {
 	type errResp struct {
-		Status  string `json:"status"`
-		Error   string `json:"error"`
+		Status string `json:"status"`
+		Error  string `json:"error"`
 	}
 	h.respondJSON(w, statusCode, errResp{Status: "error", Error: message})
 }
