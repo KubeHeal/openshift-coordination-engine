@@ -75,12 +75,12 @@ This project supports multiple OpenShift versions through version-specific relea
 
 | OpenShift | Kubernetes | Image Tag | Branch | Status |
 |-----------|-----------|-----------|--------|--------|
-| 4.21 | 1.34 | `ocp-4.21-latest` | `release-4.21` | ✅ Supported (Current) |
+| 4.22 | 1.35 | `ocp-4.22-latest` | `release-4.22` | ✅ Supported (Current) |
+| 4.21 | 1.34 | `ocp-4.21-latest` | `release-4.21` | ✅ Supported |
 | 4.20 | 1.33 | `ocp-4.20-latest` | `release-4.20` | ✅ Supported |
-| 4.19 | 1.32 | `ocp-4.19-latest` | `release-4.19` | ✅ Supported |
-| 4.18 | 1.31 | `ocp-4.18-latest` | `release-4.18` | ⚠️ Maintenance (dropping when 4.22 releases) |
+| 4.19 | 1.32 | `ocp-4.19-latest` | `release-4.19` | ⚠️ Maintenance (dropping when 4.23 releases) |
 
-**Support Policy**: Rolling 3-version window. OCP 4.21 is now GA (April 2026) — active window is 4.19 / 4.20 / 4.21. Support for 4.18 will be dropped when 4.22 is released.
+**Support Policy**: Rolling 3-version window. OCP 4.22 is now GA (June 2026) — active window is 4.20 / 4.21 / 4.22. Support for 4.19 will be dropped when 4.23 is released.
 
 ### Version Selection
 
@@ -94,17 +94,17 @@ oc version
 #### Pull Version-Specific Image
 
 ```bash
-# For OpenShift 4.21 (current)
+# For OpenShift 4.22 (current)
+podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.22-latest
+
+# For OpenShift 4.21
 podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.21-latest
 
 # For OpenShift 4.20
 podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.20-latest
 
-# For OpenShift 4.19
+# For OpenShift 4.19 (maintenance)
 podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.19-latest
-
-# For OpenShift 4.18 (maintenance)
-podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.18-latest
 ```
 
 #### Specific Git SHA Tags
@@ -112,14 +112,19 @@ podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.18-latest
 For reproducible deployments, use SHA-tagged images:
 
 ```bash
-# Example: OpenShift 4.21 with specific commit
-podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.21-a1b2c3d
+# Example: OpenShift 4.22 with specific commit
+podman pull quay.io/takinosh/openshift-coordination-engine:ocp-4.22-a1b2c3d
 ```
 
 #### Deploy with Helm
 
 ```bash
-# OpenShift 4.21 (current — or use default values.yaml)
+# OpenShift 4.22 (current — or use default values.yaml)
+helm install coordination-engine ./charts/coordination-engine \
+  --values ./charts/coordination-engine/values-ocp-4.22.yaml \
+  --namespace self-healing-platform
+
+# OpenShift 4.21
 helm install coordination-engine ./charts/coordination-engine \
   --values ./charts/coordination-engine/values-ocp-4.21.yaml \
   --namespace self-healing-platform
@@ -129,14 +134,9 @@ helm install coordination-engine ./charts/coordination-engine \
   --values ./charts/coordination-engine/values-ocp-4.20.yaml \
   --namespace self-healing-platform
 
-# OpenShift 4.19
+# OpenShift 4.19 (maintenance)
 helm install coordination-engine ./charts/coordination-engine \
   --values ./charts/coordination-engine/values-ocp-4.19.yaml \
-  --namespace self-healing-platform
-
-# OpenShift 4.18 (maintenance)
-helm install coordination-engine ./charts/coordination-engine \
-  --values ./charts/coordination-engine/values-ocp-4.18.yaml \
   --namespace self-healing-platform
 ```
 
@@ -144,7 +144,7 @@ Or override directly:
 
 ```bash
 helm install coordination-engine ./charts/coordination-engine \
-  --set image.tag=ocp-4.21-latest \
+  --set image.tag=ocp-4.22-latest \
   --namespace self-healing-platform
 ```
 
@@ -152,13 +152,13 @@ helm install coordination-engine ./charts/coordination-engine \
 
 ### Development Branches
 
-- **main**: Development branch, auto-syncs to `release-4.21`
-- **release-4.21**: Supports OpenShift 4.21 (client-go v0.34.x) — current
+- **main**: Development branch, auto-syncs to `release-4.22`
+- **release-4.22**: Supports OpenShift 4.22 (client-go v0.35.x) — current
+- **release-4.21**: Supports OpenShift 4.21 (client-go v0.34.x)
 - **release-4.20**: Supports OpenShift 4.20 (client-go v0.33.x)
-- **release-4.19**: Supports OpenShift 4.19 (client-go v0.32.x)
-- **release-4.18**: Supports OpenShift 4.18 (client-go v0.31.x) — maintenance
+- **release-4.19**: Supports OpenShift 4.19 (client-go v0.32.x) — maintenance
 
-**Note**: Direct development happens on `main`. Changes are automatically propagated to `release-4.21` and cherry-picked to older versions as needed.
+**Note**: Direct development happens on `main`. Changes are automatically propagated to `release-4.22` and cherry-picked to older versions as needed.
 
 For detailed version strategy documentation, see [VERSION-STRATEGY.md](docs/VERSION-STRATEGY.md).
 

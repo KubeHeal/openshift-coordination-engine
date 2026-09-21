@@ -55,7 +55,7 @@ flowchart TD
 
 - **Language:** Go 1.26 with `client-go` for all Kubernetes operations.
 - **License:** Apache 2.0.
-- **OpenShift versions:** Rolling 3-version window. Active: 4.19, 4.20, 4.21.
+- **OpenShift versions:** Rolling 3-version window. Active: 4.20, 4.21, 4.22.
 - **API contract:** Must maintain backward compatibility with the Python engine REST API so the MCP server requires no changes.
 - **ML protocol:** KServe v1 prediction API (`POST /v1/models/{name}:predict`).
 - **Team size:** Small team. The engine is a single deployable binary.

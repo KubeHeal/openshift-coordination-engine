@@ -1,0 +1,53 @@
+# Override values for OpenShift 4.21 deployments
+# Kubernetes version: 1.34
+
+# Image configuration
+image:
+  repository: quay.io/takinosh/openshift-coordination-engine
+  pullPolicy: IfNotPresent
+  tag: "ocp-4.21-latest"
+
+# OpenShift version metadata
+openshiftVersion:
+  target: "4.21"
+  kubernetes: "1.34"
+
+# Resource limits (same as defaults)
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# Environment variables
+env:
+  - name: LOG_LEVEL
+    value: "info"
+  - name: PORT
+    value: "8080"
+  - name: METRICS_PORT
+    value: "9090"
+  # KServe Integration (ADR-039) - replaces ML_SERVICE_URL
+  - name: ENABLE_KSERVE_INTEGRATION
+    value: "true"
+  - name: KSERVE_NAMESPACE
+    value: "self-healing-platform"
+  - name: KSERVE_PREDICTOR_PORT
+    value: "8080"  # KServe InferenceService predictors in RawDeployment mode listen on 8080
+  - name: KSERVE_ANOMALY_DETECTOR_SERVICE
+    value: "anomaly-detector-predictor"
+  # KServe model name for API paths (e.g., /v1/models/<model>:predict)
+  - name: KSERVE_ANOMALY_DETECTOR_MODEL
+    value: "anomaly-detector"
+  - name: KSERVE_PREDICTIVE_ANALYTICS_SERVICE
+    value: "predictive-analytics-predictor"
+  # KServe model name for API paths (e.g., /v1/models/<model>:predict)
+  - name: KSERVE_PREDICTIVE_ANALYTICS_MODEL
+    value: "predictive-analytics"
+  - name: KSERVE_TIMEOUT
+    value: "10s"
+  # Prometheus integration for real-time metrics (ADR-014)
+  - name: PROMETHEUS_URL
+    value: "https://thanos-querier.openshift-monitoring.svc:9091"
