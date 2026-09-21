@@ -347,17 +347,16 @@ func (h *RecommendationsHandler) buildPredictionInstances(ctx context.Context, c
 	}).Debug("Retrieved rolling mean metrics")
 
 	// Build instances with 4 features each (matching model training)
-	instances := [][]float64{
-		{hourOfDay, dayOfWeek, cpuRollingMean, memoryRollingMean},
-	}
-
-	// Add scenario with slightly elevated metrics for comparison
-	instances = append(instances, []float64{
-		hourOfDay,
-		dayOfWeek,
-		min(cpuRollingMean*1.15, 1.0),    // 15% higher CPU scenario
-		min(memoryRollingMean*1.15, 1.0), // 15% higher memory scenario
-	})
+	instances := make([][]float64, 0, 2)
+	instances = append(instances,
+		[]float64{hourOfDay, dayOfWeek, cpuRollingMean, memoryRollingMean},
+		[]float64{
+			hourOfDay,
+			dayOfWeek,
+			min(cpuRollingMean*1.15, 1.0),    // 15% higher CPU scenario
+			min(memoryRollingMean*1.15, 1.0), // 15% higher memory scenario
+		},
+	)
 
 	return instances
 }
@@ -422,7 +421,7 @@ func (h *RecommendationsHandler) interpretMLPredictions(predictions []int, req *
 		var issueType string
 		var severity string
 		var actions []string
-		var evidence []string
+		var evidence []string //nolint:prealloc // always replaced in both branches below, not appended
 
 		// Get the instance features if available
 		var instanceCPU, instanceMem float64
