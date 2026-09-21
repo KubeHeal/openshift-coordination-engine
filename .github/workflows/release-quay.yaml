@@ -22,7 +22,7 @@ on:
 env:
   REGISTRY: quay.io
   IMAGE_NAME: takinosh/openshift-coordination-engine
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26'
 
 jobs:
   build-and-push:
@@ -62,7 +62,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: Run tests
         run: make test
