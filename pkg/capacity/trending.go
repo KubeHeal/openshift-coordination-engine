@@ -226,6 +226,70 @@ func CalculateConfidence(dataPoints []DataPoint, rSquared float64) float64 {
 	return math.Round(confidence*100) / 100
 }
 
+// analyzeResourceTrend computes the trend, days-until-85%, and confidence for a
+// single resource dimension (CPU or memory).
+func analyzeResourceTrend(dataPoints []DataPoint, currentUsage, limit float64) (trend *ResourceTrend, daysUntil85 int, confidence float64) {
+	if len(dataPoints) < 2 {
+		return nil, -1, 0
+	}
+
+	dailyChange := CalculateDailyChangePercent(dataPoints)
+	weeklyChange := CalculateWeeklyChangePercent(dataPoints)
+	_, _, rSquared := LinearRegression(dataPoints)
+
+	trend = &ResourceTrend{
+		DailyChangePercent:  math.Round(dailyChange*100) / 100,
+		WeeklyChangePercent: math.Round(weeklyChange*100) / 100,
+		Direction:           DetermineTrendDirection(dailyChange),
+	}
+
+	daysUntil85 = DaysUntilThreshold(currentUsage, limit, dailyChange, 0.85)
+	confidence = CalculateConfidence(dataPoints, rSquared)
+	return trend, daysUntil85, confidence
+}
+
+// forecastExhaustionDays returns the minimum days until any resource hits 100% of
+// its limit. Returns -1 when usage is stable or no limit is set.
+func forecastExhaustionDays(result *TrendingInfo, currentCPU, cpuLimit, currentMemory, memoryLimit float64) int {
+	forecast := -1
+	if result.CPU != nil && result.CPU.DailyChangePercent > 0 && cpuLimit > 0 {
+		days := DaysUntilThreshold(currentCPU, cpuLimit, result.CPU.DailyChangePercent, 1.0)
+		if days >= 0 && (forecast < 0 || days < forecast) {
+			forecast = days
+		}
+	}
+	if result.Memory != nil && result.Memory.DailyChangePercent > 0 && memoryLimit > 0 {
+		days := DaysUntilThreshold(currentMemory, memoryLimit, result.Memory.DailyChangePercent, 1.0)
+		if days >= 0 && (forecast < 0 || days < forecast) {
+			forecast = days
+		}
+	}
+	return forecast
+}
+
+// calculateReplicaIncrease suggests +N replicas when exhaustion is within 30 days.
+// It finds the smallest N such that current_usage / (current_replicas + N) < 0.70,
+// approximating current_replicas as 1 when unknown.
+func calculateReplicaIncrease(forecastDays int, currentCPU, cpuLimit, currentMemory, memoryLimit float64) int {
+	if forecastDays < 0 || forecastDays > 30 {
+		return 0
+	}
+	maxUsageFraction := 0.0
+	if cpuLimit > 0 {
+		maxUsageFraction = math.Max(maxUsageFraction, currentCPU/cpuLimit)
+	}
+	if memoryLimit > 0 {
+		maxUsageFraction = math.Max(maxUsageFraction, currentMemory/memoryLimit)
+	}
+	if maxUsageFraction > 0.70 {
+		neededReplicas := int(math.Ceil(maxUsageFraction / 0.70))
+		if neededReplicas > 1 {
+			return neededReplicas - 1
+		}
+	}
+	return 0
+}
+
 // AnalyzeTrend performs trend analysis on data points
 func AnalyzeTrend(cpuDataPoints, memoryDataPoints []DataPoint, currentCPU, cpuLimit, currentMemory, memoryLimit float64) *TrendingInfo {
 	result := &TrendingInfo{
@@ -233,93 +297,32 @@ func AnalyzeTrend(cpuDataPoints, memoryDataPoints []DataPoint, currentCPU, cpuLi
 		Confidence:         0,
 	}
 
-	// CPU trending
-	if len(cpuDataPoints) >= 2 {
-		dailyCPUChange := CalculateDailyChangePercent(cpuDataPoints)
-		weeklyCPUChange := CalculateWeeklyChangePercent(cpuDataPoints)
-		_, _, cpuRSquared := LinearRegression(cpuDataPoints)
-
-		result.CPU = &ResourceTrend{
-			DailyChangePercent:  math.Round(dailyCPUChange*100) / 100,
-			WeeklyChangePercent: math.Round(weeklyCPUChange*100) / 100,
-			Direction:           DetermineTrendDirection(dailyCPUChange),
-		}
-
-		// Calculate days until 85% for CPU
-		cpuDays := DaysUntilThreshold(currentCPU, cpuLimit, dailyCPUChange, 0.85)
+	cpuTrend, cpuDays, cpuConf := analyzeResourceTrend(cpuDataPoints, currentCPU, cpuLimit)
+	if cpuTrend != nil {
+		result.CPU = cpuTrend
 		if cpuDays >= 0 && (result.DaysUntil85Percent < 0 || cpuDays < result.DaysUntil85Percent) {
 			result.DaysUntil85Percent = cpuDays
 		}
-
-		result.Confidence = CalculateConfidence(cpuDataPoints, cpuRSquared)
+		result.Confidence = cpuConf
 	}
 
-	// Memory trending
-	if len(memoryDataPoints) >= 2 {
-		dailyMemoryChange := CalculateDailyChangePercent(memoryDataPoints)
-		weeklyMemoryChange := CalculateWeeklyChangePercent(memoryDataPoints)
-		_, _, memRSquared := LinearRegression(memoryDataPoints)
-
-		result.Memory = &ResourceTrend{
-			DailyChangePercent:  math.Round(dailyMemoryChange*100) / 100,
-			WeeklyChangePercent: math.Round(weeklyMemoryChange*100) / 100,
-			Direction:           DetermineTrendDirection(dailyMemoryChange),
-		}
-
-		// Calculate days until 85% for memory
-		memDays := DaysUntilThreshold(currentMemory, memoryLimit, dailyMemoryChange, 0.85)
+	memTrend, memDays, memConf := analyzeResourceTrend(memoryDataPoints, currentMemory, memoryLimit)
+	if memTrend != nil {
+		result.Memory = memTrend
 		if memDays >= 0 && (result.DaysUntil85Percent < 0 || memDays < result.DaysUntil85Percent) {
 			result.DaysUntil85Percent = memDays
 		}
-
-		// Use higher confidence between CPU and memory
-		memConfidence := CalculateConfidence(memoryDataPoints, memRSquared)
-		if memConfidence > result.Confidence {
-			result.Confidence = memConfidence
+		if memConf > result.Confidence {
+			result.Confidence = memConf
 		}
 	}
 
-	// Set projected exhaustion date
 	if result.DaysUntil85Percent >= 0 {
 		result.ProjectedExhaustionDate = CalculateProjectedExhaustionDate(result.DaysUntil85Percent)
 	}
 
-	// ForecastedExhaustionDays: days until 100% of limit (more urgent signal than 85%)
-	result.ForecastedExhaustionDays = -1
-	if result.CPU != nil && result.CPU.DailyChangePercent > 0 && cpuLimit > 0 {
-		days := DaysUntilThreshold(currentCPU, cpuLimit, result.CPU.DailyChangePercent, 1.0)
-		if days >= 0 && (result.ForecastedExhaustionDays < 0 || days < result.ForecastedExhaustionDays) {
-			result.ForecastedExhaustionDays = days
-		}
-	}
-	if result.Memory != nil && result.Memory.DailyChangePercent > 0 && memoryLimit > 0 {
-		days := DaysUntilThreshold(currentMemory, memoryLimit, result.Memory.DailyChangePercent, 1.0)
-		if days >= 0 && (result.ForecastedExhaustionDays < 0 || days < result.ForecastedExhaustionDays) {
-			result.ForecastedExhaustionDays = days
-		}
-	}
-
-	// RecommendedReplicaIncrease: suggest +N replicas when exhaustion is within 30 days.
-	// Formula: find the smallest N such that current_usage / (current_replicas + N) < 0.70.
-	// We approximate current_replicas as 1 when unknown, so the formula simplifies to
-	// N = ceil(current_usage / 0.70) - 1 for the resource under most pressure.
-	result.RecommendedReplicaIncrease = 0
-	if result.ForecastedExhaustionDays >= 0 && result.ForecastedExhaustionDays <= 30 {
-		maxUsageFraction := 0.0
-		if cpuLimit > 0 {
-			maxUsageFraction = math.Max(maxUsageFraction, currentCPU/cpuLimit)
-		}
-		if memoryLimit > 0 {
-			maxUsageFraction = math.Max(maxUsageFraction, currentMemory/memoryLimit)
-		}
-		if maxUsageFraction > 0.70 {
-			// N replicas needed to bring utilisation below 70%
-			neededReplicas := int(math.Ceil(maxUsageFraction / 0.70))
-			if neededReplicas > 1 {
-				result.RecommendedReplicaIncrease = neededReplicas - 1
-			}
-		}
-	}
+	result.ForecastedExhaustionDays = forecastExhaustionDays(result, currentCPU, cpuLimit, currentMemory, memoryLimit)
+	result.RecommendedReplicaIncrease = calculateReplicaIncrease(result.ForecastedExhaustionDays, currentCPU, cpuLimit, currentMemory, memoryLimit)
 
 	return result
 }
