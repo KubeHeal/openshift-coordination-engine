@@ -45,8 +45,9 @@ type MLLayerDetector struct {
 	log                          *logrus.Logger
 }
 
-// NewMLLayerDetector creates a new ML-enhanced layer detector with legacy ML client
-// Deprecated: Use NewMLLayerDetectorWithKServe for KServe integration (ADR-039)
+// NewMLLayerDetector creates a new ML-enhanced layer detector with legacy ML client.
+//
+// Deprecated: Use NewMLLayerDetectorWithKServe for KServe integration (ADR-039).
 func NewMLLayerDetector(mlClient *integrations.MLClient, log *logrus.Logger) *MLLayerDetector {
 	return &MLLayerDetector{
 		baseDetector:                 NewLayerDetector(log),

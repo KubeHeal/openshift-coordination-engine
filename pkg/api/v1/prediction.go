@@ -697,8 +697,9 @@ func (h *PredictionHandler) processAnomalyPredictions(resp *kserve.DetectRespons
 	return cpuPercent, memoryPercent, confidence
 }
 
-// processPredictions is kept for backwards compatibility with tests
-// Deprecated: Use processAnomalyPredictions or processForecastPredictions instead
+// processPredictions is kept for backwards compatibility with tests.
+//
+// Deprecated: Use processAnomalyPredictions or processForecastPredictions instead.
 func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuRollingMean, memoryRollingMean float64) (float64, float64, float64) {
 	return h.processAnomalyPredictions(resp, cpuRollingMean, memoryRollingMean)
 }
