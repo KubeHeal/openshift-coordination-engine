@@ -72,8 +72,9 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 	o.workflows[workflow.ID] = workflow
 	o.mu.Unlock()
 
-	// Execute remediation in background
-	go o.executeWorkflow(context.Background(), workflow, deploymentInfo, issue)
+	// Execute remediation in background — context.Background is intentional: the
+	// workflow outlives the HTTP request that triggered it.
+	go o.executeWorkflow(context.Background(), workflow, deploymentInfo, issue) //nolint:gosec // G118: background goroutine must not use request-scoped context
 
 	return workflow, nil
 }
