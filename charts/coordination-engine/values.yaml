@@ -133,6 +133,20 @@ env:
     value: "90"
   - name: KUBEHEAL_MAX_STORED_INCIDENTS
     value: "10000"
+  # Alert notification sinks (ADR-022, Issue #75)
+  # Slack incoming webhook URL — leave empty to disable
+  # - name: KUBEHEAL_SLACK_WEBHOOK_URL
+  #   value: ""
+  # PagerDuty Events API v2 routing key — leave empty to disable
+  # - name: KUBEHEAL_PAGERDUTY_ROUTING_KEY
+  #   value: ""
+  # Alertmanager base URL — leave empty to disable
+  # e.g. http://alertmanager.openshift-monitoring.svc:9093
+  # - name: KUBEHEAL_ALERTMANAGER_URL
+  #   value: ""
+  # Minimum anomaly severity to trigger alerts (default: critical)
+  - name: KUBEHEAL_ALERT_SEVERITY_THRESHOLD
+    value: "critical"
   # OOM remediation tuning (Issue #62)
   # When an OOMKilled pod is detected, memory limits are multiplied by this factor.
   - name: OOM_MEMORY_MULTIPLIER

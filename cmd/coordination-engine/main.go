@@ -29,6 +29,7 @@ import (
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/config"
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/middleware"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/notifier"
 )
 
 var (
@@ -236,8 +237,11 @@ func main() {
 	capacityHandler.RegisterRoutes(router)
 	log.Info("Capacity API endpoints registered: /api/v1/capacity/namespace/{namespace}, /api/v1/capacity/cluster")
 
-	// Anomaly analysis endpoints (Issue #30)
-	anomalyHandler := initAnomalyHandler(kserveProxyHandler, prometheusClient, log)
+	// Alert notification dispatcher (ADR-022, Issue #75)
+	alertDispatcher := buildAlertDispatcher(cfg, log)
+
+	// Anomaly analysis endpoints (Issue #30, ADR-022)
+	anomalyHandler := initAnomalyHandler(kserveProxyHandler, prometheusClient, alertDispatcher, cfg.Notifier.SeverityThreshold, log)
 	anomalyHandler.RegisterRoutes(router)
 	log.Info("Anomaly analysis API endpoint registered: POST /api/v1/anomalies/analyze")
 
@@ -435,10 +439,35 @@ func initPrometheusClient(cfg *config.Config, log *logrus.Logger) *integrations.
 	return client
 }
 
-// initAnomalyHandler creates the anomaly analysis handler (Issue #30)
+// buildAlertDispatcher creates the alert notification dispatcher from config (ADR-022, Issue #75).
+func buildAlertDispatcher(cfg *config.Config, log *logrus.Logger) *notifier.Dispatcher {
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	var sinks []notifier.AlertSink
+
+	if cfg.Notifier.SlackWebhookURL != "" {
+		sinks = append(sinks, notifier.NewSlackSink(cfg.Notifier.SlackWebhookURL, httpClient, log))
+		log.Info("Slack alert sink enabled")
+	}
+	if cfg.Notifier.PagerDutyRoutingKey != "" {
+		sinks = append(sinks, notifier.NewPagerDutySink(cfg.Notifier.PagerDutyRoutingKey, httpClient, log))
+		log.Info("PagerDuty alert sink enabled")
+	}
+	if cfg.Notifier.AlertmanagerURL != "" {
+		sinks = append(sinks, notifier.NewAlertmanagerSink(cfg.Notifier.AlertmanagerURL, httpClient, log))
+		log.Info("Alertmanager alert sink enabled")
+	}
+
+	dispatcher := notifier.NewDispatcher(sinks, log)
+	log.WithField("sink_count", dispatcher.SinkCount()).Info("Alert dispatcher initialized")
+	return dispatcher
+}
+
+// initAnomalyHandler creates the anomaly analysis handler (Issue #30, ADR-022)
 func initAnomalyHandler(
 	kserveProxyHandler *v1.KServeProxyHandler,
 	prometheusClient *integrations.PrometheusClient,
+	alertDispatcher *notifier.Dispatcher,
+	severityThreshold string,
 	log *logrus.Logger,
 ) *v1.AnomalyHandler {
 	if kserveProxyHandler != nil {
@@ -446,12 +475,16 @@ func initAnomalyHandler(
 			kserveProxyHandler.GetProxyClient(),
 			prometheusClient,
 			log,
+			alertDispatcher,
+			severityThreshold,
 		)
 	}
 	return v1.NewAnomalyHandler(
 		nil, // No KServe client
 		prometheusClient,
 		log,
+		alertDispatcher,
+		severityThreshold,
 	)
 }
 

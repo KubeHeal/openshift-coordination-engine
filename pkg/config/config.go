@@ -52,6 +52,17 @@ type Config struct {
 
 	// Feature Engineering (Issue #54, ADR-016)
 	FeatureEngineering FeatureEngineeringConfig `json:"feature_engineering"`
+
+	// Alert notification sinks (ADR-022, Issue #75)
+	Notifier NotifierConfig `json:"notifier"`
+}
+
+// NotifierConfig holds configuration for alert notification sinks (ADR-022).
+type NotifierConfig struct {
+	SlackWebhookURL     string `json:"slack_webhook_url"`
+	PagerDutyRoutingKey string `json:"pagerduty_routing_key"`
+	AlertmanagerURL     string `json:"alertmanager_url"`
+	SeverityThreshold   string `json:"severity_threshold"`
 }
 
 // FeatureEngineeringConfig holds configuration for ML feature engineering (Issue #54)
@@ -197,6 +208,9 @@ const (
 	DefaultFeatureEngineeringEnabled              = true // Enable by default to fix Issue #54
 	DefaultFeatureEngineeringLookbackHours        = 24   // 24-hour lookback matches model training
 	DefaultFeatureEngineeringExpectedFeatureCount = 0    // 0 = disable validation, set to model's expected count to enable
+
+	// Notifier defaults (ADR-022, Issue #75)
+	DefaultAlertSeverityThreshold = "critical"
 )
 
 // Valid log levels
@@ -253,6 +267,14 @@ func Load() (*Config, error) {
 			Enabled:              getEnvAsBool("ENABLE_FEATURE_ENGINEERING", DefaultFeatureEngineeringEnabled),
 			LookbackHours:        getEnvAsInt("FEATURE_ENGINEERING_LOOKBACK_HOURS", DefaultFeatureEngineeringLookbackHours),
 			ExpectedFeatureCount: getEnvAsInt("FEATURE_ENGINEERING_EXPECTED_COUNT", DefaultFeatureEngineeringExpectedFeatureCount),
+		},
+
+		// Alert notification sinks (ADR-022, Issue #75)
+		Notifier: NotifierConfig{
+			SlackWebhookURL:     getEnv("KUBEHEAL_SLACK_WEBHOOK_URL", ""),
+			PagerDutyRoutingKey: getEnv("KUBEHEAL_PAGERDUTY_ROUTING_KEY", ""),
+			AlertmanagerURL:     getEnv("KUBEHEAL_ALERTMANAGER_URL", ""),
+			SeverityThreshold:   getEnv("KUBEHEAL_ALERT_SEVERITY_THRESHOLD", DefaultAlertSeverityThreshold),
 		},
 	}
 
