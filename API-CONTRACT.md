@@ -545,6 +545,39 @@ Deep root-cause analysis correlating Istio VirtualService misconfigs, NetworkPol
 - All three correlators run in parallel with a 25-second timeout each.
 - Confidence scores range from 0.0 to 1.0 and are weighted by signal type.
 
+## Alert Notification Sinks (ADR-022, Issue #75)
+
+When the anomaly analysis endpoint (`POST /api/v1/anomalies/analyze`) detects
+anomalies at or above the configured severity threshold, alerts are dispatched
+asynchronously to all configured sinks.  Dispatching never delays the HTTP
+response.
+
+### Supported Sinks
+
+| Sink | Env Var | Protocol |
+|---|---|---|
+| Slack | `KUBEHEAL_SLACK_WEBHOOK_URL` | POST to incoming webhook URL |
+| PagerDuty | `KUBEHEAL_PAGERDUTY_ROUTING_KEY` | POST to Events API v2 (`/v2/enqueue`) |
+| Alertmanager | `KUBEHEAL_ALERTMANAGER_URL` | POST to `{url}/api/v2/alerts` |
+
+### Configuration
+
+| Env Var | Default | Description |
+|---|---|---|
+| `KUBEHEAL_SLACK_WEBHOOK_URL` | (empty) | Slack incoming webhook URL; empty = disabled |
+| `KUBEHEAL_PAGERDUTY_ROUTING_KEY` | (empty) | PagerDuty Events API v2 routing key; empty = disabled |
+| `KUBEHEAL_ALERTMANAGER_URL` | (empty) | Alertmanager base URL; empty = disabled |
+| `KUBEHEAL_ALERT_SEVERITY_THRESHOLD` | `critical` | Minimum severity to trigger alerts (`info`, `warning`, `critical`) |
+
+### Behavior
+
+- Alerts are **fire-and-forget**: sink errors are logged at WARN level but
+  never propagated to the API response.
+- Each sink runs in its own goroutine with a 10-second timeout.
+- If no sinks are configured, the dispatcher is a no-op.
+- Severity threshold comparison: `info < warning < critical`.  Setting the
+  threshold to `warning` dispatches alerts for both `warning` and `critical`.
+
 ## Compatibility Guarantees
 
 - MCP server continues to work unchanged

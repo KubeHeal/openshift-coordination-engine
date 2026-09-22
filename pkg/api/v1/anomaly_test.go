@@ -21,7 +21,7 @@ func TestAnomalyHandler_AnalyzeAnomalies_Validation(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("invalid time_range", func(t *testing.T) {
 		reqBody := `{"time_range": "2h"}`
@@ -116,7 +116,7 @@ func TestAnomalyHandler_AnalyzeAnomalies_NoKServe(t *testing.T) {
 	log.SetLevel(logrus.ErrorLevel)
 
 	// Handler without KServe client
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("returns error when KServe unavailable", func(t *testing.T) {
 		reqBody := `{"time_range": "1h", "namespace": "test-ns"}`
@@ -154,7 +154,7 @@ func TestAnomalyHandler_AnalyzeAnomalies_ModelNotFound(t *testing.T) {
 	kserveClient, err := kserve.NewProxyClient(cfg, log)
 	require.NoError(t, err)
 
-	handler := NewAnomalyHandler(kserveClient, nil, log)
+	handler := NewAnomalyHandler(kserveClient, nil, log, nil, "")
 
 	t.Run("returns error when default model not found", func(t *testing.T) {
 		// Request default model "anomaly-detector" which doesn't exist
@@ -210,7 +210,7 @@ func TestAnomalyHandler_AnalyzeAnomalies_WithKServe(t *testing.T) {
 	kserveClient, err := kserve.NewProxyClient(cfg, log)
 	require.NoError(t, err)
 
-	handler := NewAnomalyHandler(kserveClient, nil, log)
+	handler := NewAnomalyHandler(kserveClient, nil, log, nil, "")
 
 	t.Run("analysis fails due to service unavailable", func(t *testing.T) {
 		// In unit tests, the KServe service is not actually reachable
@@ -237,7 +237,7 @@ func TestAnomalyHandler_RequestDefaults(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("default time_range is 1h", func(t *testing.T) {
 		req := &AnomalyAnalyzeRequest{}
@@ -278,7 +278,7 @@ func TestAnomalyHandler_ValidateRequest(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("valid request with 1h time range", func(t *testing.T) {
 		req := &AnomalyAnalyzeRequest{TimeRange: "1h", Threshold: 0.7}
@@ -333,7 +333,7 @@ func TestAnomalyHandler_RegisterRoutes(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 	router := mux.NewRouter()
 
 	handler.RegisterRoutes(router)
@@ -348,7 +348,7 @@ func TestAnomalyHandler_BuildScope(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("pod scope", func(t *testing.T) {
 		req := &AnomalyAnalyzeRequest{
@@ -397,7 +397,7 @@ func TestAnomalyHandler_BuildFeatureInfo(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	featureInfo := handler.buildFeatureInfo()
 
@@ -423,7 +423,7 @@ func TestAnomalyHandler_GetDefaultFeatures(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	features := handler.getDefaultFeatures()
 
@@ -457,7 +457,7 @@ func TestAnomalyHandler_GetDefaultMetricsData(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	metricsData := handler.getDefaultMetricsData()
 
@@ -473,7 +473,7 @@ func TestAnomalyHandler_CalculateAnomalyScore(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("normal metrics produce moderate score", func(t *testing.T) {
 		metrics := map[string]float64{
@@ -533,7 +533,7 @@ func TestAnomalyHandler_GenerateExplanation(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("high CPU generates explanation", func(t *testing.T) {
 		metrics := map[string]float64{
@@ -591,7 +591,7 @@ func TestAnomalyHandler_RecommendAction(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("high restarts recommend restart_pod", func(t *testing.T) {
 		metrics := map[string]float64{
@@ -655,7 +655,7 @@ func TestAnomalyHandler_BuildSummary(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("empty anomalies", func(t *testing.T) {
 		anomalies := []AnomalyResult{}
@@ -700,7 +700,7 @@ func TestAnomalyHandler_GenerateRecommendation(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("no anomalies", func(t *testing.T) {
 		anomalies := []AnomalyResult{}
@@ -862,7 +862,7 @@ func TestAnomalyHandler_BuildAnomalyResult(t *testing.T) {
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
 
-	handler := NewAnomalyHandler(nil, nil, log)
+	handler := NewAnomalyHandler(nil, nil, log, nil, "")
 
 	t.Run("critical severity for high score", func(t *testing.T) {
 		metrics := map[string]float64{

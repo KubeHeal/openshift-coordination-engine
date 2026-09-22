@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Deep RCA v2 endpoint** ([#72](https://github.com/KubeHeal/openshift-coordination-engine/issues/72)): New `POST /api/v1/investigate/rca` endpoint correlates Istio VirtualService misconfigurations, Kubernetes NetworkPolicy violations, and pod event streams to produce a structured root-cause report. Three signal correlators run in parallel; Istio is optional and gracefully skipped when CRDs are absent. Composite confidence scoring weighted by signal type (events 0.40, netpol 0.30, istio 0.30). ADR-021 documents the design. RBAC extended with `networking.istio.io` read access.
 
+- **Alert webhook sinks for critical anomalies** ([#75](https://github.com/KubeHeal/openshift-coordination-engine/issues/75)): Pluggable `AlertSink` interface in `pkg/notifier/` with Slack, PagerDuty Events API v2, and Alertmanager implementations. The anomaly handler (`POST /api/v1/anomalies/analyze`) asynchronously dispatches alerts to all configured sinks when detected anomalies meet the severity threshold (default: `critical`). Configuration via `KUBEHEAL_SLACK_WEBHOOK_URL`, `KUBEHEAL_PAGERDUTY_ROUTING_KEY`, `KUBEHEAL_ALERTMANAGER_URL`, and `KUBEHEAL_ALERT_SEVERITY_THRESHOLD` env vars. ADR-022 documents the design.
+
 ### Fixed
 - **Feature contract mismatch** ([#58](https://github.com/KubeHeal/openshift-coordination-engine/issues/58)): `CurrentMetrics` in the `/api/v1/predict` response now includes `disk_usage`, `network_in`, and `network_out` fields, matching the 5 base metrics sent to the predictive-analytics model. API consumers (MCP server) can now see all metric values used for predictions. Updated API-CONTRACT.md and ADR-016 to reflect the corrected 5-feature contract.
 
