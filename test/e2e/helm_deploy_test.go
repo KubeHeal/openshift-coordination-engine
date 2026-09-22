@@ -74,15 +74,15 @@ func (s *E2ETestSuite) TestHelmDeployRBACResources() {
 
 	// Override serviceAccount.name to empty so the template uses fullname
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
-		"image.repository":   repo,
-		"image.tag":          tag,
-		"image.pullPolicy":   "IfNotPresent",
-		"kserve.enabled":     "false",
+		"image.repository":    repo,
+		"image.tag":           tag,
+		"image.pullPolicy":    "IfNotPresent",
+		"kserve.enabled":      "false",
 		"serviceAccount.name": "",
-		"env[0].name":        "ENABLE_KSERVE_INTEGRATION",
-		"env[0].value":       "false",
-		"env[1].name":        "NAMESPACE",
-		"env[1].value":       testNamespace,
+		"env[0].name":         "ENABLE_KSERVE_INTEGRATION",
+		"env[0].value":        "false",
+		"env[1].name":         "NAMESPACE",
+		"env[1].value":        testNamespace,
 	})
 	s.Require().NoError(err, "Helm install failed")
 
