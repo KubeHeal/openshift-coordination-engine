@@ -44,6 +44,7 @@ type Config struct {
 	// Incident storage (ADR-014)
 	DataDir               string `json:"data_dir,omitempty"`                // Directory for persistent incident storage
 	IncidentRetentionDays int    `json:"incident_retention_days,omitempty"` // Days to retain resolved incidents (0 = no cleanup)
+	MaxStoredIncidents    int    `json:"max_stored_incidents,omitempty"`    // Maximum incidents to keep on disk (oldest resolved evicted first)
 
 	// Feature Engineering (Issue #54, ADR-016)
 	FeatureEngineering FeatureEngineeringConfig `json:"feature_engineering"`
@@ -180,8 +181,9 @@ const (
 	DefaultKServePredictorPort = 8080 // KServe predictors in RawDeployment mode listen on 8080
 
 	// Incident storage defaults (ADR-014)
-	DefaultDataDir               = "" // Empty means in-memory only
-	DefaultIncidentRetentionDays = 90 // 90 days (PCI-DSS, SOC2, HIPAA compliance)
+	DefaultDataDir               = ""    // Empty means in-memory only
+	DefaultIncidentRetentionDays = 90    // 90 days (PCI-DSS, SOC2, HIPAA compliance)
+	DefaultMaxStoredIncidents    = 10000 // Maximum incidents to keep on disk
 
 	// Feature engineering defaults (Issue #54, ADR-016)
 	DefaultFeatureEngineeringEnabled              = true // Enable by default to fix Issue #54
@@ -219,6 +221,7 @@ func Load() (*Config, error) {
 		// Incident storage configuration (ADR-014)
 		DataDir:               getEnv("DATA_DIR", DefaultDataDir),
 		IncidentRetentionDays: getEnvAsInt("INCIDENT_RETENTION_DAYS", DefaultIncidentRetentionDays),
+		MaxStoredIncidents:    getEnvAsInt("KUBEHEAL_MAX_STORED_INCIDENTS", DefaultMaxStoredIncidents),
 
 		// KServe configuration (ADR-039, ADR-040)
 		KServe: KServeConfig{
