@@ -87,13 +87,14 @@ func getE2EImage() string {
 
 // helmInstall runs helm install with the given parameters.
 func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues map[string]string) error {
-	args := []string{
+	args := make([]string, 0, 9+2*len(setValues))
+	args = append(args,
 		"install", release, chart,
 		"--namespace", namespace,
 		"--create-namespace",
 		"--wait",
 		"--timeout", "3m",
-	}
+	)
 	for k, v := range setValues {
 		args = append(args, "--set", fmt.Sprintf("%s=%s", k, v))
 	}
@@ -109,7 +110,7 @@ func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues m
 }
 
 // helmUninstall runs helm uninstall for the given release.
-func (s *E2ETestSuite) helmUninstall(release, namespace string) error {
+func (s *E2ETestSuite) helmUninstall(release, namespace string) error { //nolint:unparam // params kept for reuse across test files
 	cmd := exec.CommandContext(s.ctx, "helm", "uninstall", release, "--namespace", namespace)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -175,8 +176,8 @@ func (s *E2ETestSuite) portForwardAndGet(namespace, podName string, containerPor
 			time.Sleep(1 * time.Second)
 			continue
 		}
-		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		return resp.StatusCode, body, nil
 	}
 	return 0, nil, fmt.Errorf("GET %s failed after retries: %w", url, lastErr)
@@ -188,7 +189,7 @@ func (s *E2ETestSuite) getFirstPod(namespace, labelSelector string) (*corev1.Pod
 		LabelSelector: labelSelector,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing pods with selector %s in %s: %w", labelSelector, namespace, err)
 	}
 	for i := range pods.Items {
 		if pods.Items[i].Status.Phase == corev1.PodRunning {
@@ -199,7 +200,7 @@ func (s *E2ETestSuite) getFirstPod(namespace, labelSelector string) (*corev1.Pod
 }
 
 // deleteNamespace removes a namespace if it exists.
-func (s *E2ETestSuite) deleteNamespace(namespace string) {
+func (s *E2ETestSuite) deleteNamespace(namespace string) { //nolint:unparam // param kept for reuse across test files
 	_ = s.clientset.CoreV1().Namespaces().Delete(s.ctx, namespace, metav1.DeleteOptions{})
 }
 

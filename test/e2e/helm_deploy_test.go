@@ -37,16 +37,16 @@ func (s *E2ETestSuite) TestHelmDeployAndHealthCheck() {
 
 	// Install the Helm chart
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
-		"image.repository":                repo,
-		"image.tag":                       tag,
-		"image.pullPolicy":                "IfNotPresent",
-		"replicaCount":                    "1",
-		"env[0].name":                     "LOG_LEVEL",
-		"env[0].value":                    "debug",
-		"env[1].name":                     "PORT",
-		"env[1].value":                    "8080",
-		"env[2].name":                     "ENABLE_KSERVE_INTEGRATION",
-		"env[2].value":                    "false",
+		"image.repository": repo,
+		"image.tag":        tag,
+		"image.pullPolicy": "IfNotPresent",
+		"replicaCount":     "1",
+		"env[0].name":      "LOG_LEVEL",
+		"env[0].value":     "debug",
+		"env[1].name":      "PORT",
+		"env[1].value":     "8080",
+		"env[2].name":      "ENABLE_KSERVE_INTEGRATION",
+		"env[2].value":     "false",
 	})
 	s.Require().NoError(err, "Helm install failed")
 
@@ -87,11 +87,11 @@ func (s *E2ETestSuite) TestHelmDeployRBACResources() {
 	repo, tag := parseImage(image)
 
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
-		"image.repository":                repo,
-		"image.tag":                       tag,
-		"image.pullPolicy":                "IfNotPresent",
-		"env[0].name":                     "ENABLE_KSERVE_INTEGRATION",
-		"env[0].value":                    "false",
+		"image.repository": repo,
+		"image.tag":        tag,
+		"image.pullPolicy": "IfNotPresent",
+		"env[0].name":      "ENABLE_KSERVE_INTEGRATION",
+		"env[0].value":     "false",
 	})
 	s.Require().NoError(err, "Helm install failed")
 
@@ -134,11 +134,11 @@ func (s *E2ETestSuite) TestHelmDeployMetricsPort() {
 	repo, tag := parseImage(image)
 
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
-		"image.repository":                repo,
-		"image.tag":                       tag,
-		"image.pullPolicy":                "IfNotPresent",
-		"env[0].name":                     "ENABLE_KSERVE_INTEGRATION",
-		"env[0].value":                    "false",
+		"image.repository": repo,
+		"image.tag":        tag,
+		"image.pullPolicy": "IfNotPresent",
+		"env[0].name":      "ENABLE_KSERVE_INTEGRATION",
+		"env[0].value":     "false",
 	})
 	s.Require().NoError(err, "Helm install failed")
 
