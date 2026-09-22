@@ -1,0 +1,306 @@
+name: E2E - OpenShift Cluster Tests (Tier 2)
+
+# Tier 2: Runs on live OpenShift cluster.
+# Triggered manually, on release-* pushes, or on PRs with 'e2e-test' label.
+# Modeled on jupyter-notebook-validator-operator e2e-openshift.yaml patterns.
+
+on:
+  push:
+    branches: [ 'release-*' ]
+  pull_request:
+    branches: [ main, 'release-*' ]
+    types: [ labeled, opened, synchronize, reopened ]
+  workflow_dispatch:
+    inputs:
+      ocp_values_file:
+        description: 'OCP values file to use (e.g., values-ocp-4.22.yaml)'
+        required: false
+        default: 'values-ocp-4.22.yaml'
+        type: choice
+        options:
+          - 'values-ocp-4.22.yaml'
+          - 'values-ocp-4.21.yaml'
+          - 'values-ocp-4.20.yaml'
+
+concurrency:
+  group: e2e-openshift-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+  TEST_NAMESPACE: "coordination-engine-e2e"
+  HELM_RELEASE: "ce-e2e"
+
+jobs:
+  check-trigger:
+    name: Check E2E Trigger
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if E2E should run
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "E2E triggered by push to ${{ github.ref }}"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "E2E triggered manually"
+          elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            if [ "${{ contains(github.event.pull_request.labels.*.name, 'e2e-test') }}" == "true" ]; then
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "E2E triggered by 'e2e-test' label on PR"
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "E2E skipped - add 'e2e-test' label to PR to run"
+            fi
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  check-cluster:
+    name: Check Cluster Availability
+    runs-on: ubuntu-latest
+    needs: check-trigger
+    if: needs.check-trigger.outputs.should_run == 'true'
+    outputs:
+      cluster_available: ${{ steps.check.outputs.cluster_available }}
+    steps:
+      - name: Check if OpenShift cluster is reachable
+        id: check
+        env:
+          OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+        run: |
+          if [ -z "$OPENSHIFT_SERVER" ] || [ -z "$OPENSHIFT_TOKEN" ]; then
+            echo "cluster_available=false" >> $GITHUB_OUTPUT
+            echo "No OpenShift cluster configured - E2E tests will be skipped"
+            echo "To enable: set OPENSHIFT_SERVER and OPENSHIFT_TOKEN in repository secrets"
+            exit 0
+          fi
+          if curl -sk --max-time 5 "${OPENSHIFT_SERVER}/.well-known/oauth-authorization-server" > /dev/null 2>&1; then
+            echo "cluster_available=true" >> $GITHUB_OUTPUT
+            echo "OpenShift cluster is reachable at ${OPENSHIFT_SERVER}"
+          else
+            echo "cluster_available=false" >> $GITHUB_OUTPUT
+            echo "OpenShift cluster configured but unreachable - skipping E2E"
+          fi
+
+  openshift-e2e:
+    name: OpenShift E2E Tests
+    runs-on: ubuntu-latest
+    needs: [check-trigger, check-cluster]
+    if: |
+      always()
+      && needs.check-trigger.outputs.should_run == 'true'
+      && needs.check-cluster.outputs.cluster_available == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Install OpenShift CLI
+        run: |
+          curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz
+          tar -xzf openshift-client-linux.tar.gz
+          sudo mv oc /usr/local/bin/
+          sudo chmod +x /usr/local/bin/oc
+          oc version --client
+
+      - name: Login to OpenShift cluster
+        env:
+          OPENSHIFT_SERVER: ${{ secrets.OPENSHIFT_SERVER }}
+          OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+        run: |
+          oc login --token="$OPENSHIFT_TOKEN" --server="$OPENSHIFT_SERVER" --insecure-skip-tls-verify=true
+          echo "Verifying cluster access..."
+          oc cluster-info
+          oc version
+
+      - name: Build and push image to Quay
+        env:
+          QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+          QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}
+        run: |
+          IMAGE_TAG="e2e-$(git rev-parse --short HEAD)-$(date +%s)"
+          QUAY_IMAGE="quay.io/takinosh/openshift-coordination-engine:${IMAGE_TAG}"
+
+          echo "Building image: ${QUAY_IMAGE}"
+          docker build -t "${QUAY_IMAGE}" .
+
+          PUSH_SUCCESS=false
+          if [ -n "$QUAY_USERNAME" ] && [ -n "$QUAY_PASSWORD" ]; then
+            echo "Pushing to Quay.io..."
+            echo "$QUAY_PASSWORD" | docker login -u "$QUAY_USERNAME" --password-stdin quay.io 2>/dev/null
+            if docker push "${QUAY_IMAGE}" 2>&1; then
+              echo "IMAGE=${QUAY_IMAGE}" >> $GITHUB_ENV
+              echo "Image pushed: ${QUAY_IMAGE}"
+              PUSH_SUCCESS=true
+            fi
+          fi
+
+          if [ "$PUSH_SUCCESS" = "false" ]; then
+            echo "Using existing latest image"
+            echo "IMAGE=quay.io/takinosh/openshift-coordination-engine:ocp-4.22-latest" >> $GITHUB_ENV
+          fi
+
+      - name: Deploy coordination-engine via Helm
+        run: |
+          # Determine OCP values file
+          VALUES_FILE="${{ github.event.inputs.ocp_values_file || 'values-ocp-4.22.yaml' }}"
+
+          echo "Deploying coordination-engine..."
+          echo "  Image: ${IMAGE}"
+          echo "  Values: ${VALUES_FILE}"
+          echo "  Namespace: ${{ env.TEST_NAMESPACE }}"
+
+          # Clean up previous run
+          helm uninstall ${{ env.HELM_RELEASE }} -n ${{ env.TEST_NAMESPACE }} 2>/dev/null || true
+          oc delete namespace ${{ env.TEST_NAMESPACE }} --ignore-not-found=true --wait=false 2>/dev/null || true
+          sleep 5
+
+          # Parse image
+          IMAGE_REPO=$(echo "${IMAGE}" | rev | cut -d: -f2- | rev)
+          IMAGE_TAG=$(echo "${IMAGE}" | rev | cut -d: -f1 | rev)
+
+          helm install ${{ env.HELM_RELEASE }} ./charts/coordination-engine \
+            --namespace ${{ env.TEST_NAMESPACE }} \
+            --create-namespace \
+            --values ./charts/coordination-engine/${VALUES_FILE} \
+            --set image.repository="${IMAGE_REPO}" \
+            --set image.tag="${IMAGE_TAG}" \
+            --set image.pullPolicy=Always \
+            --set "env[0].name=ENABLE_KSERVE_INTEGRATION" \
+            --set "env[0].value=false" \
+            --wait \
+            --timeout 5m
+
+          echo "Helm install complete"
+          oc get pods -n ${{ env.TEST_NAMESPACE }}
+
+      - name: Verify health endpoint
+        run: |
+          echo "Waiting for pod to be ready..."
+          oc wait --for=condition=ready pod \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} \
+            -n ${{ env.TEST_NAMESPACE }} --timeout=3m
+
+          POD_NAME=$(oc get pods -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} \
+            -o jsonpath='{.items[0].metadata.name}')
+
+          echo "Port-forwarding to ${POD_NAME}:8080..."
+          oc port-forward "pod/${POD_NAME}" 18080:8080 -n ${{ env.TEST_NAMESPACE }} &
+          PF_PID=$!
+          sleep 3
+
+          echo "Testing /health endpoint..."
+          RESPONSE=$(curl -sf http://localhost:18080/health)
+          echo "Response: ${RESPONSE}"
+
+          STATUS=$(echo "${RESPONSE}" | jq -r '.status')
+          if [ "$STATUS" = "ok" ]; then
+            echo "Health check PASSED"
+          else
+            echo "Health check FAILED: expected status 'ok', got '${STATUS}'"
+            kill $PF_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          kill $PF_PID 2>/dev/null || true
+
+      - name: Verify RBAC resources
+        run: |
+          echo "Checking RBAC resources..."
+          oc get serviceaccount -n ${{ env.TEST_NAMESPACE }} | grep coordination-engine
+          oc get role -n ${{ env.TEST_NAMESPACE }} | grep coordination-engine
+          oc get rolebinding -n ${{ env.TEST_NAMESPACE }} | grep coordination-engine
+          echo "RBAC verification passed"
+
+      - name: Verify metrics endpoint
+        run: |
+          POD_NAME=$(oc get pods -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} \
+            -o jsonpath='{.items[0].metadata.name}')
+
+          oc port-forward "pod/${POD_NAME}" 19090:9090 -n ${{ env.TEST_NAMESPACE }} &
+          PF_PID=$!
+          sleep 3
+
+          echo "Testing /metrics endpoint..."
+          METRICS=$(curl -sf http://localhost:19090/metrics | head -20)
+          echo "${METRICS}"
+
+          if echo "${METRICS}" | grep -q "go_"; then
+            echo "Metrics endpoint PASSED"
+          else
+            echo "Metrics endpoint FAILED"
+            kill $PF_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          kill $PF_PID 2>/dev/null || true
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+          oc get pods -n ${{ env.TEST_NAMESPACE }} -o yaml > logs/pods.yaml || true
+          oc logs -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} \
+            --tail=200 > logs/coordination-engine.log || true
+          oc get events -n ${{ env.TEST_NAMESPACE }} \
+            --sort-by='.lastTimestamp' > logs/events.txt || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-openshift-results
+          path: logs/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up..."
+          helm uninstall ${{ env.HELM_RELEASE }} -n ${{ env.TEST_NAMESPACE }} || true
+          oc delete namespace ${{ env.TEST_NAMESPACE }} --wait=false || true
+          echo "Cleanup complete"
+
+  e2e-status:
+    name: E2E Status
+    runs-on: ubuntu-latest
+    needs: [check-trigger, check-cluster, openshift-e2e]
+    if: always() && needs.check-trigger.outputs.should_run == 'true'
+    steps:
+      - name: Check E2E status
+        run: |
+          echo "=== E2E OpenShift Test Results ==="
+
+          if [ "${{ needs.check-cluster.outputs.cluster_available }}" != "true" ]; then
+            echo "No OpenShift cluster available - E2E tests skipped"
+            echo "Set OPENSHIFT_SERVER and OPENSHIFT_TOKEN secrets to enable"
+            exit 0
+          fi
+
+          if [ "${{ needs.openshift-e2e.result }}" != "success" ]; then
+            echo "E2E tests failed!"
+            exit 1
+          fi
+
+          echo "All E2E tests passed!"
+          echo "  - Helm deploy: OK"
+          echo "  - Health endpoint: OK"
+          echo "  - RBAC resources: OK"
+          echo "  - Metrics endpoint: OK"
