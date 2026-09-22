@@ -180,8 +180,7 @@ jobs:
             --set image.repository="${IMAGE_REPO}" \
             --set image.tag="${IMAGE_TAG}" \
             --set image.pullPolicy=Always \
-            --set "env[0].name=ENABLE_KSERVE_INTEGRATION" \
-            --set "env[0].value=false" \
+            --set-string "env[3].value=false" \
             --wait \
             --timeout 5m
 

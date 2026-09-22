@@ -96,7 +96,11 @@ func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues m
 		"--timeout", "3m",
 	)
 	for k, v := range setValues {
-		args = append(args, "--set", fmt.Sprintf("%s=%s", k, v))
+		flag := "--set"
+		if strings.HasSuffix(k, ".value") && strings.Contains(k, "env[") {
+			flag = "--set-string"
+		}
+		args = append(args, flag, fmt.Sprintf("%s=%s", k, v))
 	}
 
 	s.T().Logf("Running: helm %s", strings.Join(args, " "))
