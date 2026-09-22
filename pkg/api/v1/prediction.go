@@ -393,7 +393,7 @@ func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *P
 
 // extractBaseMetrics extracts the 5 base metric values from an engineered feature vector.
 // The first 5 values correspond to the current values of cpu, memory, disk, net_in, net_out.
-func (h *PredictionHandler) extractBaseMetrics(features []float64) rawMetrics {
+func (h *PredictionHandler) extractBaseMetrics(featureVec []float64) rawMetrics {
 	rm := rawMetrics{
 		cpuUsage:    h.defaultCPURollingMean,
 		memoryUsage: h.defaultMemoryRollingMean,
@@ -401,12 +401,12 @@ func (h *PredictionHandler) extractBaseMetrics(features []float64) rawMetrics {
 		networkIn:   h.defaultNetworkIn,
 		networkOut:  h.defaultNetworkOut,
 	}
-	if len(features) >= 5 {
-		rm.cpuUsage = features[0]
-		rm.memoryUsage = features[1]
-		rm.diskUsage = features[2]
-		rm.networkIn = features[3]
-		rm.networkOut = features[4]
+	if len(featureVec) >= 5 {
+		rm.cpuUsage = featureVec[0]
+		rm.memoryUsage = featureVec[1]
+		rm.diskUsage = featureVec[2]
+		rm.networkIn = featureVec[3]
+		rm.networkOut = featureVec[4]
 	}
 	return rm
 }
