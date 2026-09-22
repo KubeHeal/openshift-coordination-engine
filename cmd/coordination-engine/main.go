@@ -34,7 +34,7 @@ import (
 
 var (
 	// Version is set during build with -ldflags
-	Version = "dev"
+	Version = "1.2.0"
 	// StartTime records when the application started
 	startTime time.Time
 )

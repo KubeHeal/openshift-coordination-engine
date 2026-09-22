@@ -20,9 +20,11 @@ make build
 # 3. Run unit tests
 make test
 
-# 4. Run locally (requires kubeconfig and Python ML service)
+# 4. Run locally (requires kubeconfig; KServe integration recommended)
 export KUBECONFIG=~/.kube/config
-export ML_SERVICE_URL=http://localhost:8080
+export ENABLE_KSERVE_INTEGRATION=true
+export KSERVE_NAMESPACE=self-healing-platform
+export KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
 make run
 
 # 5. Build container image
@@ -39,13 +41,16 @@ openshift-coordination-engine/
 ├── internal/                          # Private application code
 │   ├── detector/                      # ADR-041, ADR-040
 │   ├── coordination/                  # ADR-040
+│   ├── rca/                           # ADR-021 — deep RCA correlators
 │   ├── remediation/                   # ADR-039, ADR-038
+│   ├── storage/                       # ADR-014 — file-based incident persistence
 │   └── integrations/                  # External service clients
 ├── pkg/                               # Public API and models
-│   ├── api/v1/                        # REST API handlers
+│   ├── api/v1/                        # REST API handlers (including rca.go)
+│   ├── notifier/                      # ADR-022 — alert sinks (Slack, PagerDuty, Alertmanager)
 │   └── models/                        # Data structures
 ├── charts/                            # Helm chart for deployment
-├── docs/adrs/                         # Architecture decisions
+├── docs/adrs/                         # Architecture decisions (22 ADRs)
 ├── test/                              # Integration and e2e tests
 │   ├── integration/
 │   └── e2e/
@@ -208,9 +213,11 @@ make coverage
 # Build binary
 make build
 
-# Run with local Python ML service
-export ML_SERVICE_URL=http://localhost:8080
+# Run with KServe integration (recommended)
 export KUBECONFIG=~/.kube/config
+export ENABLE_KSERVE_INTEGRATION=true
+export KSERVE_NAMESPACE=self-healing-platform
+export KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
 ./bin/coordination-engine
 ```
 
@@ -233,8 +240,11 @@ The coordination engine is configured via environment variables:
 # Kubernetes configuration
 export KUBECONFIG=/path/to/kubeconfig
 
-# Python ML service endpoint
-export ML_SERVICE_URL=http://aiops-ml-service:8080
+# KServe integration (recommended)
+export ENABLE_KSERVE_INTEGRATION=true
+export KSERVE_NAMESPACE=self-healing-platform
+export KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
+export KSERVE_PREDICTIVE_ANALYTICS_SERVICE=predictive-analytics-predictor
 
 # ArgoCD API endpoint (optional, detected from cluster if not set)
 export ARGOCD_API_URL=https://argocd-server:443
@@ -247,6 +257,19 @@ export PORT=8080
 
 # Metrics port
 export METRICS_PORT=9090
+
+# Incident persistence (optional)
+export DATA_DIR=/var/lib/kubeheal/incidents
+export KUBEHEAL_MAX_STORED_INCIDENTS=1000
+
+# Alert sinks (optional, empty = disabled)
+export KUBEHEAL_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+export KUBEHEAL_PAGERDUTY_ROUTING_KEY=...
+export KUBEHEAL_ALERTMANAGER_URL=http://alertmanager.openshift-monitoring.svc:9093
+export KUBEHEAL_ALERT_SEVERITY_THRESHOLD=critical
+
+# Legacy ML service (deprecated, use KServe instead)
+# export ML_SERVICE_URL=http://aiops-ml-service:8080
 ```
 
 ## Integration with Python ML Service

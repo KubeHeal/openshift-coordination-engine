@@ -21,6 +21,22 @@ resources:
     memory: "512Mi"
     cpu: "500m"
 
+# Pod security context — let OpenShift assign UIDs from the namespace range
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: null
+  fsGroup: null
+
+# Container security context — OpenShift restricted-v2 compatible
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
+
 # Environment variables
 env:
   - name: LOG_LEVEL
@@ -51,3 +67,7 @@ env:
   # Prometheus integration for real-time metrics (ADR-014)
   - name: PROMETHEUS_URL
     value: "https://thanos-querier.openshift-monitoring.svc:9091"
+
+# Disable KServe health check job (no KServe on E2E cluster)
+kserve:
+  enabled: false

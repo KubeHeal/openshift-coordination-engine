@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-22
+
 ### Added
 - **File-based incident persistence** ([#70](https://github.com/KubeHeal/openshift-coordination-engine/issues/70)): Each incident is now persisted as an individual JSON file (`<id>.json`) under `DATA_DIR` (default: `/var/lib/kubeheal/incidents`). Incidents are loaded newest-first on startup and flushed on SIGTERM for graceful shutdown. A configurable `KUBEHEAL_MAX_STORED_INCIDENTS` env var (default: 10000) caps the on-disk collection, evicting resolved incidents first. Helm `values.yaml` updated with persistence env vars and mount path. ADR-014 Phase 3 marked as Implemented.
 
@@ -19,13 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Feature contract mismatch** ([#58](https://github.com/KubeHeal/openshift-coordination-engine/issues/58)): `CurrentMetrics` in the `/api/v1/predict` response now includes `disk_usage`, `network_in`, and `network_out` fields, matching the 5 base metrics sent to the predictive-analytics model. API consumers (MCP server) can now see all metric values used for predictions. Updated API-CONTRACT.md and ADR-016 to reflect the corrected 5-feature contract.
 
-### Planned — v1.2.0 (Tracked Issues)
-- OpenAPI/Swagger spec generation via `swaggo/swag` — [#71](https://github.com/KubeHeal/openshift-coordination-engine/issues/71)
-
-### Planned — Infrastructure
-- CI gate: verify GA on v1.0.0 + v1.1.0 tags, enforce branch protection — [#68](https://github.com/KubeHeal/openshift-coordination-engine/issues/68)
-- RELEASE.md: versioning policy and Quay release checklist — [#69](https://github.com/KubeHeal/openshift-coordination-engine/issues/69)
-- OCP 4.21 support: add `release-4.21` branch, update CI matrix, validate on Kubernetes 1.34; move 4.18 to maintenance-only
+### Infrastructure
+- **OCP 4.22 support** ([#81](https://github.com/KubeHeal/openshift-coordination-engine/issues/81)): CI matrix, Helm values, and release branches updated for OpenShift 4.22 / Kubernetes 1.35. Version support window shifted to 4.20 / 4.21 / 4.22.
+- **Dual E2E testing** ([#92](https://github.com/KubeHeal/openshift-coordination-engine/issues/92)): Tier 1 (Kind, CI-gated) and Tier 2 (OpenShift, release/manual) E2E test infrastructure.
+- **Cross-repo release checklist** ([#93](https://github.com/KubeHeal/openshift-coordination-engine/issues/93)): Documented coordination-engine → kubeheal-operator → OperatorHub release sequence.
+- **Documentation audit and DESIGN_DOC.md** ([#96](https://github.com/KubeHeal/openshift-coordination-engine/issues/96)): Comprehensive arc42 Software Design Document covering all 12 sections.
+- **Security remediation** ([#94](https://github.com/KubeHeal/openshift-coordination-engine/issues/94), [#89](https://github.com/KubeHeal/openshift-coordination-engine/issues/89)): Bumped `golang.org/x/net`, `golang.org/x/text`, Go stdlib, and base image to resolve Trivy alerts.
 
 ## [1.1.0] - 2026-04-21
 
@@ -68,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - CI pipeline now uses Go 1.24 to match `go.mod` toolchain requirement (previously pinned to 1.21)
 
-[Unreleased]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/KubeHeal/openshift-coordination-engine/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/KubeHeal/openshift-coordination-engine/releases/tag/v1.0.0
