@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **File-based incident persistence** ([#70](https://github.com/KubeHeal/openshift-coordination-engine/issues/70)): Each incident is now persisted as an individual JSON file (`<id>.json`) under `DATA_DIR` (default: `/var/lib/kubeheal/incidents`). Incidents are loaded newest-first on startup and flushed on SIGTERM for graceful shutdown. A configurable `KUBEHEAL_MAX_STORED_INCIDENTS` env var (default: 10000) caps the on-disk collection, evicting resolved incidents first. Helm `values.yaml` updated with persistence env vars and mount path. ADR-014 Phase 3 marked as Implemented.
+
 ### Fixed
 - **Feature contract mismatch** ([#58](https://github.com/KubeHeal/openshift-coordination-engine/issues/58)): `CurrentMetrics` in the `/api/v1/predict` response now includes `disk_usage`, `network_in`, and `network_out` fields, matching the 5 base metrics sent to the predictive-analytics model. API consumers (MCP server) can now see all metric values used for predictions. Updated API-CONTRACT.md and ADR-016 to reflect the corrected 5-feature contract.
 
 ### Planned — v1.2.0 (Tracked Issues)
-- File-based incident persistence for ML training dataset — [#70](https://github.com/KubeHeal/openshift-coordination-engine/issues/70) `good first issue`
 - OpenAPI/Swagger spec generation via `swaggo/swag` — [#71](https://github.com/KubeHeal/openshift-coordination-engine/issues/71)
 - Deep RCA v2 endpoint (Istio + NetworkPolicy + pod events) — [#72](https://github.com/KubeHeal/openshift-coordination-engine/issues/72)
 
