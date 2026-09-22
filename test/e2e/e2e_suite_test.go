@@ -58,6 +58,16 @@ func (s *E2ETestSuite) SetupSuite() {
 	s.clientset = clientset
 }
 
+// TearDownSuite runs once after all tests to clean up cluster resources.
+func (s *E2ETestSuite) TearDownSuite() {
+	if s.clientset == nil {
+		return
+	}
+	s.T().Log("Suite cleanup: uninstalling Helm release and deleting namespace")
+	_ = s.helmUninstall("ce-e2e", "coordination-engine-e2e")
+	s.deleteNamespace("coordination-engine-e2e")
+}
+
 // TestE2ESuite runs the e2e test suite
 func TestE2ESuite(t *testing.T) {
 	suite.Run(t, new(E2ETestSuite))
@@ -158,8 +168,9 @@ func (s *E2ETestSuite) portForwardAndGet(namespace, podName string, containerPor
 		fmt.Sprintf("%d:%d", localPort, containerPort),
 		"-n", namespace,
 	)
+	var stderrBuf strings.Builder
 	pfCmd.Stdout = io.Discard
-	pfCmd.Stderr = io.Discard
+	pfCmd.Stderr = &stderrBuf
 	if err := pfCmd.Start(); err != nil {
 		return 0, nil, fmt.Errorf("failed to start port-forward: %w", err)
 	}
@@ -168,23 +179,27 @@ func (s *E2ETestSuite) portForwardAndGet(namespace, podName string, containerPor
 		_ = pfCmd.Wait()
 	}()
 
-	// Wait for port-forward to be ready
-	time.Sleep(2 * time.Second)
+	// Wait for port-forward to be ready — ROSA needs more time than Kind
+	time.Sleep(5 * time.Second)
 
 	url := fmt.Sprintf("http://localhost:%d%s", localPort, path)
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	var lastErr error
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 10; i++ {
 		resp, err := client.Get(url)
 		if err != nil {
 			lastErr = err
-			time.Sleep(1 * time.Second)
+			time.Sleep(2 * time.Second)
 			continue
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		return resp.StatusCode, body, nil
+	}
+	pfStderr := stderrBuf.String()
+	if pfStderr != "" {
+		s.T().Logf("port-forward stderr: %s", pfStderr)
 	}
 	return 0, nil, fmt.Errorf("GET %s failed after retries: %w", url, lastErr)
 }

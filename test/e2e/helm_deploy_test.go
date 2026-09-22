@@ -24,17 +24,13 @@ func (s *E2ETestSuite) TestHelmDeployAndHealthCheck() {
 		s.T().Skip("Clientset not initialized")
 	}
 
-	// Cleanup from any previous failed run
-	_ = s.helmUninstall(helmReleaseName, testNamespace)
-	s.deleteNamespace(testNamespace)
-
 	image := getE2EImage()
 	s.T().Logf("Using E2E image: %s", image)
 
 	// Parse image into repository:tag
 	repo, tag := parseImage(image)
 
-	// Install the Helm chart
+	// Install (or upgrade) the Helm chart — upgrade --install is idempotent
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
 		"image.repository": repo,
 		"image.tag":        tag,
@@ -47,15 +43,10 @@ func (s *E2ETestSuite) TestHelmDeployAndHealthCheck() {
 		"env[1].value":     "8080",
 		"env[2].name":      "ENABLE_KSERVE_INTEGRATION",
 		"env[2].value":     "false",
+		"env[3].name":      "NAMESPACE",
+		"env[3].value":     testNamespace,
 	})
 	s.Require().NoError(err, "Helm install failed")
-
-	// Ensure cleanup runs even if test fails
-	defer func() {
-		s.T().Log("Cleaning up Helm release and namespace...")
-		_ = s.helmUninstall(helmReleaseName, testNamespace)
-		s.deleteNamespace(testNamespace)
-	}()
 
 	// Wait for deployment to be ready
 	err = s.waitForDeployment(testNamespace, deploymentName, 3*time.Minute)
@@ -78,29 +69,24 @@ func (s *E2ETestSuite) TestHelmDeployRBACResources() {
 		s.T().Skip("Clientset not initialized")
 	}
 
-	// Cleanup + install
-	_ = s.helmUninstall(helmReleaseName, testNamespace)
-	s.deleteNamespace(testNamespace)
-
 	image := getE2EImage()
 	repo, tag := parseImage(image)
 
+	// Override serviceAccount.name to empty so the template uses fullname
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
-		"image.repository": repo,
-		"image.tag":        tag,
-		"image.pullPolicy": "IfNotPresent",
-		"kserve.enabled":   "false",
-		"env[0].name":      "ENABLE_KSERVE_INTEGRATION",
-		"env[0].value":     "false",
+		"image.repository":   repo,
+		"image.tag":          tag,
+		"image.pullPolicy":   "IfNotPresent",
+		"kserve.enabled":     "false",
+		"serviceAccount.name": "",
+		"env[0].name":        "ENABLE_KSERVE_INTEGRATION",
+		"env[0].value":       "false",
+		"env[1].name":        "NAMESPACE",
+		"env[1].value":       testNamespace,
 	})
 	s.Require().NoError(err, "Helm install failed")
 
-	defer func() {
-		_ = s.helmUninstall(helmReleaseName, testNamespace)
-		s.deleteNamespace(testNamespace)
-	}()
-
-	// Verify ServiceAccount exists
+	// ServiceAccount name follows fullname template: {release}-coordination-engine
 	saName := fmt.Sprintf("%s-coordination-engine", helmReleaseName)
 	sa, err := s.clientset.CoreV1().ServiceAccounts(testNamespace).Get(s.ctx, saName, metav1.GetOptions{})
 	s.Require().NoError(err, "ServiceAccount not found: %s", saName)
@@ -125,27 +111,26 @@ func (s *E2ETestSuite) TestHelmDeployMetricsPort() {
 		s.T().Skip("Clientset not initialized")
 	}
 
-	// Cleanup + install
-	_ = s.helmUninstall(helmReleaseName, testNamespace)
-	s.deleteNamespace(testNamespace)
-
 	image := getE2EImage()
 	repo, tag := parseImage(image)
 
+	// Use same values as TestHelmDeployAndHealthCheck to avoid triggering a rollout
 	err := s.helmInstall(helmChartPath, helmReleaseName, testNamespace, map[string]string{
 		"image.repository": repo,
 		"image.tag":        tag,
 		"image.pullPolicy": "IfNotPresent",
+		"replicaCount":     "1",
 		"kserve.enabled":   "false",
-		"env[0].name":      "ENABLE_KSERVE_INTEGRATION",
-		"env[0].value":     "false",
+		"env[0].name":      "LOG_LEVEL",
+		"env[0].value":     "debug",
+		"env[1].name":      "PORT",
+		"env[1].value":     "8080",
+		"env[2].name":      "ENABLE_KSERVE_INTEGRATION",
+		"env[2].value":     "false",
+		"env[3].name":      "NAMESPACE",
+		"env[3].value":     testNamespace,
 	})
 	s.Require().NoError(err, "Helm install failed")
-
-	defer func() {
-		_ = s.helmUninstall(helmReleaseName, testNamespace)
-		s.deleteNamespace(testNamespace)
-	}()
 
 	// Wait for deployment
 	err = s.waitForDeployment(testNamespace, deploymentName, 3*time.Minute)
