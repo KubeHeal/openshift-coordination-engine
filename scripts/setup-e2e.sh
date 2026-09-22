@@ -437,12 +437,14 @@ spec:
     spec:
       containers:
       - name: mock-predictor
-        image: nginx:alpine
+        image: nginxinc/nginx-unprivileged:alpine
         ports:
         - containerPort: 8080
         volumeMounts:
         - name: nginx-config
           mountPath: /etc/nginx/conf.d
+        - name: tmp
+          mountPath: /tmp
         resources:
           requests:
             cpu: 10m
@@ -454,6 +456,8 @@ spec:
       - name: nginx-config
         configMap:
           name: kserve-mock-nginx-config
+      - name: tmp
+        emptyDir: {}
 DEPLOYMENT
 
         $KUBECTL apply -n "$NAMESPACE" -f - <<SERVICE
@@ -488,7 +492,7 @@ SERVICE
         local SVC_NAME="${MODEL}-predictor"
         local POD=$($KUBECTL get pods -n "$NAMESPACE" -l "app=$SVC_NAME" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
         if [ -n "$POD" ]; then
-            RESULT=$($KUBECTL exec -n "$NAMESPACE" "$POD" -- wget -qO- http://localhost:8080/v1/models/"$MODEL" 2>/dev/null || echo "")
+            RESULT=$($KUBECTL exec -n "$NAMESPACE" "$POD" -- curl -sf http://localhost:8080/v1/models/"$MODEL" 2>/dev/null || echo "")
             if echo "$RESULT" | grep -q "ready"; then
                 ok "  $SVC_NAME responds on /v1/models/$MODEL"
             else

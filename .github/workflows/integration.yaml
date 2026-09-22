@@ -194,7 +194,6 @@ jobs:
         run: |
           REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
           if [ -z "$REGISTRY" ]; then
-            # Expose the internal registry if route doesn't exist
             oc patch configs.imageregistry.operator.openshift.io/cluster --type=merge -p '{"spec":{"defaultRoute":true}}' 2>/dev/null || true
             sleep 10
             REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
@@ -204,35 +203,46 @@ jobs:
             echo "::warning::Could not expose OpenShift internal registry - skipping E2E"
             exit 0
           fi
+
+          # Push to a stable namespace that survives test namespace deletion
+          oc create namespace coordination-engine-images 2>/dev/null || true
           docker build -t coordination-engine:e2e-test .
-          docker tag coordination-engine:e2e-test "$REGISTRY/coordination-engine-e2e/coordination-engine:e2e-test"
+          docker tag coordination-engine:e2e-test "$REGISTRY/coordination-engine-images/coordination-engine:e2e-test"
           docker login -u $(oc whoami) -p $(oc whoami -t) "$REGISTRY"
-          docker push "$REGISTRY/coordination-engine-e2e/coordination-engine:e2e-test"
+          docker push "$REGISTRY/coordination-engine-images/coordination-engine:e2e-test"
+
+          # Grant the test namespace permission to pull from the images namespace
+          oc create namespace coordination-engine-e2e 2>/dev/null || true
+          oc policy add-role-to-group system:image-puller \
+            system:serviceaccounts:coordination-engine-e2e \
+            -n coordination-engine-images 2>/dev/null || true
+
           echo "image_pushed=true" >> $GITHUB_OUTPUT
-          echo "registry=$REGISTRY" >> $GITHUB_OUTPUT
 
       - name: Deploy KServe mocks for E2E
         if: steps.check_creds.outputs.has_creds == 'true' && steps.push_image.outputs.image_pushed == 'true'
         run: |
-          oc create namespace coordination-engine-e2e 2>/dev/null || true
-          bash scripts/setup-e2e.sh --setup-kserve-mocks || true
+          oc create namespace self-healing-platform 2>/dev/null || true
+          bash scripts/setup-e2e.sh --setup-kserve-mocks
         env:
-          NAMESPACE: coordination-engine-e2e
+          NAMESPACE: self-healing-platform
 
       - name: Run e2e tests on OpenShift
         if: steps.check_creds.outputs.has_creds == 'true' && steps.push_image.outputs.image_pushed == 'true'
         run: |
           export KUBECONFIG=$HOME/.kube/config
-          REGISTRY="${{ steps.push_image.outputs.registry }}"
-          E2E_IMAGE="image-registry.openshift-image-registry.svc:5000/coordination-engine-e2e/coordination-engine:e2e-test" \
+          E2E_IMAGE="image-registry.openshift-image-registry.svc:5000/coordination-engine-images/coordination-engine:e2e-test" \
             make test-e2e
 
       - name: Cleanup test resources
         if: always() && steps.check_creds.outputs.has_creds == 'true'
         run: |
-          # Clean up any test namespaces created during testing
+          # Clean up test namespaces and resources
+          helm uninstall ce-e2e -n coordination-engine-e2e 2>/dev/null || true
+          NAMESPACE=self-healing-platform bash scripts/setup-e2e.sh --destroy-kserve-mocks || true
           oc delete namespace coordination-engine-e2e --ignore-not-found=true
           oc delete namespace coordination-engine-test --ignore-not-found=true
+          oc delete namespace coordination-engine-images --ignore-not-found=true
 
       - name: Upload test results
         if: always()

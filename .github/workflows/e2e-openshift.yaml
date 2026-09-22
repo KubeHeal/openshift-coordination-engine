@@ -237,10 +237,30 @@ jobs:
       - name: Verify RBAC resources
         run: |
           echo "Checking RBAC resources..."
-          oc get serviceaccount -n ${{ env.TEST_NAMESPACE }} | grep coordination-engine
-          oc get role -n ${{ env.TEST_NAMESPACE }} | grep coordination-engine
-          oc get rolebinding -n ${{ env.TEST_NAMESPACE }} | grep coordination-engine
-          echo "RBAC verification passed"
+          echo "ServiceAccounts:"
+          oc get serviceaccount -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} -o name
+          echo "Roles:"
+          oc get role -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} -o name
+          echo "RoleBindings:"
+          oc get rolebinding -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} -o name
+
+          # Verify at least one of each exists
+          SA_COUNT=$(oc get serviceaccount -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} -o name | wc -l)
+          ROLE_COUNT=$(oc get role -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} -o name | wc -l)
+          RB_COUNT=$(oc get rolebinding -n ${{ env.TEST_NAMESPACE }} \
+            -l app.kubernetes.io/instance=${{ env.HELM_RELEASE }} -o name | wc -l)
+
+          if [ "$SA_COUNT" -ge 1 ] && [ "$ROLE_COUNT" -ge 1 ] && [ "$RB_COUNT" -ge 1 ]; then
+            echo "RBAC verification passed"
+          else
+            echo "RBAC verification FAILED: SA=$SA_COUNT Role=$ROLE_COUNT RoleBinding=$RB_COUNT"
+            exit 1
+          fi
 
       - name: Verify metrics endpoint
         run: |
