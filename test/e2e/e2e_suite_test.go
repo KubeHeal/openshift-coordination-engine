@@ -85,11 +85,13 @@ func getE2EImage() string {
 	return "coordination-engine:e2e-test"
 }
 
-// helmInstall runs helm install with the given parameters.
+// helmInstall runs helm upgrade --install with the given parameters.
+// Using upgrade --install avoids "release: already exists" errors from
+// prior runs that didn't fully clean up.
 func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues map[string]string) error {
-	args := make([]string, 0, 9+2*len(setValues))
+	args := make([]string, 0, 10+2*len(setValues))
 	args = append(args,
-		"install", release, chart,
+		"upgrade", "--install", release, chart,
 		"--namespace", namespace,
 		"--create-namespace",
 		"--wait",
