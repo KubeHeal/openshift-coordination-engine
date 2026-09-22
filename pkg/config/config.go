@@ -53,7 +53,8 @@ type Config struct {
 type FeatureEngineeringConfig struct {
 	// Enabled enables feature engineering for predictive-analytics model
 	// When true, the prediction handler builds 3200+ engineered features from Prometheus
-	// When false, only 4 raw features are sent (legacy behavior)
+	// When false, 5 raw features are sent matching the model's base metrics (Issue #58):
+	// cpu_usage, memory_usage, disk_usage, network_in, network_out
 	Enabled bool `json:"enabled"`
 
 	// LookbackHours is the number of hours to look back for historical data
