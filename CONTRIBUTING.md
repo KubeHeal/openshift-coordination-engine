@@ -521,6 +521,13 @@ EOF
 # Edit docs/adrs/README.md to add ADR-014 to index table
 ```
 
+## Release Process
+
+Only maintainers with push access to `main` and `release-4.x` branches can cut releases.
+The full process — versioning policy, branch strategy, and the step-by-step checklist — is
+documented in **[RELEASE.md](RELEASE.md)**. For the cross-repository sequence that includes
+the kubeheal-operator and OperatorHub submission, see **[RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md)**.
+
 ## Getting Help
 
 ### Resources
@@ -562,6 +569,8 @@ If you have questions or suggestions about this guide, please open an issue or s
 ---
 
 **Related Documentation**:
+- [Release Guide](RELEASE.md) — versioning policy, branch strategy, and step-by-step release checklist
+- [Release Checklist](RELEASE-CHECKLIST.md) — cross-repository release sequence (operator + OperatorHub)
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Architectural Decision Records](docs/adrs/README.md)
 - [API Contract](API-CONTRACT.md)
