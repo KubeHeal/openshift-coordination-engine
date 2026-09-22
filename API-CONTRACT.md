@@ -481,6 +481,70 @@ Analyze patterns in historical data.
 }
 ```
 
+#### `POST /api/v1/investigate/rca`
+Deep root-cause analysis correlating Istio VirtualService misconfigs, NetworkPolicy violations, and pod events (ADR-021, Issue #72).
+
+**Request Body**:
+```json
+{
+  "service": "my-app",
+  "namespace": "production",
+  "start_time": "2026-09-22T10:00:00Z",
+  "end_time": "2026-09-22T11:00:00Z"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `service` | string | Yes | Name of the service to investigate |
+| `namespace` | string | Yes | Kubernetes namespace |
+| `start_time` | string (RFC 3339) | Yes | Start of investigation window |
+| `end_time` | string (RFC 3339) | Yes | End of investigation window (max 7 days) |
+
+**Response** (200 OK):
+```json
+{
+  "status": "success",
+  "service": "my-app",
+  "namespace": "production",
+  "time_range": { "start": "...", "end": "..." },
+  "root_causes": [
+    {
+      "signal_type": "pod_event",
+      "description": "OOMKilled: Container exceeded memory limit on pod/my-app-abc123",
+      "evidence": {
+        "event_type": "Warning",
+        "reason": "OOMKilled",
+        "count": 3,
+        "message": "Container exceeded memory limit"
+      },
+      "confidence": 0.92,
+      "remediation_steps": [
+        "Increase container memory limits",
+        "Profile application for memory leaks"
+      ]
+    }
+  ],
+  "confidence_score": 0.89,
+  "affected_components": ["pod/my-app-abc123", "networkpolicy/deny-all"],
+  "istio_available": false,
+  "correlator_stats": [
+    { "name": "pod_events", "findings": 1, "duration_ms": 45 },
+    { "name": "network_policy", "findings": 0, "duration_ms": 32 },
+    { "name": "istio_virtual_service", "findings": 0, "duration_ms": 1 }
+  ]
+}
+```
+
+**Signal Types**: `pod_event`, `network_policy`, `istio_virtual_service`
+
+**Error Codes**: `INVALID_REQUEST`, `ANALYSIS_FAILED`
+
+**Notes**:
+- Istio correlation is optional — gracefully skipped when Istio CRDs are not installed.
+- All three correlators run in parallel with a 25-second timeout each.
+- Confidence scores range from 0.0 to 1.0 and are weighted by signal type.
+
 ## Compatibility Guarantees
 
 - MCP server continues to work unchanged

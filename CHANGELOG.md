@@ -12,12 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **OOMKill resource patching** ([#62](https://github.com/KubeHeal/openshift-coordination-engine/issues/62)): OOMKilled pod remediation now patches the owning Deployment's memory limits (default 2.5x, capped at `OOM_MEMORY_MAX_LIMIT`) instead of only deleting pods. Traverses Pod -> ReplicaSet -> Deployment ownership chain. Adds `self-healing.kubeheal.io/memory-increase` annotation for audit trail. Falls back to pod delete for orphan pods or non-Deployment workloads.
 
+- **Deep RCA v2 endpoint** ([#72](https://github.com/KubeHeal/openshift-coordination-engine/issues/72)): New `POST /api/v1/investigate/rca` endpoint correlates Istio VirtualService misconfigurations, Kubernetes NetworkPolicy violations, and pod event streams to produce a structured root-cause report. Three signal correlators run in parallel; Istio is optional and gracefully skipped when CRDs are absent. Composite confidence scoring weighted by signal type (events 0.40, netpol 0.30, istio 0.30). ADR-021 documents the design. RBAC extended with `networking.istio.io` read access.
+
 ### Fixed
 - **Feature contract mismatch** ([#58](https://github.com/KubeHeal/openshift-coordination-engine/issues/58)): `CurrentMetrics` in the `/api/v1/predict` response now includes `disk_usage`, `network_in`, and `network_out` fields, matching the 5 base metrics sent to the predictive-analytics model. API consumers (MCP server) can now see all metric values used for predictions. Updated API-CONTRACT.md and ADR-016 to reflect the corrected 5-feature contract.
 
 ### Planned — v1.2.0 (Tracked Issues)
 - OpenAPI/Swagger spec generation via `swaggo/swag` — [#71](https://github.com/KubeHeal/openshift-coordination-engine/issues/71)
-- Deep RCA v2 endpoint (Istio + NetworkPolicy + pod events) — [#72](https://github.com/KubeHeal/openshift-coordination-engine/issues/72)
 
 ### Planned — Infrastructure
 - CI gate: verify GA on v1.0.0 + v1.1.0 tags, enforce branch protection — [#68](https://github.com/KubeHeal/openshift-coordination-engine/issues/68)
