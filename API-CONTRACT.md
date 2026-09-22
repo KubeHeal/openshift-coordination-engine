@@ -382,42 +382,74 @@ Detect anomalies in metrics data.
 }
 ```
 
-#### `POST /api/v1/prediction/predict`
-Predict future issues based on current state.
+#### `POST /api/v1/predict`
+Get time-specific resource usage predictions using KServe ML models and Prometheus metrics.
+
+Sends 5 base metrics (`cpu_usage`, `memory_usage`, `disk_usage`, `network_in`, `network_out`) to the `predictive-analytics` model. When feature engineering is enabled (`ENABLE_FEATURE_ENGINEERING=true`, the default), a 3200+ engineered feature vector is built from Prometheus range queries instead.
 
 **Request Body**:
 ```json
 {
+  "hour": 15,
+  "day_of_week": 3,
   "namespace": "production",
-  "resource": "Deployment/payment-service",
-  "current_state": {
-    "replicas": 3,
-    "cpu_usage": 0.75,
-    "memory_usage": 0.80,
-    "error_rate": 0.02
-  },
-  "prediction_horizon": "1h"
+  "deployment": "payment-service",
+  "pod": "",
+  "scope": "deployment",
+  "model": "predictive-analytics"
 }
 ```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `hour` | int | Yes | Hour of day, 0-23 |
+| `day_of_week` | int | Yes | Day of week, 0=Monday, 6=Sunday |
+| `namespace` | string | No | Namespace filter |
+| `deployment` | string | No | Deployment filter |
+| `pod` | string | No | Pod filter |
+| `scope` | string | No | One of: `pod`, `deployment`, `namespace`, `cluster` (default: inferred) |
+| `model` | string | No | KServe model name (default: `predictive-analytics`) |
 
 **Response** (200 OK):
 ```json
 {
-  "predictions": [
-    {
-      "issue_type": "memory_pressure",
-      "probability": 0.85,
-      "expected_time": "45m",
-      "severity": "high",
-      "recommended_actions": [
-        "increase_memory_limit",
-        "add_horizontal_scaling"
-      ]
-    }
-  ],
-  "confidence": 0.82
+  "status": "success",
+  "scope": "deployment",
+  "target": "production/payment-service",
+  "predictions": {
+    "cpu_percent": 74.5,
+    "memory_percent": 81.2
+  },
+  "current_metrics": {
+    "cpu_rolling_mean": 68.2,
+    "memory_rolling_mean": 74.5,
+    "disk_usage": 0.45,
+    "network_in": 0.10,
+    "network_out": 0.08,
+    "timestamp": "2026-01-12T14:30:00Z",
+    "time_range": "24h"
+  },
+  "model_info": {
+    "name": "predictive-analytics",
+    "version": "1.0.0",
+    "confidence": 0.92
+  },
+  "target_time": {
+    "hour": 15,
+    "day_of_week": 3,
+    "iso_timestamp": "2026-01-15T15:00:00Z"
+  }
 }
 ```
+
+**Error Responses**:
+
+| Code | HTTP Status | Condition |
+|------|-------------|-----------|
+| `INVALID_REQUEST` | 400 | Malformed JSON, invalid hour/day_of_week, bad scope |
+| `KSERVE_UNAVAILABLE` | 503 | KServe integration not configured |
+| `MODEL_NOT_FOUND` | 503 | Requested model not registered in KServe |
+| `PREDICTION_FAILED` | 503 | Model returned an error or empty response |
 
 #### `POST /api/v1/pattern/analyze`
 Analyze patterns in historical data.
@@ -448,6 +480,103 @@ Analyze patterns in historical data.
   ]
 }
 ```
+
+#### `POST /api/v1/investigate/rca`
+Deep root-cause analysis correlating Istio VirtualService misconfigs, NetworkPolicy violations, and pod events (ADR-021, Issue #72).
+
+**Request Body**:
+```json
+{
+  "service": "my-app",
+  "namespace": "production",
+  "start_time": "2026-09-22T10:00:00Z",
+  "end_time": "2026-09-22T11:00:00Z"
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `service` | string | Yes | Name of the service to investigate |
+| `namespace` | string | Yes | Kubernetes namespace |
+| `start_time` | string (RFC 3339) | Yes | Start of investigation window |
+| `end_time` | string (RFC 3339) | Yes | End of investigation window (max 7 days) |
+
+**Response** (200 OK):
+```json
+{
+  "status": "success",
+  "service": "my-app",
+  "namespace": "production",
+  "time_range": { "start": "...", "end": "..." },
+  "root_causes": [
+    {
+      "signal_type": "pod_event",
+      "description": "OOMKilled: Container exceeded memory limit on pod/my-app-abc123",
+      "evidence": {
+        "event_type": "Warning",
+        "reason": "OOMKilled",
+        "count": 3,
+        "message": "Container exceeded memory limit"
+      },
+      "confidence": 0.92,
+      "remediation_steps": [
+        "Increase container memory limits",
+        "Profile application for memory leaks"
+      ]
+    }
+  ],
+  "confidence_score": 0.89,
+  "affected_components": ["pod/my-app-abc123", "networkpolicy/deny-all"],
+  "istio_available": false,
+  "correlator_stats": [
+    { "name": "pod_events", "findings": 1, "duration_ms": 45 },
+    { "name": "network_policy", "findings": 0, "duration_ms": 32 },
+    { "name": "istio_virtual_service", "findings": 0, "duration_ms": 1 }
+  ]
+}
+```
+
+**Signal Types**: `pod_event`, `network_policy`, `istio_virtual_service`
+
+**Error Codes**: `INVALID_REQUEST`, `ANALYSIS_FAILED`
+
+**Notes**:
+- Istio correlation is optional — gracefully skipped when Istio CRDs are not installed.
+- All three correlators run in parallel with a 25-second timeout each.
+- Confidence scores range from 0.0 to 1.0 and are weighted by signal type.
+
+## Alert Notification Sinks (ADR-022, Issue #75)
+
+When the anomaly analysis endpoint (`POST /api/v1/anomalies/analyze`) detects
+anomalies at or above the configured severity threshold, alerts are dispatched
+asynchronously to all configured sinks.  Dispatching never delays the HTTP
+response.
+
+### Supported Sinks
+
+| Sink | Env Var | Protocol |
+|---|---|---|
+| Slack | `KUBEHEAL_SLACK_WEBHOOK_URL` | POST to incoming webhook URL |
+| PagerDuty | `KUBEHEAL_PAGERDUTY_ROUTING_KEY` | POST to Events API v2 (`/v2/enqueue`) |
+| Alertmanager | `KUBEHEAL_ALERTMANAGER_URL` | POST to `{url}/api/v2/alerts` |
+
+### Configuration
+
+| Env Var | Default | Description |
+|---|---|---|
+| `KUBEHEAL_SLACK_WEBHOOK_URL` | (empty) | Slack incoming webhook URL; empty = disabled |
+| `KUBEHEAL_PAGERDUTY_ROUTING_KEY` | (empty) | PagerDuty Events API v2 routing key; empty = disabled |
+| `KUBEHEAL_ALERTMANAGER_URL` | (empty) | Alertmanager base URL; empty = disabled |
+| `KUBEHEAL_ALERT_SEVERITY_THRESHOLD` | `critical` | Minimum severity to trigger alerts (`info`, `warning`, `critical`) |
+
+### Behavior
+
+- Alerts are **fire-and-forget**: sink errors are logged at WARN level but
+  never propagated to the API response.
+- Each sink runs in its own goroutine with a 10-second timeout.
+- If no sinks are configured, the dispatcher is a no-op.
+- Severity threshold comparison: `info < warning < critical`.  Setting the
+  threshold to `warning` dispatches alerts for both `warning` and `critical`.
 
 ## Compatibility Guarantees
 

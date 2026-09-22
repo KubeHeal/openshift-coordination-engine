@@ -2,11 +2,16 @@ package remediation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/sirupsen/logrus"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
@@ -14,15 +19,29 @@ import (
 
 // ManualRemediator handles manually-deployed application remediation
 type ManualRemediator struct {
-	clientset kubernetes.Interface
-	log       *logrus.Logger
+	clientset     kubernetes.Interface
+	log           *logrus.Logger
+	oomMultiplier float64           // memory limit multiplier for OOMKill remediation
+	oomMaxLimit   resource.Quantity // ceiling for memory limit increases
 }
 
-// NewManualRemediator creates a new manual remediator
+// NewManualRemediator creates a new manual remediator with default OOM settings.
 func NewManualRemediator(clientset kubernetes.Interface, log *logrus.Logger) *ManualRemediator {
 	return &ManualRemediator{
-		clientset: clientset,
-		log:       log,
+		clientset:     clientset,
+		log:           log,
+		oomMultiplier: 2.5,
+		oomMaxLimit:   resource.MustParse("2Gi"),
+	}
+}
+
+// SetOOMConfig overrides the default OOM remediation parameters.
+func (mr *ManualRemediator) SetOOMConfig(multiplier float64, maxLimit string) {
+	if multiplier > 0 {
+		mr.oomMultiplier = multiplier
+	}
+	if maxLimit != "" {
+		mr.oomMaxLimit = resource.MustParse(maxLimit)
 	}
 }
 
@@ -109,35 +128,217 @@ func (mr *ManualRemediator) remediateImagePull(ctx context.Context, issue *model
 	return fmt.Errorf("ImagePullBackOff requires manual intervention: verify image exists and pull secrets are configured")
 }
 
-// remediateOOM handles OOMKilled pods
+// remediateOOM handles OOMKilled pods by patching the owning Deployment's
+// memory limits.  If no Deployment can be resolved, it falls back to
+// deleting the pod (the previous behaviour).
 func (mr *ManualRemediator) remediateOOM(ctx context.Context, issue *models.Issue) error {
 	mr.log.WithFields(logrus.Fields{
 		"namespace": issue.Namespace,
 		"pod":       issue.ResourceName,
-	}).Warn("OOMKilled detected: considering memory limit increase")
+	}).Warn("OOMKilled detected: attempting to increase memory limits on owning Deployment")
 
-	// Get pod to check current limits
+	// 1. Get the pod.
 	pod, err := mr.clientset.CoreV1().Pods(issue.Namespace).Get(ctx, issue.ResourceName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get pod: %w", err)
 	}
 
-	// Log current resource limits
-	for i := range pod.Spec.Containers {
-		mr.log.WithFields(logrus.Fields{
-			"container":      pod.Spec.Containers[i].Name,
-			"memory_limit":   pod.Spec.Containers[i].Resources.Limits.Memory().String(),
-			"memory_request": pod.Spec.Containers[i].Resources.Requests.Memory().String(),
-		}).Info("Current container resource limits")
+	// 2. Resolve the owning Deployment.
+	deployment, resolveErr := mr.resolveOwnerDeployment(ctx, issue.Namespace, pod)
+	if resolveErr != nil || deployment == nil {
+		mr.log.WithField("reason", resolveErr).Warn(
+			"Could not resolve owning Deployment, falling back to pod delete")
+		delErr := mr.clientset.CoreV1().Pods(issue.Namespace).Delete(ctx, issue.ResourceName, metav1.DeleteOptions{})
+		if delErr != nil {
+			return fmt.Errorf("failed to delete pod: %w", delErr)
+		}
+		mr.log.Warn("Pod deleted, but OOM may recur without memory limit increase")
+		return nil
 	}
 
-	// Delete pod to restart (may OOM again)
-	err = mr.clientset.CoreV1().Pods(issue.Namespace).Delete(ctx, issue.ResourceName, metav1.DeleteOptions{})
+	// 3. Find the target container (first OOMKilled, or first container).
+	containerIdx := mr.findOOMKilledContainer(pod)
+
+	container := deployment.Spec.Template.Spec.Containers[containerIdx]
+	currentLimit := container.Resources.Limits.Memory()
+
+	if currentLimit == nil || currentLimit.IsZero() {
+		mr.log.Warn("Container has no memory limit set, falling back to pod delete")
+		if delErr := mr.clientset.CoreV1().Pods(issue.Namespace).Delete(ctx, issue.ResourceName, metav1.DeleteOptions{}); delErr != nil {
+			return fmt.Errorf("failed to delete pod (no memory limit set): %w", delErr)
+		}
+		return nil
+	}
+
+	// 4. Calculate new limits.
+	oldLimitBytes := currentLimit.Value()
+	newLimitBytes := int64(float64(oldLimitBytes) * mr.oomMultiplier)
+	maxBytes := mr.oomMaxLimit.Value()
+	if newLimitBytes > maxBytes {
+		newLimitBytes = maxBytes
+	}
+	newLimit := resource.NewQuantity(newLimitBytes, resource.BinarySI)
+	newRequestBytes := int64(float64(newLimitBytes) * 0.8)
+	newRequest := resource.NewQuantity(newRequestBytes, resource.BinarySI)
+
+	mr.log.WithFields(logrus.Fields{
+		"deployment":  deployment.Name,
+		"container":   container.Name,
+		"old_limit":   currentLimit.String(),
+		"new_limit":   newLimit.String(),
+		"new_request": newRequest.String(),
+	}).Info("Patching Deployment memory limits")
+
+	// 5. Build and apply StrategicMergePatch.
+	if patchErr := mr.patchDeploymentMemory(
+		ctx, deployment, containerIdx,
+		newLimit, newRequest, currentLimit.String(), newLimit.String(),
+	); patchErr != nil {
+		return fmt.Errorf("failed to patch deployment memory limits: %w", patchErr)
+	}
+
+	mr.log.WithFields(logrus.Fields{
+		"deployment": deployment.Name,
+		"old_limit":  currentLimit.String(),
+		"new_limit":  newLimit.String(),
+	}).Info("Deployment memory limits patched — Deployment controller will roll out new pods")
+
+	return nil
+}
+
+// resolveOwnerDeployment walks Pod -> OwnerRef(ReplicaSet) -> OwnerRef(Deployment).
+func (mr *ManualRemediator) resolveOwnerDeployment(
+	ctx context.Context, namespace string, pod *corev1.Pod,
+) (*appsv1.Deployment, error) {
+	// Find a ReplicaSet owner.
+	rsName := ""
+	for _, ref := range pod.OwnerReferences {
+		if ref.Kind == "ReplicaSet" {
+			rsName = ref.Name
+			break
+		}
+	}
+	if rsName == "" {
+		return nil, fmt.Errorf("pod %s has no ReplicaSet owner", pod.Name)
+	}
+
+	rs, err := mr.clientset.AppsV1().ReplicaSets(namespace).Get(ctx, rsName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to delete pod: %w", err)
+		return nil, fmt.Errorf("failed to get ReplicaSet %s: %w", rsName, err)
 	}
 
-	mr.log.Warn("Pod deleted, but OOM may recur without memory limit increase")
+	// Find a Deployment owner on the ReplicaSet.
+	deployName := ""
+	for _, ref := range rs.OwnerReferences {
+		if ref.Kind == "Deployment" {
+			deployName = ref.Name
+			break
+		}
+	}
+	if deployName == "" {
+		return nil, fmt.Errorf("ReplicaSet %s has no Deployment owner", rsName)
+	}
+
+	deploy, err := mr.clientset.AppsV1().Deployments(namespace).Get(ctx, deployName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Deployment %s: %w", deployName, err)
+	}
+
+	return deploy, nil
+}
+
+// findOOMKilledContainer returns the index of the first OOMKilled container in
+// the pod's status, or 0 if none can be identified.
+func (mr *ManualRemediator) findOOMKilledContainer(pod *corev1.Pod) int {
+	for i := range pod.Status.ContainerStatuses {
+		cs := &pod.Status.ContainerStatuses[i]
+		if cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled" {
+			return i
+		}
+		if cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled" {
+			return i
+		}
+	}
+	return 0 // default to first container
+}
+
+// deploymentMemoryPatch is the JSON structure for StrategicMergePatch.
+type deploymentMemoryPatch struct {
+	Metadata patchMetadata `json:"metadata"`
+	Spec     patchSpec     `json:"spec"`
+}
+
+type patchMetadata struct {
+	Annotations map[string]string `json:"annotations"`
+}
+
+type patchSpec struct {
+	Template patchTemplate `json:"template"`
+}
+
+type patchTemplate struct {
+	Spec patchPodSpec `json:"spec"`
+}
+
+type patchPodSpec struct {
+	Containers []patchContainer `json:"containers"`
+}
+
+type patchContainer struct {
+	Name      string         `json:"name"`
+	Resources patchResources `json:"resources"`
+}
+
+type patchResources struct {
+	Limits   map[string]string `json:"limits"`
+	Requests map[string]string `json:"requests"`
+}
+
+// patchDeploymentMemory applies a StrategicMergePatch to update the target
+// container's memory limits and adds remediation annotations.
+func (mr *ManualRemediator) patchDeploymentMemory(
+	ctx context.Context,
+	deploy *appsv1.Deployment,
+	containerIdx int,
+	newLimit, newRequest *resource.Quantity,
+	oldLimitStr, newLimitStr string,
+) error {
+	containerName := deploy.Spec.Template.Spec.Containers[containerIdx].Name
+
+	patch := deploymentMemoryPatch{
+		Metadata: patchMetadata{
+			Annotations: map[string]string{
+				"self-healing.kubeheal.io/last-remediation": time.Now().Format(time.RFC3339),
+				"self-healing.kubeheal.io/memory-increase":  oldLimitStr + "->" + newLimitStr,
+			},
+		},
+		Spec: patchSpec{
+			Template: patchTemplate{
+				Spec: patchPodSpec{
+					Containers: []patchContainer{
+						{
+							Name: containerName,
+							Resources: patchResources{
+								Limits:   map[string]string{"memory": newLimit.String()},
+								Requests: map[string]string{"memory": newRequest.String()},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	if _, patchErr := mr.clientset.AppsV1().Deployments(deploy.Namespace).Patch(
+		ctx, deploy.Name, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{},
+	); patchErr != nil {
+		return fmt.Errorf("failed to apply patch to deployment %s: %w", deploy.Name, patchErr)
+	}
 	return nil
 }
 

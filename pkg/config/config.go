@@ -44,16 +44,33 @@ type Config struct {
 	// Incident storage (ADR-014)
 	DataDir               string `json:"data_dir,omitempty"`                // Directory for persistent incident storage
 	IncidentRetentionDays int    `json:"incident_retention_days,omitempty"` // Days to retain resolved incidents (0 = no cleanup)
+	MaxStoredIncidents    int    `json:"max_stored_incidents,omitempty"`    // Maximum incidents to keep on disk (oldest resolved evicted first)
+
+	// OOM remediation tuning (Issue #62)
+	OOMMemoryMultiplier float64 `json:"oom_memory_multiplier"` // Multiplier for memory limit on OOMKill
+	OOMMemoryMaxLimit   string  `json:"oom_memory_max_limit"`  // Max memory limit ceiling (e.g. "2Gi")
 
 	// Feature Engineering (Issue #54, ADR-016)
 	FeatureEngineering FeatureEngineeringConfig `json:"feature_engineering"`
+
+	// Alert notification sinks (ADR-022, Issue #75)
+	Notifier NotifierConfig `json:"notifier"`
+}
+
+// NotifierConfig holds configuration for alert notification sinks (ADR-022).
+type NotifierConfig struct {
+	SlackWebhookURL     string `json:"slack_webhook_url"`
+	PagerDutyRoutingKey string `json:"pagerduty_routing_key"`
+	AlertmanagerURL     string `json:"alertmanager_url"`
+	SeverityThreshold   string `json:"severity_threshold"`
 }
 
 // FeatureEngineeringConfig holds configuration for ML feature engineering (Issue #54)
 type FeatureEngineeringConfig struct {
 	// Enabled enables feature engineering for predictive-analytics model
 	// When true, the prediction handler builds 3200+ engineered features from Prometheus
-	// When false, only 4 raw features are sent (legacy behavior)
+	// When false, 5 raw features are sent matching the model's base metrics (Issue #58):
+	// cpu_usage, memory_usage, disk_usage, network_in, network_out
 	Enabled bool `json:"enabled"`
 
 	// LookbackHours is the number of hours to look back for historical data
@@ -179,13 +196,21 @@ const (
 	DefaultKServePredictorPort = 8080 // KServe predictors in RawDeployment mode listen on 8080
 
 	// Incident storage defaults (ADR-014)
-	DefaultDataDir               = "" // Empty means in-memory only
-	DefaultIncidentRetentionDays = 90 // 90 days (PCI-DSS, SOC2, HIPAA compliance)
+	DefaultDataDir               = ""    // Empty means in-memory only
+	DefaultIncidentRetentionDays = 90    // 90 days (PCI-DSS, SOC2, HIPAA compliance)
+	DefaultMaxStoredIncidents    = 10000 // Maximum incidents to keep on disk
+
+	// OOM remediation defaults (Issue #62)
+	DefaultOOMMemoryMultiplier = 2.5   // 2.5x current limit
+	DefaultOOMMemoryMaxLimit   = "2Gi" // Ceiling to prevent runaway scaling
 
 	// Feature engineering defaults (Issue #54, ADR-016)
 	DefaultFeatureEngineeringEnabled              = true // Enable by default to fix Issue #54
 	DefaultFeatureEngineeringLookbackHours        = 24   // 24-hour lookback matches model training
 	DefaultFeatureEngineeringExpectedFeatureCount = 0    // 0 = disable validation, set to model's expected count to enable
+
+	// Notifier defaults (ADR-022, Issue #75)
+	DefaultAlertSeverityThreshold = "critical"
 )
 
 // Valid log levels
@@ -218,6 +243,7 @@ func Load() (*Config, error) {
 		// Incident storage configuration (ADR-014)
 		DataDir:               getEnv("DATA_DIR", DefaultDataDir),
 		IncidentRetentionDays: getEnvAsInt("INCIDENT_RETENTION_DAYS", DefaultIncidentRetentionDays),
+		MaxStoredIncidents:    getEnvAsInt("KUBEHEAL_MAX_STORED_INCIDENTS", DefaultMaxStoredIncidents),
 
 		// KServe configuration (ADR-039, ADR-040)
 		KServe: KServeConfig{
@@ -232,11 +258,23 @@ func Load() (*Config, error) {
 			Timeout:         getEnvAsDuration("KSERVE_TIMEOUT", DefaultKServeTimeout),
 		},
 
+		// OOM remediation configuration (Issue #62)
+		OOMMemoryMultiplier: getEnvAsFloat64("OOM_MEMORY_MULTIPLIER", DefaultOOMMemoryMultiplier),
+		OOMMemoryMaxLimit:   getEnv("OOM_MEMORY_MAX_LIMIT", DefaultOOMMemoryMaxLimit),
+
 		// Feature engineering configuration (Issue #54, ADR-016)
 		FeatureEngineering: FeatureEngineeringConfig{
 			Enabled:              getEnvAsBool("ENABLE_FEATURE_ENGINEERING", DefaultFeatureEngineeringEnabled),
 			LookbackHours:        getEnvAsInt("FEATURE_ENGINEERING_LOOKBACK_HOURS", DefaultFeatureEngineeringLookbackHours),
 			ExpectedFeatureCount: getEnvAsInt("FEATURE_ENGINEERING_EXPECTED_COUNT", DefaultFeatureEngineeringExpectedFeatureCount),
+		},
+
+		// Alert notification sinks (ADR-022, Issue #75)
+		Notifier: NotifierConfig{
+			SlackWebhookURL:     getEnv("KUBEHEAL_SLACK_WEBHOOK_URL", ""),
+			PagerDutyRoutingKey: getEnv("KUBEHEAL_PAGERDUTY_ROUTING_KEY", ""),
+			AlertmanagerURL:     getEnv("KUBEHEAL_ALERTMANAGER_URL", ""),
+			SeverityThreshold:   getEnv("KUBEHEAL_ALERT_SEVERITY_THRESHOLD", DefaultAlertSeverityThreshold),
 		},
 	}
 
@@ -383,6 +421,19 @@ func getEnvAsFloat32(key string, defaultVal float32) float32 {
 		return defaultVal
 	}
 	return float32(value)
+}
+
+// getEnvAsFloat64 gets an environment variable as a float64 or returns a default value
+func getEnvAsFloat64(key string, defaultVal float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultVal
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return value
 }
 
 // getEnvAsBool gets an environment variable as a boolean or returns a default value

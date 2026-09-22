@@ -16,6 +16,7 @@ import (
 
 	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/notifier"
 )
 
 // AnomalyHandler handles anomaly analysis API requests
@@ -24,22 +25,34 @@ type AnomalyHandler struct {
 	kserveClient     *kserve.ProxyClient
 	prometheusClient *integrations.PrometheusClient
 	log              *logrus.Logger
+	alertDispatcher  *notifier.Dispatcher
+
+	// Minimum severity that triggers alert dispatch (ADR-022, Issue #75)
+	alertSeverityThreshold string
 
 	// Default values when Prometheus is not available
 	defaultMetricValue float64
 }
 
-// NewAnomalyHandler creates a new anomaly analysis handler
+// NewAnomalyHandler creates a new anomaly analysis handler.
+// alertDispatcher and severityThreshold may be nil/"" to disable alerting.
 func NewAnomalyHandler(
 	kserveClient *kserve.ProxyClient,
 	prometheusClient *integrations.PrometheusClient,
 	log *logrus.Logger,
+	alertDispatcher *notifier.Dispatcher,
+	severityThreshold string,
 ) *AnomalyHandler {
+	if severityThreshold == "" {
+		severityThreshold = "critical"
+	}
 	return &AnomalyHandler{
-		kserveClient:       kserveClient,
-		prometheusClient:   prometheusClient,
-		log:                log,
-		defaultMetricValue: 0.5,
+		kserveClient:           kserveClient,
+		prometheusClient:       prometheusClient,
+		log:                    log,
+		alertDispatcher:        alertDispatcher,
+		alertSeverityThreshold: severityThreshold,
+		defaultMetricValue:     0.5,
 	}
 }
 
@@ -269,6 +282,9 @@ func (h *AnomalyHandler) AnalyzeAnomalies(w http.ResponseWriter, r *http.Request
 	}).Info("Anomaly analysis completed successfully")
 
 	h.respondJSON(w, http.StatusOK, response)
+
+	// Fire alert sinks for anomalies meeting the severity threshold (ADR-022, Issue #75)
+	h.dispatchAnomalyAlerts(&response, &req)
 }
 
 // setRequestDefaults sets default values for optional request fields
@@ -768,6 +784,46 @@ func (h *AnomalyHandler) generateRecommendation(anomalies []AnomalyResult, summa
 	}
 
 	return fmt.Sprintf("INFO: %d minor anomalies detected. Continue monitoring.", len(anomalies))
+}
+
+// dispatchAnomalyAlerts sends alerts for anomalies meeting the severity
+// threshold (ADR-022, Issue #75).  It is a no-op when no dispatcher is
+// configured or no anomalies match the threshold.
+func (h *AnomalyHandler) dispatchAnomalyAlerts(response *AnomalyAnalyzeResponse, req *AnomalyAnalyzeRequest) {
+	if h.alertDispatcher == nil || h.alertDispatcher.SinkCount() == 0 {
+		return
+	}
+	if response.AnomaliesDetected == 0 {
+		return
+	}
+
+	for i := range response.Anomalies {
+		a := &response.Anomalies[i]
+		if !h.severityMeetsThreshold(a.Severity) {
+			continue
+		}
+		h.alertDispatcher.Dispatch(&notifier.Alert{
+			Severity:       a.Severity,
+			Service:        req.Deployment,
+			Namespace:      req.Namespace,
+			AnomalyScore:   a.AnomalyScore,
+			Summary:        a.Explanation,
+			Recommendation: a.RecommendedAction,
+			Timestamp:      time.Now().UTC(),
+			Labels: map[string]string{
+				"scope":     response.Scope.TargetDescription,
+				"model":     response.ModelUsed,
+				"threshold": fmt.Sprintf("%.2f", req.Threshold),
+			},
+		})
+	}
+}
+
+// severityMeetsThreshold checks whether the given severity is at or above the
+// configured severity threshold.
+func (h *AnomalyHandler) severityMeetsThreshold(severity string) bool {
+	levels := map[string]int{"info": 0, "warning": 1, "critical": 2}
+	return levels[severity] >= levels[h.alertSeverityThreshold]
 }
 
 // respondJSON writes a JSON response

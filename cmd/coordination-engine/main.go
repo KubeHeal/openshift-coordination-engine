@@ -29,11 +29,12 @@ import (
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/config"
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/kserve"
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/middleware"
+	"github.com/KubeHeal/openshift-coordination-engine/pkg/notifier"
 )
 
 var (
 	// Version is set during build with -ldflags
-	Version = "dev"
+	Version = "1.2.0"
 	// StartTime records when the application started
 	startTime time.Time
 )
@@ -236,8 +237,11 @@ func main() {
 	capacityHandler.RegisterRoutes(router)
 	log.Info("Capacity API endpoints registered: /api/v1/capacity/namespace/{namespace}, /api/v1/capacity/cluster")
 
-	// Anomaly analysis endpoints (Issue #30)
-	anomalyHandler := initAnomalyHandler(kserveProxyHandler, prometheusClient, log)
+	// Alert notification dispatcher (ADR-022, Issue #75)
+	alertDispatcher := buildAlertDispatcher(cfg, log)
+
+	// Anomaly analysis endpoints (Issue #30, ADR-022)
+	anomalyHandler := initAnomalyHandler(kserveProxyHandler, prometheusClient, alertDispatcher, cfg.Notifier.SeverityThreshold, log)
 	anomalyHandler.RegisterRoutes(router)
 	log.Info("Anomaly analysis API endpoint registered: POST /api/v1/anomalies/analyze")
 
@@ -248,6 +252,11 @@ func main() {
 	// Right-sizing recommendations endpoint (ADR-019)
 	rightSizingHandler := v1.NewRightSizingHandler(prometheusClient, log)
 	rightSizingHandler.RegisterRoutes(router)
+
+	// Deep RCA v2 investigation endpoint (ADR-021, Issue #72)
+	rcaHandler := v1.NewRCAHandler(k8sClients.Clientset, k8sClients.DynamicClient, k8sClients.Clientset.Discovery(), log)
+	rcaHandler.RegisterRoutes(router)
+	log.Info("RCA investigation endpoint registered: POST /api/v1/investigate/rca")
 
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
@@ -308,14 +317,18 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal and shut down gracefully
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	gracefulShutdown(server, metricsServer, incidentStore, log)
+}
+
+// gracefulShutdown stops HTTP servers and persists incident data before exit.
+func gracefulShutdown(server, metricsServer *http.Server, incidentStore *storage.IncidentStore, log *logrus.Logger) {
 	log.Info("Shutting down servers...")
 
-	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -325,6 +338,13 @@ func main() {
 
 	if err := metricsServer.Shutdown(ctx); err != nil {
 		log.WithError(err).Error("Metrics server shutdown error")
+	}
+
+	// Persist all incidents to disk on graceful shutdown (ADR-014, Issue #70)
+	if err := incidentStore.SaveToFile(); err != nil {
+		log.WithError(err).Error("Failed to save incidents on shutdown")
+	} else {
+		log.WithField("count", incidentStore.Count()).Info("Incidents saved to disk on shutdown")
 	}
 
 	log.Info("Servers stopped")
@@ -366,7 +386,11 @@ func initRemediationComponents(
 ) (*remediation.Orchestrator, *remediation.StrategySelector) {
 	// Initialize remediation components
 	manualRemediator := remediation.NewManualRemediator(k8sClients.Clientset, log)
-	log.Info("Manual remediator initialized")
+	manualRemediator.SetOOMConfig(cfg.OOMMemoryMultiplier, cfg.OOMMemoryMaxLimit)
+	log.WithFields(logrus.Fields{
+		"oom_multiplier": cfg.OOMMemoryMultiplier,
+		"oom_max_limit":  cfg.OOMMemoryMaxLimit,
+	}).Info("Manual remediator initialized with OOM resource patching")
 
 	helmRemediator := remediation.NewHelmRemediator(log)
 	log.Info("Helm remediator initialized")
@@ -415,10 +439,35 @@ func initPrometheusClient(cfg *config.Config, log *logrus.Logger) *integrations.
 	return client
 }
 
-// initAnomalyHandler creates the anomaly analysis handler (Issue #30)
+// buildAlertDispatcher creates the alert notification dispatcher from config (ADR-022, Issue #75).
+func buildAlertDispatcher(cfg *config.Config, log *logrus.Logger) *notifier.Dispatcher {
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+	var sinks []notifier.AlertSink
+
+	if cfg.Notifier.SlackWebhookURL != "" {
+		sinks = append(sinks, notifier.NewSlackSink(cfg.Notifier.SlackWebhookURL, httpClient, log))
+		log.Info("Slack alert sink enabled")
+	}
+	if cfg.Notifier.PagerDutyRoutingKey != "" {
+		sinks = append(sinks, notifier.NewPagerDutySink(cfg.Notifier.PagerDutyRoutingKey, httpClient, log))
+		log.Info("PagerDuty alert sink enabled")
+	}
+	if cfg.Notifier.AlertmanagerURL != "" {
+		sinks = append(sinks, notifier.NewAlertmanagerSink(cfg.Notifier.AlertmanagerURL, httpClient, log))
+		log.Info("Alertmanager alert sink enabled")
+	}
+
+	dispatcher := notifier.NewDispatcher(sinks, log)
+	log.WithField("sink_count", dispatcher.SinkCount()).Info("Alert dispatcher initialized")
+	return dispatcher
+}
+
+// initAnomalyHandler creates the anomaly analysis handler (Issue #30, ADR-022)
 func initAnomalyHandler(
 	kserveProxyHandler *v1.KServeProxyHandler,
 	prometheusClient *integrations.PrometheusClient,
+	alertDispatcher *notifier.Dispatcher,
+	severityThreshold string,
 	log *logrus.Logger,
 ) *v1.AnomalyHandler {
 	if kserveProxyHandler != nil {
@@ -426,12 +475,16 @@ func initAnomalyHandler(
 			kserveProxyHandler.GetProxyClient(),
 			prometheusClient,
 			log,
+			alertDispatcher,
+			severityThreshold,
 		)
 	}
 	return v1.NewAnomalyHandler(
 		nil, // No KServe client
 		prometheusClient,
 		log,
+		alertDispatcher,
+		severityThreshold,
 	)
 }
 
@@ -535,18 +588,19 @@ func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.Incident
 		return storage.NewIncidentStore()
 	}
 
-	// Create incident store with file-based persistence
-	incidentStore, err := storage.NewIncidentStoreWithPersistence(cfg.DataDir, log)
+	// Create incident store with per-file persistence (ADR-014, Issue #70)
+	incidentStore, err := storage.NewIncidentStoreWithPersistence(cfg.DataDir, cfg.MaxStoredIncidents, log)
 	if err != nil {
 		log.WithError(err).Error("Failed to create persistent incident store, falling back to in-memory")
 		return storage.NewIncidentStore()
 	}
 
 	log.WithFields(logrus.Fields{
-		"data_dir":         cfg.DataDir,
-		"retention_days":   cfg.IncidentRetentionDays,
-		"loaded_incidents": incidentStore.Count(),
-	}).Info("Incident store initialized with file-based persistence")
+		"data_dir":             cfg.DataDir,
+		"retention_days":       cfg.IncidentRetentionDays,
+		"max_stored_incidents": cfg.MaxStoredIncidents,
+		"loaded_incidents":     incidentStore.Count(),
+	}).Info("Incident store initialized with per-file persistence")
 
 	// Start background cleanup goroutine for old incidents
 	if cfg.IncidentRetentionDays > 0 {

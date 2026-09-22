@@ -74,6 +74,11 @@ rules:
   resources: ["clusteroperators"]
   verbs: ["get", "list", "watch"]
 
+# Istio networking resources (read-only for RCA VirtualService correlation, ADR-021)
+- apiGroups: ["networking.istio.io"]
+  resources: ["virtualservices", "destinationrules"]
+  verbs: ["get", "list", "watch"]
+
 {{- with .Values.rbac.rules }}
 {{- toYaml . | nindent 0 }}
 {{- end }}
