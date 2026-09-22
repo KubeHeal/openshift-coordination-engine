@@ -46,6 +46,10 @@ type Config struct {
 	IncidentRetentionDays int    `json:"incident_retention_days,omitempty"` // Days to retain resolved incidents (0 = no cleanup)
 	MaxStoredIncidents    int    `json:"max_stored_incidents,omitempty"`    // Maximum incidents to keep on disk (oldest resolved evicted first)
 
+	// OOM remediation tuning (Issue #62)
+	OOMMemoryMultiplier float64 `json:"oom_memory_multiplier"` // Multiplier for memory limit on OOMKill
+	OOMMemoryMaxLimit   string  `json:"oom_memory_max_limit"`  // Max memory limit ceiling (e.g. "2Gi")
+
 	// Feature Engineering (Issue #54, ADR-016)
 	FeatureEngineering FeatureEngineeringConfig `json:"feature_engineering"`
 }
@@ -185,6 +189,10 @@ const (
 	DefaultIncidentRetentionDays = 90    // 90 days (PCI-DSS, SOC2, HIPAA compliance)
 	DefaultMaxStoredIncidents    = 10000 // Maximum incidents to keep on disk
 
+	// OOM remediation defaults (Issue #62)
+	DefaultOOMMemoryMultiplier = 2.5   // 2.5x current limit
+	DefaultOOMMemoryMaxLimit   = "2Gi" // Ceiling to prevent runaway scaling
+
 	// Feature engineering defaults (Issue #54, ADR-016)
 	DefaultFeatureEngineeringEnabled              = true // Enable by default to fix Issue #54
 	DefaultFeatureEngineeringLookbackHours        = 24   // 24-hour lookback matches model training
@@ -235,6 +243,10 @@ func Load() (*Config, error) {
 			DynamicServices: discoverKServeServicesFromEnv(),
 			Timeout:         getEnvAsDuration("KSERVE_TIMEOUT", DefaultKServeTimeout),
 		},
+
+		// OOM remediation configuration (Issue #62)
+		OOMMemoryMultiplier: getEnvAsFloat64("OOM_MEMORY_MULTIPLIER", DefaultOOMMemoryMultiplier),
+		OOMMemoryMaxLimit:   getEnv("OOM_MEMORY_MAX_LIMIT", DefaultOOMMemoryMaxLimit),
 
 		// Feature engineering configuration (Issue #54, ADR-016)
 		FeatureEngineering: FeatureEngineeringConfig{
@@ -387,6 +399,19 @@ func getEnvAsFloat32(key string, defaultVal float32) float32 {
 		return defaultVal
 	}
 	return float32(value)
+}
+
+// getEnvAsFloat64 gets an environment variable as a float64 or returns a default value
+func getEnvAsFloat64(key string, defaultVal float64) float64 {
+	valueStr := os.Getenv(key)
+	if valueStr == "" {
+		return defaultVal
+	}
+	value, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		return defaultVal
+	}
+	return value
 }
 
 // getEnvAsBool gets an environment variable as a boolean or returns a default value
