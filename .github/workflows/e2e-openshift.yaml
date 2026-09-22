@@ -195,6 +195,8 @@ jobs:
             --set image.tag="${IMAGE_TAG}" \
             --set image.pullPolicy=Always \
             --set-string "env[3].value=false" \
+            --set "env[12].name=NAMESPACE" \
+            --set-string "env[12].value=${{ env.TEST_NAMESPACE }}" \
             --wait \
             --timeout 5m
 
