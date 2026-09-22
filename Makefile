@@ -81,6 +81,13 @@ test-e2e:
 	@echo "Running e2e tests..."
 	@go test -v -tags=e2e -timeout 20m ./test/e2e/...
 
+## test-e2e-ci: Build image, run e2e tests (assumes Kind cluster exists)
+test-e2e-ci:
+	@echo "Building e2e test image..."
+	@docker build -t coordination-engine:e2e-test .
+	@echo "Running e2e tests..."
+	E2E_IMAGE=coordination-engine:e2e-test go test -v -tags=e2e -timeout 20m ./test/e2e/...
+
 ## coverage: Generate test coverage report
 coverage:
 	@echo "Generating coverage report..."
