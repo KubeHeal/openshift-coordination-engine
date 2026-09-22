@@ -32,6 +32,8 @@ These ADRs define the **Go implementation** of the coordination engine:
 | [018](018-disk-exhaustion-memory-leak-detection.md) | Disk Exhaustion ETA and Memory Leak Slope Detection | ACCEPTED | Deterministic disk-full ETA and memory leak classification without ML models |
 | [019](019-rightsizing-recommendation-engine.md) | VPA-style Right-Sizing Recommendation Engine | ACCEPTED | P95 usage vs requests/limits comparison for per-container CPU/memory recommendations |
 | [020](020-cpu-throttle-detection-cfs-metrics.md) | CPU Throttle Detection via cgroup CFS Metrics | ACCEPTED | Real CFS throttle rate replacing heuristic cpu_throttling label |
+| [021](021-deep-rca-v2-multi-signal-correlation.md) | Deep RCA v2 Multi-Signal Correlation | IMPLEMENTED | Three parallel correlators (pod events, NetworkPolicy, Istio VS) behind `POST /api/v1/investigate/rca` |
+| [022](022-alerting-sink-interface.md) | Alerting Sink Interface | IMPLEMENTED | Pluggable `AlertSink` with Slack, PagerDuty, Alertmanager; async fire-and-forget dispatch |
 
 **Note on numbering**: ADR-007, ADR-008, and ADR-010 are reserved numbers. These were initially planned for additional decisions but were either integrated into existing ADRs or deemed unnecessary. The numbers are kept reserved to maintain sequential reference integrity.
 
@@ -92,10 +94,18 @@ Platform ADR-042 (Go Coordination Engine)
     │       ├──> Improves ADR-012 (ML confidence with real metrics)
     │       └──> Extends ADR-001 (Storage package)
     │
-    └──> ADR-015 (KServe InferenceService Integration)
-            ├──> Alternative to ADR-009 (KServe vs legacy ML service)
-            ├──> Consumed by ADR-003 (Anomaly detection for coordination)
-            └──> Enhanced by ADR-014 (Prometheus metrics for ML)
+    ├──> ADR-015 (KServe InferenceService Integration)
+    │       ├──> Alternative to ADR-009 (KServe vs legacy ML service)
+    │       ├──> Consumed by ADR-003 (Anomaly detection for coordination)
+    │       └──> Enhanced by ADR-014 (Prometheus metrics for ML)
+    │
+    ├──> ADR-021 (Deep RCA v2 Multi-Signal Correlation)
+    │       ├──> Uses ADR-006 (RBAC for NetworkPolicy + Istio CRD access)
+    │       └──> Complements ADR-017 (enriched anomaly signals)
+    │
+    └──> ADR-022 (Alerting Sink Interface)
+            ├──> Triggered by ADR-017 (anomaly detection)
+            └──> Extends ADR-014 (incident management)
 ```
 
 ## Reading Order
@@ -117,6 +127,8 @@ If you're new to the coordination engine, read ADRs in this order:
 11. **[ADR-015](015-kserve-inference-service-integration.md)** - KServe InferenceService integration (recommended for OpenShift AI)
 12. **[ADR-012](012-ml-enhanced-layer-detection.md)** *(Optional)* - ML-enhanced layer detection
 13. **[ADR-014](014-prometheus-thanos-observability-incident-management.md)** - Prometheus/Thanos observability and incident management (builds on ADR-003 and ADR-009)
+14. **[ADR-021](021-deep-rca-v2-multi-signal-correlation.md)** - Deep RCA v2 multi-signal correlation (pod events, NetworkPolicy, Istio)
+15. **[ADR-022](022-alerting-sink-interface.md)** - Alerting sink interface (Slack, PagerDuty, Alertmanager)
 
 ### For Platform Understanding
 
@@ -195,10 +207,13 @@ openshift-coordination-engine/
 ├── internal/                       # Private implementation
 │   ├── detector/                   # Deployment and layer detection (ADR-002, ADR-003)
 │   ├── coordination/               # Planner, orchestrator, health checker (ADR-003)
+│   ├── rca/                        # Deep RCA correlators (ADR-021)
 │   ├── remediation/                # Strategy selector and remediators (ADR-005)
+│   ├── storage/                    # File-persisted incident store (ADR-014)
 │   └── integrations/               # ArgoCD, MCO, ML service clients (ADR-004, ADR-009)
 ├── pkg/                            # Public API
-│   ├── api/v1/                     # HTTP handlers (ADR-011)
+│   ├── api/v1/                     # HTTP handlers (ADR-011, ADR-021)
+│   ├── notifier/                   # Alert sinks (ADR-022)
 │   └── models/                     # Data models
 └── charts/coordination-engine/     # Helm chart (ADR-006)
 ```
@@ -214,8 +229,9 @@ The MCP server calls the coordination engine via REST API:
 - `GET /api/v1/incidents?status=all&severity=high` - List incidents with enhanced filtering (ADR-014)
 - `POST /api/v1/incidents` - Create incident for manual tracking (ADR-014)
 - `GET /api/v1/workflows/{id}` - Get workflow status
+- `POST /api/v1/investigate/rca` - Deep root-cause analysis (ADR-021)
 
-See: [ADR-011](011-mcp-server-integration.md), [ADR-014](014-prometheus-thanos-observability-incident-management.md), [API-CONTRACT.md](../../API-CONTRACT.md)
+See: [ADR-011](011-mcp-server-integration.md), [ADR-014](014-prometheus-thanos-observability-incident-management.md), [ADR-021](021-deep-rca-v2-multi-signal-correlation.md), [API-CONTRACT.md](../../API-CONTRACT.md)
 
 ### Downstream API (Python ML Service)
 
@@ -247,7 +263,7 @@ See: [ADR-009](009-python-ml-integration.md)
 
 When creating new ADRs:
 1. Follow the [ADR template](https://github.com/joelparkerhenderson/architecture-decision-record)
-2. Number ADRs sequentially (next: ADR-016; skip reserved numbers 007, 008, 010)
+2. Number ADRs sequentially (next: ADR-023; skip reserved numbers 007, 008, 010)
 3. Reference platform ADRs where applicable
 4. Update this README with the new ADR in index table, relationship diagram, and reading order
 5. Add cross-references in "Related ADRs" section
@@ -262,4 +278,4 @@ When creating new ADRs:
 
 ---
 
-*Last Updated: 2026-01-28*
+*Last Updated: 2026-09-22*

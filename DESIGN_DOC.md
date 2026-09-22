@@ -78,6 +78,9 @@ flowchart TB
   mco[Machine Config Operator]
   prom[(Prometheus / Thanos)]
   kserve[KServe InferenceServices]
+  slack([Slack])
+  pd([PagerDuty])
+  am([Alertmanager])
 
   mcp -->|"REST /api/v1"| engine
   engine -->|"client-go"| k8s
@@ -85,18 +88,24 @@ flowchart TB
   engine -->|"dynamic client"| mco
   engine -->|"PromQL queries"| prom
   engine -->|"KServe v1 predict"| kserve
+  engine -.->|"webhook (async)"| slack
+  engine -.->|"Events API v2 (async)"| pd
+  engine -.->|"/api/v2/alerts (async)"| am
 ```
 
 ### External interfaces
 
 | Interface | Protocol | Direction | Purpose |
 |-----------|----------|-----------|---------|
-| MCP Server | REST JSON | Inbound | Trigger remediation, query incidents and workflows |
+| MCP Server | REST JSON | Inbound | Trigger remediation, query incidents, workflows, and RCA investigations |
 | Kubernetes API | client-go | Outbound | Read/write pods, deployments, namespaces, RBAC checks |
 | ArgoCD API | HTTP REST | Outbound | Sync applications, check sync status |
 | MCO | Dynamic client | Outbound | Monitor MachineConfigPool stability |
 | Prometheus/Thanos | HTTP PromQL | Outbound | Query CPU, memory, disk, network metrics |
 | KServe | HTTP REST | Outbound | Anomaly detection and predictive analytics |
+| Slack | Webhook POST | Outbound (async) | Alert notifications on critical anomalies |
+| PagerDuty | Events API v2 | Outbound (async) | On-call escalation for critical anomalies |
+| Alertmanager | REST `/api/v2/alerts` | Outbound (async) | Integration with Prometheus alerting pipelines |
 
 ---
 
@@ -122,14 +131,16 @@ The design follows these high-level decisions. Each links to a formal ADR.
 | `cmd/coordination-engine` | Process entry, HTTP server, component wiring, graceful shutdown | ADR-001 |
 | `internal/detector` | Deployment method detection with cache | ADR-002 |
 | `internal/coordination` | Layer detection, planning, orchestration, health checks | ADR-003 |
-| `internal/remediation` | Strategy selector, ArgoCD/Helm/Operator/Manual remediators | ADR-005 |
+| `internal/remediation` | Strategy selector, ArgoCD/Helm/Operator/Manual remediators, OOMKill resource patching | ADR-005 |
 | `internal/integrations` | Clients for ArgoCD, MCO, Prometheus, KServe, legacy ML | ADR-004, ADR-009, ADR-014 |
 | `internal/rbac` | Startup RBAC verification via SelfSubjectAccessReview | ADR-006 |
-| `internal/storage` | In-memory and file-persisted incident store | ADR-014 |
-| `pkg/api/v1` | REST API handlers (11 handler files) | ADR-011 |
+| `internal/storage` | In-memory and file-persisted incident store (per-file JSON persistence) | ADR-014 |
+| `internal/rca` | Multi-signal root-cause analysis: event, NetworkPolicy, and Istio correlators | ADR-021 |
+| `pkg/api/v1` | REST API handlers (12 handler files, including RCA endpoint) | ADR-011, ADR-021 |
 | `pkg/models` | Shared domain types (7 model files) | ADR-001 |
 | `pkg/config` | Environment-variable-based configuration | ADR-001 |
 | `pkg/kserve` | KServe InferenceService proxy client | ADR-015 |
+| `pkg/notifier` | Pluggable alert sinks: Slack, PagerDuty, Alertmanager dispatcher | ADR-022 |
 | `pkg/middleware` | Recovery, request logging, CORS | ADR-001 |
 | `pkg/features` | ML feature engineering and Prometheus adapter | ADR-016 |
 | `pkg/capacity` | Namespace/cluster capacity analysis and trend math | ADR-019 |
@@ -147,6 +158,7 @@ flowchart TB
     integ[integrations]
     rbacPkg[rbac]
     store[storage]
+    rcaPkg[rca]
   end
 
   subgraph pub [pkg/]
@@ -154,6 +166,7 @@ flowchart TB
     models[models]
     cfg[config]
     ks[kserve]
+    notif[notifier]
     mw[middleware]
     feat[features]
     cap[capacity]
@@ -162,12 +175,15 @@ flowchart TB
   main --> api
   main --> cfg
   main --> mw
+  main --> notif
   api --> coord
   api --> det
   api --> remed
   api --> ks
   api --> feat
   api --> cap
+  api --> rcaPkg
+  api --> notif
   coord --> integ
   coord --> det
   remed --> integ
@@ -188,11 +204,12 @@ openshift-coordination-engine/
     detector/        (3 files: deployment_detector, detector, metrics)
     integrations/    (5 files: argocd_client, kserve_client, mco_client, ml_client, prometheus_client)
     rbac/            (1 file:  verifier)
+    rca/             (8 files: types, aggregator, events, networkpolicy, virtualservice, plus tests)
     remediation/     (8 files: orchestrator, strategy_selector, interfaces, 4 remediators, metrics)
-    storage/         (1 file:  incidents)
+    storage/         (2 files: incidents, incidents_test)
   pkg/
-    api/v1/          (11 files: health, remediation, detection, coordination, anomaly, prediction,
-                      recommendations, capacity, diskexhaustion, rightsizing, kserve_proxy)
+    api/v1/          (12 files: health, remediation, detection, coordination, anomaly, prediction,
+                      recommendations, capacity, diskexhaustion, rightsizing, kserve_proxy, rca)
     capacity/        (2 files: analyzer, trending)
     config/          (1 file:  config)
     features/        (2 files: predictive, prometheus_adapter)
@@ -200,8 +217,9 @@ openshift-coordination-engine/
     middleware/      (3 files: recovery, logging, cors)
     models/          (7 files: deployment_info, health, incident, issue, layered_issue,
                       remediation_plan, workflow)
+    notifier/        (9 files: alert, dispatcher, slack, pagerduty, alertmanager, plus tests)
   charts/coordination-engine/   (Helm chart)
-  docs/adrs/                    (20 ADRs)
+  docs/adrs/                    (22 ADRs)
 ```
 
 ---
@@ -253,7 +271,81 @@ sequenceDiagram
   O-->>M: 200 OK {workflow completed}
 ```
 
-### 6.3 Workflow lifecycle
+### 6.3 RCA investigation flow
+
+```mermaid
+sequenceDiagram
+  participant C as Caller
+  participant H as RCAHandler
+  participant Agg as Aggregator
+  participant E as EventCorrelator
+  participant N as NetpolCorrelator
+  participant I as IstioCorrelator
+
+  C->>H: POST /api/v1/investigate/rca
+  H->>H: Validate request (service, namespace, time range)
+  H->>Agg: Run(request)
+  par parallel correlators
+    Agg->>E: Correlate(request)
+    E-->>Agg: []RootCause (pod events)
+  and
+    Agg->>N: Correlate(request)
+    N-->>Agg: []RootCause (network policies)
+  and
+    Agg->>I: Correlate(request)
+    I-->>Agg: []RootCause (Istio VS, or empty if CRDs absent)
+  end
+  Agg->>Agg: Merge findings, compute weighted confidence
+  Agg-->>H: Result
+  H-->>C: 200 OK {root_causes, confidence_score}
+```
+
+### 6.4 Alert dispatch flow
+
+```mermaid
+sequenceDiagram
+  participant C as Caller
+  participant AH as AnomalyHandler
+  participant D as Dispatcher
+  participant S as SlackSink
+  participant P as PagerDutySink
+  participant AM as AlertmanagerSink
+
+  C->>AH: POST /api/v1/anomalies/analyze
+  AH->>AH: Detect anomalies
+  AH->>AH: Severity >= threshold?
+  AH->>D: Dispatch(alert)
+  par fire-and-forget goroutines
+    D->>S: Send(alert)
+  and
+    D->>P: Send(alert)
+  and
+    D->>AM: Send(alert)
+  end
+  AH-->>C: 200 OK {anomaly results}
+  Note right of D: Sink errors are logged,<br/>never block the response.
+```
+
+### 6.5 OOMKill remediation flow
+
+```mermaid
+sequenceDiagram
+  participant MR as ManualRemediator
+  participant K8s as Kubernetes API
+
+  MR->>K8s: Get Pod (OOMKilled container)
+  K8s-->>MR: Pod with OwnerReferences
+  MR->>K8s: Get ReplicaSet (from pod owner ref)
+  K8s-->>MR: ReplicaSet with OwnerReferences
+  MR->>K8s: Get Deployment (from RS owner ref)
+  K8s-->>MR: Deployment spec
+  MR->>MR: Calculate new limit (current x 2.5, capped at 2Gi)
+  MR->>K8s: StrategicMergePatch Deployment (memory limits + annotations)
+  K8s-->>MR: Patched Deployment
+  Note right of MR: Deployment controller<br/>rolls out new pods.
+```
+
+### 6.6 Workflow lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -333,11 +425,53 @@ pods, deployments, nodes, namespaces, and MachineConfigPools.
 - **Panic recovery:** The `Recovery` middleware catches panics and returns 500 JSON responses
   with a stack trace in the server log.
 
+### Incident persistence
+
+The `internal/storage` package supports two modes:
+
+1. **In-memory only** (default). The `NewIncidentStore()` constructor creates a map-backed
+   store with no disk I/O.
+2. **File-persisted** (ADR-014 Phase 3). `NewIncidentStoreWithPersistence(dataDir, max, log)`
+   writes each incident as an individual JSON file (`<id>.json`) under `DATA_DIR`. On startup
+   the directory is scanned, files are loaded newest-first, and the collection is truncated
+   to `KUBEHEAL_MAX_STORED_INCIDENTS`. On `SIGTERM` the store flushes every incident to
+   disk via `SaveToFile()`. Writes are atomic (temp file plus rename).
+
+Eviction order: resolved incidents are evicted before active ones, oldest first within each
+group.
+
+### Alerting sink pattern
+
+The `pkg/notifier` package implements a pluggable alert-dispatch architecture (ADR-022).
+An `AlertSink` interface (`Name()`, `Send()`) has three concrete implementations: Slack
+(incoming webhook), PagerDuty (Events API v2), and Alertmanager (`/api/v2/alerts`). A
+`Dispatcher` fans out to all configured sinks asynchronously, one goroutine per sink,
+with a 10-second timeout. Sink errors are logged at WARN level but never propagated to
+the HTTP response.
+
+Dispatch triggers when the anomaly analysis endpoint detects anomalies at or above the
+configured severity threshold (`KUBEHEAL_ALERT_SEVERITY_THRESHOLD`, default `critical`).
+New sinks are added by implementing the `AlertSink` interface and registering with the
+`Dispatcher`.
+
+### OOMKill resource patching
+
+The `ManualRemediator` now handles `OOMKilled` pods by patching the owning Deployment
+memory limits rather than only deleting the pod. The remediation walks the owner-reference
+chain: Pod to ReplicaSet to Deployment. It multiplies the current memory limit by 2.5
+(configurable), capped at a maximum of 2Gi (configurable). The patch uses
+`StrategicMergePatch` and adds audit-trail annotations
+(`self-healing.kubeheal.io/last-remediation`, `self-healing.kubeheal.io/memory-increase`).
+If no owning Deployment can be resolved, the remediator falls back to pod deletion.
+
 ### Configuration
 
 All configuration uses environment variables loaded by `pkg/config.Load()`. No configuration
 files are read at runtime. Key variable groups: server ports, Kubernetes client tuning,
-KServe service names, Prometheus URL, ArgoCD URL, feature engineering toggles.
+KServe service names, Prometheus URL, ArgoCD URL, feature engineering toggles, incident
+persistence (`DATA_DIR`, `KUBEHEAL_MAX_STORED_INCIDENTS`), and alert sinks
+(`KUBEHEAL_SLACK_WEBHOOK_URL`, `KUBEHEAL_PAGERDUTY_ROUTING_KEY`, `KUBEHEAL_ALERTMANAGER_URL`,
+`KUBEHEAL_ALERT_SEVERITY_THRESHOLD`).
 
 ### Metrics
 
@@ -375,6 +509,8 @@ summarizes each decision.
 | 018 | Disk Exhaustion / Memory Leak | Accepted | Deterministic ETA and slope-based leak classification |
 | 019 | Right-Sizing Recommendations | Accepted | P95 usage comparison against requests/limits |
 | 020 | CPU Throttle Detection | Accepted | Real CFS throttle rate from cgroup metrics |
+| 021 | Deep RCA v2 Multi-Signal Correlation | Implemented | Three parallel correlators (pod events, NetworkPolicy, Istio VS) behind `POST /api/v1/investigate/rca` |
+| 022 | Alerting Sink Interface | Implemented | Pluggable `AlertSink` with Slack, PagerDuty, Alertmanager; async fire-and-forget dispatch |
 
 ---
 
@@ -396,12 +532,14 @@ summarizes each decision.
 | Risk / Debt | Owner | Mitigation |
 |-------------|-------|------------|
 | Go version churn: upgraded from 1.21 to 1.26 in 9 months due to dependency requirements. | Maintainers | Pin `toolchain` directive in `go.mod`. Track `golang.org/x/*` minimum Go versions before upgrading. |
-| Container base image CVEs require `microdnf update -y` in every build. | CI/CD | Added in issue #94. Automated Dependabot checks base image updates. |
+| Container base image CVEs require `microdnf update -y` in every build. | CI/CD | Addressed in issue #94. Automated Dependabot checks base image updates. Go deps bumped in issue #89. |
 | Legacy ML service (`ML_SERVICE_URL`) is deprecated but still supported. | ML team | Remove after all deployments migrate to KServe. Track in ADR-009 supersession. |
 | No OpenAPI specification file. | Issue #71 | Generate via `swaggo/swag` and publish as a CI artifact. |
 | `MIGRATION-GUIDE.md` referenced in `CLAUDE.md` but never created. | Docs | Create or remove the reference. |
 | Platform ADR cross-references in `docs/adrs/README.md` point to paths outside this repository. | Docs | Replace with GitHub URLs to the platform repository or inline the relevant context. |
 | CORS middleware is implemented but not wired in `main.go`. | Maintainers | Wire it when external browser clients require CORS headers. |
+| Alert sink dispatch is fire-and-forget with no deduplication. | Maintainers | Repeated anomaly requests may fire duplicate alerts. Add a per-service cooldown period in a future release. |
+| Event API does not support server-side time-range filtering. | RCA | Client-side filtering after listing. Pagination and field selectors limit blast radius on large clusters. |
 
 ---
 
@@ -431,6 +569,9 @@ summarizes each decision.
 2. Building-block flowchart (section 5): present.
 3. Sequence diagram (section 6.1): remediation trigger flow, 5 participants.
 4. Sequence diagram (section 6.2): multi-layer coordination flow, 5 participants.
-5. State diagram (section 6.3): workflow lifecycle.
-6. Deployment flowchart (section 7): present.
-7. No PlantUML Salt wireframes required. This system is an API-only backend with no user-facing screens.
+5. Sequence diagram (section 6.3): RCA investigation flow, 7 participants.
+6. Sequence diagram (section 6.4): alert dispatch flow, 6 participants.
+7. Sequence diagram (section 6.5): OOMKill remediation flow, 2 participants.
+8. State diagram (section 6.6): workflow lifecycle.
+9. Deployment flowchart (section 7): present.
+10. No PlantUML Salt wireframes required. This system is an API-only backend with no user-facing screens.

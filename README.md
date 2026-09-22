@@ -12,8 +12,12 @@ A Go-based coordination engine for multi-layer remediation in OpenShift/Kubernet
 - **Multi-Layer Coordination**: Orchestrates remediation across infrastructure (nodes, MCO), platform (operators, SDN), and application layers
 - **Deployment-Aware**: Detects deployment methods (ArgoCD, Helm, Operator, Manual) and applies appropriate remediation strategies
 - **GitOps Integration**: Respects ArgoCD workflows and maintains Git as the source of truth
-- **ML-Enhanced**: Integrates with Python ML service for anomaly detection and predictive analysis
-- **Production-Ready**: Built-in health checks, metrics, RBAC, and graceful degradation
+- **ML-Enhanced**: Integrates with KServe InferenceServices for anomaly detection and predictive analytics (legacy Python ML service also supported)
+- **Deep Root-Cause Analysis**: `POST /api/v1/investigate/rca` correlates pod events, NetworkPolicy violations, and Istio VirtualService misconfigs in parallel (ADR-021)
+- **Alert Notifications**: Pluggable alert sinks (Slack, PagerDuty, Alertmanager) dispatch asynchronously on critical anomalies (ADR-022)
+- **OOMKill Remediation**: Automatically patches Deployment memory limits (2.5x, capped) when OOMKilled pods are detected, with audit-trail annotations
+- **Persistent Incidents**: File-based incident storage (`DATA_DIR`) survives restarts, with configurable max-limit and oldest-first eviction
+- **Production-Ready**: Built-in health checks, metrics, RBAC, graceful degradation, and dual E2E testing (Kind + OpenShift)
 
 ## Quick Start
 
@@ -197,6 +201,22 @@ export KSERVE_ANOMALY_DETECTOR_SERVICE=anomaly-detector-predictor
 export KSERVE_PREDICTIVE_ANALYTICS_SERVICE=predictive-analytics-predictor
 ```
 
+#### Incident Persistence
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `DATA_DIR` | Directory for per-incident JSON files | (empty, in-memory only) | No |
+| `KUBEHEAL_MAX_STORED_INCIDENTS` | Maximum stored incidents (0 = unlimited) | 0 | No |
+
+#### Alert Notification Sinks (ADR-022)
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `KUBEHEAL_SLACK_WEBHOOK_URL` | Slack incoming webhook URL (empty = disabled) | (empty) | No |
+| `KUBEHEAL_PAGERDUTY_ROUTING_KEY` | PagerDuty Events API v2 routing key (empty = disabled) | (empty) | No |
+| `KUBEHEAL_ALERTMANAGER_URL` | Alertmanager base URL (empty = disabled) | (empty) | No |
+| `KUBEHEAL_ALERT_SEVERITY_THRESHOLD` | Minimum severity to trigger alerts | critical | No |
+
 #### Legacy ML Service (Deprecated)
 
 | Variable | Description | Default | Required |
@@ -205,7 +225,7 @@ export KSERVE_PREDICTIVE_ANALYTICS_SERVICE=predictive-analytics-predictor
 
 *Required only when `ENABLE_KSERVE_INTEGRATION=false`
 
-**⚠️ Note**: `ML_SERVICE_URL` is deprecated. Use KServe integration instead (ADR-039).
+**Warning**: `ML_SERVICE_URL` is deprecated. Use KServe integration instead (ADR-039).
 
 ## Deployment Prerequisites
 
@@ -307,6 +327,19 @@ curl http://localhost:8080/api/v1/incidents?namespace=production&status=active
 curl http://localhost:8080/api/v1/workflows/wf-12345678
 ```
 
+### Investigate Root Cause
+
+```bash
+curl -X POST http://localhost:8080/api/v1/investigate/rca \
+  -H "Content-Type: application/json" \
+  -d '{
+    "service": "my-app",
+    "namespace": "production",
+    "start_time": "2026-09-22T10:00:00Z",
+    "end_time": "2026-09-22T11:00:00Z"
+  }'
+```
+
 See [API Documentation](docs/API.md) for complete API reference.
 
 ## Architecture
@@ -317,8 +350,11 @@ The coordination engine consists of several components:
 - **Deployment Detector**: Determines how applications were deployed (ArgoCD, Helm, Operator, Manual)
 - **Multi-Layer Planner**: Creates ordered remediation plans across layers
 - **Strategy Selector**: Routes to appropriate remediator based on deployment method
-- **Remediators**: Execute deployment-specific remediation (ArgoCD sync, Helm rollback, etc.)
+- **Remediators**: Execute deployment-specific remediation (ArgoCD sync, Helm rollback, OOMKill memory patching, pod restart)
 - **Health Checker**: Validates system state at each layer after remediation
+- **RCA Aggregator**: Runs pod-event, NetworkPolicy, and Istio correlators in parallel for deep root-cause analysis
+- **Alert Dispatcher**: Fans out critical anomaly notifications to Slack, PagerDuty, and Alertmanager
+- **Incident Store**: Persists incidents as individual JSON files on disk for restart durability
 
 See [Architecture Documentation](docs/adrs/README.md) for detailed design decisions.
 
@@ -416,8 +452,11 @@ The coordination engine exposes Prometheus metrics on port 9090:
 - `coordination_engine_remediation_duration_seconds` - Remediation duration
 - `coordination_engine_argocd_sync_total` - ArgoCD sync operations
 - `coordination_engine_ml_layer_detection_total` - ML-enhanced detections
+- `coordination_engine_deployment_detection_total` - Deployment method detections
 
-See [DESIGN_DOC.md](DESIGN_DOC.md) section 8 for metrics details.
+Alert sinks (Slack, PagerDuty, Alertmanager) provide push-based notifications for critical anomalies. Configure via `KUBEHEAL_SLACK_WEBHOOK_URL`, `KUBEHEAL_PAGERDUTY_ROUTING_KEY`, or `KUBEHEAL_ALERTMANAGER_URL`.
+
+See [DESIGN_DOC.md](DESIGN_DOC.md) section 8 for metrics and alerting details.
 
 ## Troubleshooting
 
