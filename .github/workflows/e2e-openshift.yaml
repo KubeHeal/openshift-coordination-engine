@@ -166,8 +166,17 @@ jobs:
 
           # Clean up previous run
           helm uninstall ${{ env.HELM_RELEASE }} -n ${{ env.TEST_NAMESPACE }} 2>/dev/null || true
-          oc delete namespace ${{ env.TEST_NAMESPACE }} --ignore-not-found=true --wait=false 2>/dev/null || true
-          sleep 5
+          oc delete namespace ${{ env.TEST_NAMESPACE }} --ignore-not-found=true 2>/dev/null || true
+
+          # Wait for namespace to fully terminate (up to 60s)
+          echo "Waiting for namespace ${{ env.TEST_NAMESPACE }} to terminate..."
+          for i in $(seq 1 60); do
+            if ! oc get namespace ${{ env.TEST_NAMESPACE }} 2>/dev/null; then
+              echo "Namespace terminated after ${i}s"
+              break
+            fi
+            sleep 1
+          done
 
           # Parse image
           IMAGE_REPO=$(echo "${IMAGE}" | rev | cut -d: -f2- | rev)
