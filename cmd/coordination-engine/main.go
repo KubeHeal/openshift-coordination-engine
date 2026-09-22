@@ -308,14 +308,18 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal
+	// Wait for interrupt signal and shut down gracefully
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	gracefulShutdown(server, metricsServer, incidentStore, log)
+}
+
+// gracefulShutdown stops HTTP servers and persists incident data before exit.
+func gracefulShutdown(server, metricsServer *http.Server, incidentStore *storage.IncidentStore, log *logrus.Logger) {
 	log.Info("Shutting down servers...")
 
-	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -325,6 +329,13 @@ func main() {
 
 	if err := metricsServer.Shutdown(ctx); err != nil {
 		log.WithError(err).Error("Metrics server shutdown error")
+	}
+
+	// Persist all incidents to disk on graceful shutdown (ADR-014, Issue #70)
+	if err := incidentStore.SaveToFile(); err != nil {
+		log.WithError(err).Error("Failed to save incidents on shutdown")
+	} else {
+		log.WithField("count", incidentStore.Count()).Info("Incidents saved to disk on shutdown")
 	}
 
 	log.Info("Servers stopped")
@@ -535,18 +546,19 @@ func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.Incident
 		return storage.NewIncidentStore()
 	}
 
-	// Create incident store with file-based persistence
-	incidentStore, err := storage.NewIncidentStoreWithPersistence(cfg.DataDir, log)
+	// Create incident store with per-file persistence (ADR-014, Issue #70)
+	incidentStore, err := storage.NewIncidentStoreWithPersistence(cfg.DataDir, cfg.MaxStoredIncidents, log)
 	if err != nil {
 		log.WithError(err).Error("Failed to create persistent incident store, falling back to in-memory")
 		return storage.NewIncidentStore()
 	}
 
 	log.WithFields(logrus.Fields{
-		"data_dir":         cfg.DataDir,
-		"retention_days":   cfg.IncidentRetentionDays,
-		"loaded_incidents": incidentStore.Count(),
-	}).Info("Incident store initialized with file-based persistence")
+		"data_dir":             cfg.DataDir,
+		"retention_days":       cfg.IncidentRetentionDays,
+		"max_stored_incidents": cfg.MaxStoredIncidents,
+		"loaded_incidents":     incidentStore.Count(),
+	}).Info("Incident store initialized with per-file persistence")
 
 	// Start background cleanup goroutine for old incidents
 	if cfg.IncidentRetentionDays > 0 {

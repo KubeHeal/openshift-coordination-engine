@@ -1212,72 +1212,47 @@ func (c *MLServiceClient) DetectAnomaly(ctx context.Context, req *AnomalyRequest
 
 **Target**: Q1 2026
 
-### Phase 3: Incident Persistence (PLANNED)
+### Phase 3: Incident Persistence (IMPLEMENTED — Issue #70, PR #103)
 
 **Deliverables**:
-- 📋 Implement file-based persistence in IncidentStore
-- 📋 Add load-on-startup, save-on-change logic
-- 📋 Implement atomic write pattern (temp file + rename)
-- 📋 Add TTL cleanup for resolved incidents >90 days
-- 📋 Add PersistentVolume to Helm chart
+- ✅ Per-incident JSON file persistence (`<dataDir>/<id>.json`)
+- ✅ Load-on-startup from directory (newest-first), save-on-change per file
+- ✅ Atomic write pattern (temp file + rename) for each incident
+- ✅ TTL cleanup for resolved incidents >90 days (background goroutine)
+- ✅ Max stored incidents limit via `KUBEHEAL_MAX_STORED_INCIDENTS` (default: 10000)
+- ✅ SIGTERM handler flushes all incidents to disk before exit
+- ✅ PersistentVolume documented in Helm chart `values.yaml`
+- ✅ 12 unit tests covering write, reload, max-limit, eviction, concurrency
 
-**Implementation**:
-```go
-// internal/storage/incidents.go
-func (s *IncidentStore) Create(incident *Incident) (*Incident, error) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-
-    // Existing in-memory logic
-    created := s.createInMemory(incident)
-
-    // NEW: Persist to disk
-    if err := s.saveToFile(s.filePath); err != nil {
-        // Rollback in-memory change on persistence failure
-        delete(s.incidents, created.ID)
-        return nil, fmt.Errorf("failed to persist incident: %w", err)
-    }
-
-    return created, nil
-}
+**Storage Format**: Each incident is an independent JSON file:
+```
+/var/lib/kubeheal/incidents/
+  inc-a1b2c3d4.json
+  inc-e5f6g7h8.json
+  ...
 ```
 
-**Helm Chart Enhancement**:
-```yaml
-# values.yaml
-persistence:
-  enabled: true
-  storageClass: "gp3"
-  size: "10Gi"
-  mountPath: "/app/data"
+**Eviction Policy**: When the store exceeds `maxIncidents`, resolved incidents
+are evicted first (oldest-first), then the oldest active incidents.
 
+**Helm Chart Configuration**:
+```yaml
 env:
   - name: DATA_DIR
-    value: "/app/data"
+    value: "/var/lib/kubeheal/incidents"
   - name: INCIDENT_RETENTION_DAYS
     value: "90"
+  - name: KUBEHEAL_MAX_STORED_INCIDENTS
+    value: "10000"
+
+persistence:
+  enabled: true          # set true for production
+  storageClass: "gp3"
+  size: "1Gi"
+  mountPath: "/var/lib/kubeheal/incidents"
 ```
 
-**Migration Script**:
-```bash
-# Migrate in-memory incidents to file on first deployment
-kubectl exec -n self-healing-platform deployment/coordination-engine -- \
-  curl -X POST http://localhost:8080/internal/admin/export-incidents \
-  > incidents-backup.json
-
-# Deploy with persistent volume
-helm upgrade coordination-engine ./charts/coordination-engine \
-  --set persistence.enabled=true
-
-# Import incidents
-kubectl cp incidents-backup.json \
-  self-healing-platform/coordination-engine-0:/app/data/incidents.json
-
-# Restart to load incidents
-kubectl rollout restart deployment/coordination-engine -n self-healing-platform
-```
-
-**Target**: Q2 2026
+**Status**: ✅ Implemented (September 2026)
 
 ### Phase 4: PostgreSQL Migration (FUTURE)
 
