@@ -377,7 +377,11 @@ func initRemediationComponents(
 ) (*remediation.Orchestrator, *remediation.StrategySelector) {
 	// Initialize remediation components
 	manualRemediator := remediation.NewManualRemediator(k8sClients.Clientset, log)
-	log.Info("Manual remediator initialized")
+	manualRemediator.SetOOMConfig(cfg.OOMMemoryMultiplier, cfg.OOMMemoryMaxLimit)
+	log.WithFields(logrus.Fields{
+		"oom_multiplier": cfg.OOMMemoryMultiplier,
+		"oom_max_limit":  cfg.OOMMemoryMaxLimit,
+	}).Info("Manual remediator initialized with OOM resource patching")
 
 	helmRemediator := remediation.NewHelmRemediator(log)
 	log.Info("Helm remediator initialized")

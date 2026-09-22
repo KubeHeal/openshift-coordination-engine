@@ -133,6 +133,13 @@ env:
     value: "90"
   - name: KUBEHEAL_MAX_STORED_INCIDENTS
     value: "10000"
+  # OOM remediation tuning (Issue #62)
+  # When an OOMKilled pod is detected, memory limits are multiplied by this factor.
+  - name: OOM_MEMORY_MULTIPLIER
+    value: "2.5"
+  # Absolute ceiling for memory limit increases to prevent runaway scaling.
+  - name: OOM_MEMORY_MAX_LIMIT
+    value: "2Gi"
   # Legacy ML_SERVICE_URL (deprecated - use KServe integration instead)
   # - name: ML_SERVICE_URL
   #   value: "http://aiops-ml-service:8080"

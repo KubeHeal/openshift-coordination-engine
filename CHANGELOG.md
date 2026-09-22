@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **File-based incident persistence** ([#70](https://github.com/KubeHeal/openshift-coordination-engine/issues/70)): Each incident is now persisted as an individual JSON file (`<id>.json`) under `DATA_DIR` (default: `/var/lib/kubeheal/incidents`). Incidents are loaded newest-first on startup and flushed on SIGTERM for graceful shutdown. A configurable `KUBEHEAL_MAX_STORED_INCIDENTS` env var (default: 10000) caps the on-disk collection, evicting resolved incidents first. Helm `values.yaml` updated with persistence env vars and mount path. ADR-014 Phase 3 marked as Implemented.
 
+- **OOMKill resource patching** ([#62](https://github.com/KubeHeal/openshift-coordination-engine/issues/62)): OOMKilled pod remediation now patches the owning Deployment's memory limits (default 2.5x, capped at `OOM_MEMORY_MAX_LIMIT`) instead of only deleting pods. Traverses Pod -> ReplicaSet -> Deployment ownership chain. Adds `self-healing.kubeheal.io/memory-increase` annotation for audit trail. Falls back to pod delete for orphan pods or non-Deployment workloads.
+
 ### Fixed
 - **Feature contract mismatch** ([#58](https://github.com/KubeHeal/openshift-coordination-engine/issues/58)): `CurrentMetrics` in the `/api/v1/predict` response now includes `disk_usage`, `network_in`, and `network_out` fields, matching the 5 base metrics sent to the predictive-analytics model. API consumers (MCP server) can now see all metric values used for predictions. Updated API-CONTRACT.md and ADR-016 to reflect the corrected 5-feature contract.
 
