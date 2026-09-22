@@ -135,6 +135,11 @@ jobs:
     runs-on: ubuntu-latest
     # Only run on push to main/develop or scheduled runs (secrets not available on PRs from forks)
     if: github.event_name == 'push' || github.event_name == 'schedule'
+    # Share a concurrency group with e2e-openshift.yaml to prevent
+    # both workflows from deploying to the same ROSA cluster at once
+    concurrency:
+      group: rosa-cluster-e2e
+      cancel-in-progress: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -177,11 +182,50 @@ jobs:
         env:
           ML_SERVICE_URL: ${{ secrets.ML_SERVICE_URL || 'http://localhost:8080' }}
 
-      - name: Run e2e tests on OpenShift
+      - name: Set up Helm
         if: steps.check_creds.outputs.has_creds == 'true'
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Build and push E2E image to OpenShift internal registry
+        if: steps.check_creds.outputs.has_creds == 'true'
+        id: push_image
+        run: |
+          REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+          if [ -z "$REGISTRY" ]; then
+            # Expose the internal registry if route doesn't exist
+            oc patch configs.imageregistry.operator.openshift.io/cluster --type=merge -p '{"spec":{"defaultRoute":true}}' 2>/dev/null || true
+            sleep 10
+            REGISTRY=$(oc get route default-route -n openshift-image-registry -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+          fi
+          if [ -z "$REGISTRY" ]; then
+            echo "image_pushed=false" >> $GITHUB_OUTPUT
+            echo "::warning::Could not expose OpenShift internal registry - skipping E2E"
+            exit 0
+          fi
+          docker build -t coordination-engine:e2e-test .
+          docker tag coordination-engine:e2e-test "$REGISTRY/coordination-engine-e2e/coordination-engine:e2e-test"
+          docker login -u $(oc whoami) -p $(oc whoami -t) "$REGISTRY"
+          docker push "$REGISTRY/coordination-engine-e2e/coordination-engine:e2e-test"
+          echo "image_pushed=true" >> $GITHUB_OUTPUT
+          echo "registry=$REGISTRY" >> $GITHUB_OUTPUT
+
+      - name: Deploy KServe mocks for E2E
+        if: steps.check_creds.outputs.has_creds == 'true' && steps.push_image.outputs.image_pushed == 'true'
+        run: |
+          oc create namespace coordination-engine-e2e 2>/dev/null || true
+          bash scripts/setup-e2e.sh --setup-kserve-mocks || true
+        env:
+          NAMESPACE: coordination-engine-e2e
+
+      - name: Run e2e tests on OpenShift
+        if: steps.check_creds.outputs.has_creds == 'true' && steps.push_image.outputs.image_pushed == 'true'
         run: |
           export KUBECONFIG=$HOME/.kube/config
-          make test-e2e
+          REGISTRY="${{ steps.push_image.outputs.registry }}"
+          E2E_IMAGE="image-registry.openshift-image-registry.svc:5000/coordination-engine-e2e/coordination-engine:e2e-test" \
+            make test-e2e
 
       - name: Cleanup test resources
         if: always() && steps.check_creds.outputs.has_creds == 'true'

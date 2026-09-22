@@ -91,6 +91,11 @@ jobs:
     name: OpenShift E2E Tests
     runs-on: ubuntu-latest
     needs: [check-trigger, check-cluster]
+    # Share a concurrency group with integration.yaml's openshift-integration
+    # job to prevent both workflows from deploying to the same ROSA cluster
+    concurrency:
+      group: rosa-cluster-e2e
+      cancel-in-progress: false
     if: |
       always()
       && needs.check-trigger.outputs.should_run == 'true'
