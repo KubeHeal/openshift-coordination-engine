@@ -96,11 +96,7 @@ func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues m
 		"--timeout", "3m",
 	)
 	for k, v := range setValues {
-		flag := "--set"
-		if strings.HasSuffix(k, ".value") && strings.Contains(k, "env[") {
-			flag = "--set-string"
-		}
-		args = append(args, flag, fmt.Sprintf("%s=%s", k, v))
+		args = append(args, "--set-string", fmt.Sprintf("%s=%s", k, v))
 	}
 
 	s.T().Logf("Running: helm %s", strings.Join(args, " "))
@@ -203,9 +199,21 @@ func (s *E2ETestSuite) getFirstPod(namespace, labelSelector string) (*corev1.Pod
 	return nil, fmt.Errorf("no running pod found with selector %s in %s", labelSelector, namespace)
 }
 
-// deleteNamespace removes a namespace if it exists.
+// deleteNamespace removes a namespace and waits for it to be fully gone.
 func (s *E2ETestSuite) deleteNamespace(namespace string) { //nolint:unparam // param kept for reuse across test files
-	_ = s.clientset.CoreV1().Namespaces().Delete(s.ctx, namespace, metav1.DeleteOptions{})
+	err := s.clientset.CoreV1().Namespaces().Delete(s.ctx, namespace, metav1.DeleteOptions{})
+	if err != nil {
+		return // namespace likely doesn't exist
+	}
+	// Wait up to 60 seconds for the namespace to be fully terminated
+	for i := 0; i < 30; i++ {
+		_, getErr := s.clientset.CoreV1().Namespaces().Get(s.ctx, namespace, metav1.GetOptions{})
+		if getErr != nil {
+			return // namespace is gone
+		}
+		time.Sleep(2 * time.Second)
+	}
+	s.T().Logf("Warning: namespace %s still terminating after 60s", namespace)
 }
 
 // healthResponse is the expected shape of the /health endpoint response.

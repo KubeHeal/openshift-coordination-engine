@@ -27,7 +27,6 @@ func (s *E2ETestSuite) TestHelmDeployAndHealthCheck() {
 	// Cleanup from any previous failed run
 	_ = s.helmUninstall(helmReleaseName, testNamespace)
 	s.deleteNamespace(testNamespace)
-	time.Sleep(2 * time.Second)
 
 	image := getE2EImage()
 	s.T().Logf("Using E2E image: %s", image)
@@ -41,6 +40,7 @@ func (s *E2ETestSuite) TestHelmDeployAndHealthCheck() {
 		"image.tag":        tag,
 		"image.pullPolicy": "IfNotPresent",
 		"replicaCount":     "1",
+		"kserve.enabled":   "false",
 		"env[0].name":      "LOG_LEVEL",
 		"env[0].value":     "debug",
 		"env[1].name":      "PORT",
@@ -81,7 +81,6 @@ func (s *E2ETestSuite) TestHelmDeployRBACResources() {
 	// Cleanup + install
 	_ = s.helmUninstall(helmReleaseName, testNamespace)
 	s.deleteNamespace(testNamespace)
-	time.Sleep(2 * time.Second)
 
 	image := getE2EImage()
 	repo, tag := parseImage(image)
@@ -90,6 +89,7 @@ func (s *E2ETestSuite) TestHelmDeployRBACResources() {
 		"image.repository": repo,
 		"image.tag":        tag,
 		"image.pullPolicy": "IfNotPresent",
+		"kserve.enabled":   "false",
 		"env[0].name":      "ENABLE_KSERVE_INTEGRATION",
 		"env[0].value":     "false",
 	})
@@ -128,7 +128,6 @@ func (s *E2ETestSuite) TestHelmDeployMetricsPort() {
 	// Cleanup + install
 	_ = s.helmUninstall(helmReleaseName, testNamespace)
 	s.deleteNamespace(testNamespace)
-	time.Sleep(2 * time.Second)
 
 	image := getE2EImage()
 	repo, tag := parseImage(image)
@@ -137,6 +136,7 @@ func (s *E2ETestSuite) TestHelmDeployMetricsPort() {
 		"image.repository": repo,
 		"image.tag":        tag,
 		"image.pullPolicy": "IfNotPresent",
+		"kserve.enabled":   "false",
 		"env[0].name":      "ENABLE_KSERVE_INTEGRATION",
 		"env[0].value":     "false",
 	})
