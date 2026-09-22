@@ -37,18 +37,23 @@ serviceAccount:
 podAnnotations: {}
 
 # Pod security context
+# Note: runAsUser and fsGroup are null to let OpenShift assign UIDs from the
+# namespace range (required for ROSA and restricted-v2 SCC compatibility).
+# Override with --set podSecurityContext.runAsUser=1001 for non-OCP clusters.
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1001
-  fsGroup: 1001
+  runAsUser: null
+  fsGroup: null
 
-# Container security context
+# Container security context — OpenShift restricted-v2 compatible
 securityContext:
   capabilities:
     drop:
     - ALL
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
 
 # Service configuration
 service:
