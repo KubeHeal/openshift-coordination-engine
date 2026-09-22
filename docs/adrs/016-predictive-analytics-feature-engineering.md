@@ -5,7 +5,7 @@ IMPLEMENTED - 2026-01-29
 
 ## Context
 
-The `predictive-analytics` KServe model was trained with extensive feature engineering in the Python notebook, resulting in a model that expects 3264 features. However, the coordination engine was sending only 4 raw features, causing prediction failures:
+The `predictive-analytics` KServe model was trained with extensive feature engineering in the Python notebook, resulting in a model that expects 3264 features. However, the coordination engine was originally sending only 4 raw features, causing prediction failures:
 
 ```
 X has 4 features, but StandardScaler is expecting 3264 features as input.
@@ -31,7 +31,7 @@ instances := [][]float64{{
 }}
 ```
 
-This 4-feature vector caused a dimension mismatch with the trained model.
+This 4-feature vector caused a dimension mismatch with the trained model. Issue #58 later corrected the raw-metric fallback to send all 5 base metrics (`cpu_usage`, `memory_usage`, `disk_usage`, `network_in`, `network_out`).
 
 ## Decision
 
@@ -119,7 +119,7 @@ Feature engineering is automatically used for the `predictive-analytics` model w
 - `ENABLE_FEATURE_ENGINEERING=true` (default)
 - Prometheus is available
 
-Fallback to 4-feature raw metrics occurs when:
+Fallback to 5-feature raw metrics (Issue #58) occurs when:
 - Feature engineering is disabled
 - Prometheus is unavailable
 - Feature engineering fails (with warning log)
@@ -222,7 +222,7 @@ env:
     value: "false"
 ```
 
-This will send 4 features instead of 3200+, which requires a compatible model.
+This will send 5 raw features instead of 3200+, matching the model's base metrics (Issue #58).
 
 ## Testing
 

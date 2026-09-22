@@ -459,6 +459,9 @@ func TestPredictResponse_Structure(t *testing.T) {
 		CurrentMetrics: CurrentMetrics{
 			CPURollingMean:    68.2,
 			MemoryRollingMean: 74.5,
+			DiskUsage:         0.45,
+			NetworkIn:         0.10,
+			NetworkOut:        0.08,
 			Timestamp:         "2026-01-12T14:30:00Z",
 			TimeRange:         "24h",
 		},
@@ -488,6 +491,9 @@ func TestPredictResponse_Structure(t *testing.T) {
 	assert.Equal(t, resp.Predictions.MemoryPercent, decoded.Predictions.MemoryPercent)
 	assert.Equal(t, resp.CurrentMetrics.CPURollingMean, decoded.CurrentMetrics.CPURollingMean)
 	assert.Equal(t, resp.CurrentMetrics.MemoryRollingMean, decoded.CurrentMetrics.MemoryRollingMean)
+	assert.Equal(t, resp.CurrentMetrics.DiskUsage, decoded.CurrentMetrics.DiskUsage)
+	assert.Equal(t, resp.CurrentMetrics.NetworkIn, decoded.CurrentMetrics.NetworkIn)
+	assert.Equal(t, resp.CurrentMetrics.NetworkOut, decoded.CurrentMetrics.NetworkOut)
 	assert.Equal(t, resp.ModelInfo.Name, decoded.ModelInfo.Name)
 	assert.Equal(t, resp.ModelInfo.Confidence, decoded.ModelInfo.Confidence)
 	assert.Equal(t, resp.TargetTime.Hour, decoded.TargetTime.Hour)
@@ -1009,7 +1015,7 @@ func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
 			Namespace: "test-ns",
 		}
 
-		instances, featureCount := handler.buildRawMetricInstances(ctx, req)
+		instances, featureCount, rm := handler.buildRawMetricInstances(ctx, req)
 
 		require.Len(t, instances, 1, "Should return single instance")
 		require.Len(t, instances[0], 5, "Raw metrics should have exactly 5 features (Issue #58)")
@@ -1022,6 +1028,13 @@ func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
 		assert.Equal(t, 0.45, instances[0][2], "Feature 2 should be disk_usage (default)")
 		assert.Equal(t, 0.10, instances[0][3], "Feature 3 should be network_in (default)")
 		assert.Equal(t, 0.08, instances[0][4], "Feature 4 should be network_out (default)")
+
+		// Verify rawMetrics struct matches (Issue #58)
+		assert.Equal(t, 0.65, rm.cpuUsage, "rawMetrics.cpuUsage should match")
+		assert.Equal(t, 0.72, rm.memoryUsage, "rawMetrics.memoryUsage should match")
+		assert.Equal(t, 0.45, rm.diskUsage, "rawMetrics.diskUsage should match")
+		assert.Equal(t, 0.10, rm.networkIn, "rawMetrics.networkIn should match")
+		assert.Equal(t, 0.08, rm.networkOut, "rawMetrics.networkOut should match")
 	})
 
 	t.Run("returns default values when Prometheus unavailable", func(t *testing.T) {
@@ -1034,7 +1047,7 @@ func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
 			Pod:        "my-pod-xyz",
 		}
 
-		instances, featureCount := handler.buildRawMetricInstances(ctx, req)
+		instances, featureCount, _ := handler.buildRawMetricInstances(ctx, req)
 
 		require.Len(t, instances, 1, "Should return single instance")
 		require.Len(t, instances[0], 5, "Should have 5 features")
@@ -1053,25 +1066,25 @@ func TestPredictionHandler_BuildRawMetricInstances(t *testing.T) {
 
 		// Cluster scope (no filters)
 		clusterReq := &PredictRequest{Scope: "cluster"}
-		instances, count := handler.buildRawMetricInstances(ctx, clusterReq)
+		instances, count, _ := handler.buildRawMetricInstances(ctx, clusterReq)
 		assert.Len(t, instances[0], 5)
 		assert.Equal(t, 5, count)
 
 		// Namespace scope
 		nsReq := &PredictRequest{Scope: "namespace", Namespace: "prod"}
-		instances, count = handler.buildRawMetricInstances(ctx, nsReq)
+		instances, count, _ = handler.buildRawMetricInstances(ctx, nsReq)
 		assert.Len(t, instances[0], 5)
 		assert.Equal(t, 5, count)
 
 		// Deployment scope
 		deployReq := &PredictRequest{Scope: "deployment", Namespace: "prod", Deployment: "api"}
-		instances, count = handler.buildRawMetricInstances(ctx, deployReq)
+		instances, count, _ = handler.buildRawMetricInstances(ctx, deployReq)
 		assert.Len(t, instances[0], 5)
 		assert.Equal(t, 5, count)
 
 		// Pod scope
 		podReq := &PredictRequest{Scope: "pod", Namespace: "prod", Pod: "api-abc123"}
-		instances, count = handler.buildRawMetricInstances(ctx, podReq)
+		instances, count, _ = handler.buildRawMetricInstances(ctx, podReq)
 		assert.Len(t, instances[0], 5)
 		assert.Equal(t, 5, count)
 	})

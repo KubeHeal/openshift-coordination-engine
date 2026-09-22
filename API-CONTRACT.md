@@ -382,42 +382,74 @@ Detect anomalies in metrics data.
 }
 ```
 
-#### `POST /api/v1/prediction/predict`
-Predict future issues based on current state.
+#### `POST /api/v1/predict`
+Get time-specific resource usage predictions using KServe ML models and Prometheus metrics.
+
+Sends 5 base metrics (`cpu_usage`, `memory_usage`, `disk_usage`, `network_in`, `network_out`) to the `predictive-analytics` model. When feature engineering is enabled (`ENABLE_FEATURE_ENGINEERING=true`, the default), a 3200+ engineered feature vector is built from Prometheus range queries instead.
 
 **Request Body**:
 ```json
 {
+  "hour": 15,
+  "day_of_week": 3,
   "namespace": "production",
-  "resource": "Deployment/payment-service",
-  "current_state": {
-    "replicas": 3,
-    "cpu_usage": 0.75,
-    "memory_usage": 0.80,
-    "error_rate": 0.02
-  },
-  "prediction_horizon": "1h"
+  "deployment": "payment-service",
+  "pod": "",
+  "scope": "deployment",
+  "model": "predictive-analytics"
 }
 ```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `hour` | int | Yes | Hour of day, 0-23 |
+| `day_of_week` | int | Yes | Day of week, 0=Monday, 6=Sunday |
+| `namespace` | string | No | Namespace filter |
+| `deployment` | string | No | Deployment filter |
+| `pod` | string | No | Pod filter |
+| `scope` | string | No | One of: `pod`, `deployment`, `namespace`, `cluster` (default: inferred) |
+| `model` | string | No | KServe model name (default: `predictive-analytics`) |
 
 **Response** (200 OK):
 ```json
 {
-  "predictions": [
-    {
-      "issue_type": "memory_pressure",
-      "probability": 0.85,
-      "expected_time": "45m",
-      "severity": "high",
-      "recommended_actions": [
-        "increase_memory_limit",
-        "add_horizontal_scaling"
-      ]
-    }
-  ],
-  "confidence": 0.82
+  "status": "success",
+  "scope": "deployment",
+  "target": "production/payment-service",
+  "predictions": {
+    "cpu_percent": 74.5,
+    "memory_percent": 81.2
+  },
+  "current_metrics": {
+    "cpu_rolling_mean": 68.2,
+    "memory_rolling_mean": 74.5,
+    "disk_usage": 0.45,
+    "network_in": 0.10,
+    "network_out": 0.08,
+    "timestamp": "2026-01-12T14:30:00Z",
+    "time_range": "24h"
+  },
+  "model_info": {
+    "name": "predictive-analytics",
+    "version": "1.0.0",
+    "confidence": 0.92
+  },
+  "target_time": {
+    "hour": 15,
+    "day_of_week": 3,
+    "iso_timestamp": "2026-01-15T15:00:00Z"
+  }
 }
 ```
+
+**Error Responses**:
+
+| Code | HTTP Status | Condition |
+|------|-------------|-----------|
+| `INVALID_REQUEST` | 400 | Malformed JSON, invalid hour/day_of_week, bad scope |
+| `KSERVE_UNAVAILABLE` | 503 | KServe integration not configured |
+| `MODEL_NOT_FOUND` | 503 | Requested model not registered in KServe |
+| `PREDICTION_FAILED` | 503 | Model returned an error or empty response |
 
 #### `POST /api/v1/pattern/analyze`
 Analyze patterns in historical data.
