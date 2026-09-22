@@ -249,6 +249,11 @@ func main() {
 	rightSizingHandler := v1.NewRightSizingHandler(prometheusClient, log)
 	rightSizingHandler.RegisterRoutes(router)
 
+	// Deep RCA v2 investigation endpoint (ADR-021, Issue #72)
+	rcaHandler := v1.NewRCAHandler(k8sClients.Clientset, k8sClients.DynamicClient, k8sClients.Clientset.Discovery(), log)
+	rcaHandler.RegisterRoutes(router)
+	log.Info("RCA investigation endpoint registered: POST /api/v1/investigate/rca")
+
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
 		kserveProxyHandler.RegisterRoutes(router)
