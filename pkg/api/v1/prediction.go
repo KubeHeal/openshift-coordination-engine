@@ -184,10 +184,14 @@ type PredictionValues struct {
 	MemoryPercent float64 `json:"memory_percent"`
 }
 
-// CurrentMetrics contains the current rolling metrics from Prometheus
+// CurrentMetrics contains the current metrics from Prometheus used for prediction.
+// All values are ratios in the range [0, 1] (multiply by 100 for percentages).
 type CurrentMetrics struct {
 	CPURollingMean    float64 `json:"cpu_rolling_mean"`
 	MemoryRollingMean float64 `json:"memory_rolling_mean"`
+	DiskUsage         float64 `json:"disk_usage"`
+	NetworkIn         float64 `json:"network_in"`
+	NetworkOut        float64 `json:"network_out"`
 	Timestamp         string  `json:"timestamp"`
 	TimeRange         string  `json:"time_range"`
 }
@@ -256,7 +260,7 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 	cpuRollingMean, memoryRollingMean := h.getMetricsWithDefaults(ctx, req)
 
 	// Build prediction instances (Issue #58: uses 5 raw metrics when feature engineering is disabled)
-	instances, featureCount := h.buildPredictionInstances(ctx, req)
+	instances, featureCount, metrics := h.buildPredictionInstances(ctx, req)
 
 	h.logPredictionInstances(featureCount, cpuRollingMean, memoryRollingMean)
 
@@ -267,8 +271,8 @@ func (h *PredictionHandler) HandlePredict(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Build and send response
-	response := h.buildPredictResponse(req, cpuPercent, memoryPercent, confidence, modelVersion, cpuRollingMean, memoryRollingMean)
+	// Build and send response (Issue #58: include all 5 metrics in response)
+	response := h.buildPredictResponse(req, cpuPercent, memoryPercent, confidence, modelVersion, cpuRollingMean, memoryRollingMean, metrics)
 	h.logPredictionSuccess(&response, cpuPercent, memoryPercent, confidence)
 	h.respondJSON(w, http.StatusOK, response)
 }
@@ -354,8 +358,18 @@ func (h *PredictionHandler) getMetricsWithDefaults(ctx context.Context, req *Pre
 	return cpuRollingMean, memoryRollingMean
 }
 
+// rawMetrics holds the 5 base metric values used for prediction (Issue #58).
+// These are included in the API response so consumers can see what was sent to the model.
+type rawMetrics struct {
+	cpuUsage    float64
+	memoryUsage float64
+	diskUsage   float64
+	networkIn   float64
+	networkOut  float64
+}
+
 // buildPredictionInstances builds the feature vector for prediction
-func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *PredictRequest) ([][]float64, int) {
+func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *PredictRequest) ([][]float64, int, rawMetrics) {
 	// Use feature engineering for predictive-analytics model if enabled
 	if req.Model == "predictive-analytics" && h.featureBuilder != nil && h.enableFeatureEngineering {
 		featureVector, err := h.featureBuilder.BuildFeatures(ctx, req.Namespace, req.Deployment, req.Pod)
@@ -368,11 +382,33 @@ func (h *PredictionHandler) buildPredictionInstances(ctx context.Context, req *P
 			"feature_count": featureVector.FeatureCount,
 			"metrics":       featureVector.MetricsData,
 		}).Debug("Built engineered features for prediction")
-		return [][]float64{featureVector.Features}, featureVector.FeatureCount
+		// For engineered features, extract base metrics from the first 5 values
+		rm := h.extractBaseMetrics(featureVector.Features)
+		return [][]float64{featureVector.Features}, featureVector.FeatureCount, rm
 	}
 	// Issue #58: Use 5 raw features matching the model's expected input:
 	// [cpu_usage, memory_usage, disk_usage, network_in, network_out]
 	return h.buildRawMetricInstances(ctx, req)
+}
+
+// extractBaseMetrics extracts the 5 base metric values from an engineered feature vector.
+// The first 5 values correspond to the current values of cpu, memory, disk, net_in, net_out.
+func (h *PredictionHandler) extractBaseMetrics(featureVec []float64) rawMetrics {
+	rm := rawMetrics{
+		cpuUsage:    h.defaultCPURollingMean,
+		memoryUsage: h.defaultMemoryRollingMean,
+		diskUsage:   h.defaultDiskUsage,
+		networkIn:   h.defaultNetworkIn,
+		networkOut:  h.defaultNetworkOut,
+	}
+	if len(featureVec) >= 5 {
+		rm.cpuUsage = featureVec[0]
+		rm.memoryUsage = featureVec[1]
+		rm.diskUsage = featureVec[2]
+		rm.networkIn = featureVec[3]
+		rm.networkOut = featureVec[4]
+	}
+	return rm
 }
 
 // executePrediction calls the KServe model and processes the response
@@ -407,7 +443,7 @@ func (h *PredictionHandler) processKServeResponse(resp *kserve.ModelResponse, cp
 }
 
 // buildPredictResponse constructs the prediction response
-func (h *PredictionHandler) buildPredictResponse(req *PredictRequest, cpuPercent, memoryPercent, confidence float64, modelVersion string, cpuRollingMean, memoryRollingMean float64) PredictResponse {
+func (h *PredictionHandler) buildPredictResponse(req *PredictRequest, cpuPercent, memoryPercent, confidence float64, modelVersion string, cpuRollingMean, memoryRollingMean float64, rm rawMetrics) PredictResponse {
 	return PredictResponse{
 		Status: "success",
 		Scope:  req.Scope,
@@ -419,6 +455,9 @@ func (h *PredictionHandler) buildPredictResponse(req *PredictRequest, cpuPercent
 		CurrentMetrics: CurrentMetrics{
 			CPURollingMean:    cpuRollingMean * 100, // Convert to percentage
 			MemoryRollingMean: memoryRollingMean * 100,
+			DiskUsage:         rm.diskUsage,  // Ratio [0,1] as sent to model (Issue #58)
+			NetworkIn:         rm.networkIn,  // Ratio [0,1] as sent to model (Issue #58)
+			NetworkOut:        rm.networkOut, // Ratio [0,1] as sent to model (Issue #58)
 			Timestamp:         time.Now().UTC().Format(time.RFC3339),
 			TimeRange:         "24h",
 		},
@@ -707,7 +746,7 @@ func (h *PredictionHandler) processPredictions(resp *kserve.DetectResponse, cpuR
 // buildRawMetricInstances builds the 5-feature instance for predictions (Issue #58)
 // Features: [cpu_usage, memory_usage, disk_usage, network_in, network_out]
 // This matches the predictive-analytics model's training data features.
-func (h *PredictionHandler) buildRawMetricInstances(ctx context.Context, req *PredictRequest) ([][]float64, int) {
+func (h *PredictionHandler) buildRawMetricInstances(ctx context.Context, req *PredictRequest) ([][]float64, int, rawMetrics) {
 	cpuUsage := h.defaultCPURollingMean
 	memoryUsage := h.defaultMemoryRollingMean
 	diskUsage := h.defaultDiskUsage
@@ -765,13 +804,21 @@ func (h *PredictionHandler) buildRawMetricInstances(ctx context.Context, req *Pr
 		"pod":          req.Pod,
 	}).Debug("Built raw metric instances for prediction")
 
+	rm := rawMetrics{
+		cpuUsage:    cpuUsage,
+		memoryUsage: memoryUsage,
+		diskUsage:   diskUsage,
+		networkIn:   networkIn,
+		networkOut:  networkOut,
+	}
+
 	return [][]float64{{
 		cpuUsage,
 		memoryUsage,
 		diskUsage,
 		networkIn,
 		networkOut,
-	}}, 5
+	}}, 5, rm
 }
 
 // IsFeatureEngineeringEnabled returns true if feature engineering is enabled
