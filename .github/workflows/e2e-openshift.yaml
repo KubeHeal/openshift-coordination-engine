@@ -273,10 +273,10 @@ jobs:
           sleep 3
 
           echo "Testing /metrics endpoint..."
-          METRICS=$(curl -sf http://localhost:19090/metrics | head -20)
-          echo "${METRICS}"
+          METRICS=$(curl -sf http://localhost:19090/metrics)
+          echo "${METRICS}" | head -20
 
-          if echo "${METRICS}" | grep -q "go_"; then
+          if echo "${METRICS}" | grep -qE "coordination_engine_|go_"; then
             echo "Metrics endpoint PASSED"
           else
             echo "Metrics endpoint FAILED"
