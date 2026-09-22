@@ -339,12 +339,32 @@ make test
 # Integration tests
 make test-integration
 
-# E2E tests
+# E2E tests (requires KUBECONFIG or Kind cluster)
 make test-e2e
+
+# E2E tests with image build (assumes Kind cluster exists)
+make test-e2e-ci
 
 # Coverage
 make coverage
 ```
+
+### E2E Testing
+
+The project uses a dual E2E testing strategy:
+
+- **Tier 1 (Kind)**: Runs on every push/PR via `.github/workflows/e2e-kind.yaml`. Builds the image, loads into Kind, deploys via Helm, verifies health endpoint.
+- **Tier 2 (OpenShift)**: Runs manually or on `release-*` pushes via `.github/workflows/e2e-openshift.yaml`. Tests against a live OpenShift cluster.
+
+For manual OpenShift testing, use the setup script:
+
+```bash
+./scripts/setup-e2e.sh --deploy    # Deploy + smoke test
+./scripts/setup-e2e.sh --audit     # Audit cluster readiness
+./scripts/setup-e2e.sh --destroy   # Cleanup
+```
+
+See [E2E Runbook](docs/E2E-RUNBOOK.md) for full documentation.
 
 ### Linting
 
