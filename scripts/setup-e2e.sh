@@ -5,12 +5,14 @@
 # Simplified for Helm-based deployment (no operator-sdk, no CRDs).
 #
 # Usage:
-#   ./scripts/setup-e2e.sh --deploy    Deploy coordination-engine + smoke test
-#   ./scripts/setup-e2e.sh --audit     Audit cluster readiness
-#   ./scripts/setup-e2e.sh --secrets   Print GitHub secrets needed for CI
-#   ./scripts/setup-e2e.sh --set-secrets  Auto-set GitHub secrets via gh CLI
-#   ./scripts/setup-e2e.sh --destroy   Uninstall chart + delete namespace
-#   ./scripts/setup-e2e.sh --status    Check deployment status
+#   ./scripts/setup-e2e.sh --deploy              Deploy mock KServe + coordination-engine + smoke test
+#   ./scripts/setup-e2e.sh --audit               Audit cluster readiness
+#   ./scripts/setup-e2e.sh --secrets             Print GitHub secrets needed for CI
+#   ./scripts/setup-e2e.sh --set-secrets         Auto-set GitHub secrets via gh CLI
+#   ./scripts/setup-e2e.sh --destroy             Uninstall chart + mocks + delete namespace
+#   ./scripts/setup-e2e.sh --status              Check deployment status
+#   ./scripts/setup-e2e.sh --setup-kserve-mocks  Deploy mock KServe predictor services only
+#   ./scripts/setup-e2e.sh --destroy-kserve-mocks Remove mock KServe services only
 #
 # Environment variables (optional overrides):
 #   NAMESPACE          — Target namespace (default: self-healing-platform)
@@ -375,6 +377,141 @@ check_status() {
 }
 
 # ──────────────────────────────────────────────────────────────────────
+# Deploy mock KServe predictor services
+# ──────────────────────────────────────────────────────────────────────
+deploy_kserve_mocks() {
+    section "Deploying mock KServe predictor services"
+
+    local MODELS=("anomaly-detector" "predictive-analytics")
+
+    # Create nginx config that returns 200 JSON on /v1/models/* paths
+    info "Creating mock KServe nginx config..."
+    $KUBECTL apply -n "$NAMESPACE" -f - <<'CONFIGMAP'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kserve-mock-nginx-config
+  labels:
+    app.kubernetes.io/part-of: kserve-mocks
+data:
+  default.conf: |
+    server {
+        listen 8080;
+        location /v1/models/ {
+            default_type application/json;
+            return 200 '{"name":"mock-model","ready":true}';
+        }
+        location /v1/models {
+            default_type application/json;
+            return 200 '{"name":"mock-model","ready":true}';
+        }
+        location / {
+            default_type application/json;
+            return 200 '{"status":"ok"}';
+        }
+    }
+CONFIGMAP
+    ok "ConfigMap created"
+
+    for MODEL in "${MODELS[@]}"; do
+        local SVC_NAME="${MODEL}-predictor"
+        info "Deploying mock: $SVC_NAME"
+
+        $KUBECTL apply -n "$NAMESPACE" -f - <<DEPLOYMENT
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${SVC_NAME}
+  labels:
+    app: ${SVC_NAME}
+    app.kubernetes.io/part-of: kserve-mocks
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${SVC_NAME}
+  template:
+    metadata:
+      labels:
+        app: ${SVC_NAME}
+    spec:
+      containers:
+      - name: mock-predictor
+        image: nginx:alpine
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 50m
+            memory: 32Mi
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: kserve-mock-nginx-config
+DEPLOYMENT
+
+        $KUBECTL apply -n "$NAMESPACE" -f - <<SERVICE
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${SVC_NAME}
+  labels:
+    app: ${SVC_NAME}
+    app.kubernetes.io/part-of: kserve-mocks
+spec:
+  selector:
+    app: ${SVC_NAME}
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+SERVICE
+        ok "  $SVC_NAME deployment + service created"
+    done
+
+    info "Waiting for mock pods to be ready..."
+    for MODEL in "${MODELS[@]}"; do
+        local SVC_NAME="${MODEL}-predictor"
+        $KUBECTL rollout status deployment/"$SVC_NAME" -n "$NAMESPACE" --timeout=60s 2>/dev/null || \
+            warn "  $SVC_NAME rollout not ready (non-fatal)"
+    done
+
+    # Verify endpoints respond
+    info "Verifying mock endpoints..."
+    for MODEL in "${MODELS[@]}"; do
+        local SVC_NAME="${MODEL}-predictor"
+        local POD=$($KUBECTL get pods -n "$NAMESPACE" -l "app=$SVC_NAME" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$POD" ]; then
+            RESULT=$($KUBECTL exec -n "$NAMESPACE" "$POD" -- wget -qO- http://localhost:8080/v1/models/"$MODEL" 2>/dev/null || echo "")
+            if echo "$RESULT" | grep -q "ready"; then
+                ok "  $SVC_NAME responds on /v1/models/$MODEL"
+            else
+                warn "  $SVC_NAME health check inconclusive (pod may still be starting)"
+            fi
+        else
+            warn "  No pod found for $SVC_NAME"
+        fi
+    done
+
+    ok "Mock KServe predictor services deployed"
+}
+
+# Remove mock KServe services
+destroy_kserve_mocks() {
+    info "Removing mock KServe services..."
+    $KUBECTL delete deployment -n "$NAMESPACE" -l app.kubernetes.io/part-of=kserve-mocks --ignore-not-found=true 2>/dev/null || true
+    $KUBECTL delete service -n "$NAMESPACE" -l app.kubernetes.io/part-of=kserve-mocks --ignore-not-found=true 2>/dev/null || true
+    $KUBECTL delete configmap -n "$NAMESPACE" kserve-mock-nginx-config --ignore-not-found=true 2>/dev/null || true
+    ok "Mock KServe services removed"
+}
+
+# ──────────────────────────────────────────────────────────────────────
 # Destroy
 # ──────────────────────────────────────────────────────────────────────
 destroy() {
@@ -398,6 +535,8 @@ main() {
     case "${1:-}" in
         --deploy)
             preflight
+            $KUBECTL create namespace "$NAMESPACE" 2>/dev/null || true
+            deploy_kserve_mocks
             deploy_engine
             run_smoke_test
             echo ""
@@ -417,8 +556,18 @@ main() {
             preflight
             check_status
             ;;
+        --setup-kserve-mocks)
+            preflight
+            $KUBECTL create namespace "$NAMESPACE" 2>/dev/null || true
+            deploy_kserve_mocks
+            ;;
+        --destroy-kserve-mocks)
+            preflight
+            destroy_kserve_mocks
+            ;;
         --destroy)
             preflight
+            destroy_kserve_mocks
             destroy
             ;;
         --help|-h)
@@ -426,12 +575,14 @@ main() {
 Coordination Engine E2E Setup
 
 Usage:
-  $(basename "$0") --deploy       Deploy coordination-engine + smoke test
-  $(basename "$0") --audit        Audit cluster readiness
-  $(basename "$0") --secrets      Print GitHub secrets needed for CI
-  $(basename "$0") --set-secrets  Auto-set GitHub secrets via gh CLI
-  $(basename "$0") --status       Check deployment status
-  $(basename "$0") --destroy      Uninstall chart + delete namespace
+  $(basename "$0") --deploy              Deploy mock KServe + coordination-engine + smoke test
+  $(basename "$0") --audit               Audit cluster readiness
+  $(basename "$0") --secrets             Print GitHub secrets needed for CI
+  $(basename "$0") --set-secrets         Auto-set GitHub secrets via gh CLI
+  $(basename "$0") --status              Check deployment status
+  $(basename "$0") --setup-kserve-mocks  Deploy mock KServe predictor services only
+  $(basename "$0") --destroy-kserve-mocks Remove mock KServe services only
+  $(basename "$0") --destroy             Uninstall chart + mocks + delete namespace
 
 Environment variables:
   NAMESPACE       Target namespace (default: self-healing-platform)
