@@ -588,6 +588,6 @@ response.
 ## References
 
 - [KServe v1 Protocol](https://kserve.github.io/website/latest/modelserving/data_plane/v1_protocol/)
-- [ADR-039: User-Deployed KServe Models](../docs/adrs/039-user-deployed-kserve-models.md)
+- ADR-039: User-Deployed KServe Models (platform repository)
 
 
