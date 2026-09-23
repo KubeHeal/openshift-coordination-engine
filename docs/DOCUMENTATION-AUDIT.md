@@ -43,7 +43,7 @@ The repository now has comprehensive documentation across all tiers: contributor
 
 | ID | File | Issue | Status |
 |----|------|-------|--------|
-| M-1 | `todo.md` | Working scratchpad, not formal documentation. | **Open.** Low impact. |
+| M-1 | `todo.md` | Working scratchpad, not formal documentation. | **Fixed.** File removed. Tasks tracked in GitHub Issues. |
 | M-2 | `GITHUB-SETUP.md` | Overlaps with `CONTRIBUTING.md`. | **Open.** Low impact. |
 | M-3 | `CLAUDE.md` | Local filesystem paths (`/home/lab-user/...`). | **Fixed.** Replaced with GitHub repository references. |
 | M-4 | `API-CONTRACT.md` | Broken link to `../docs/adrs/039-user-deployed-kserve-models.md`. | **Fixed.** Replaced with plain-text reference to platform repository. |
@@ -76,7 +76,7 @@ The repository now has comprehensive documentation across all tiers: contributor
 
 | ID | Priority | Description | Notes |
 |----|----------|-------------|-------|
-| M-1 | Medium | `todo.md` is a working scratchpad. | Consider removing or adding a header. |
+| M-1 | Medium | `todo.md` was a working scratchpad. | **Fixed.** Removed. Tasks tracked in GitHub Issues. |
 | M-2 | Medium | `GITHUB-SETUP.md` duplicates `CONTRIBUTING.md`. | Consider consolidating. |
 | M-6 | Medium | Long ADRs lack a table of contents. | Informational; add as ADRs are revised. |
 | M-7 | Medium | No OpenAPI specification. | Tracked by issue #71. |
