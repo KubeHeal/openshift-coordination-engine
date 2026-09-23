@@ -1,5 +1,7 @@
 # Coordination Engine Helm Chart
 
+> **Chart version:** 1.2.0 | **App version:** 1.2.0 | **Last updated:** 2026-09-23
+
 Helm chart for deploying the OpenShift Coordination Engine.
 
 ## Prerequisites

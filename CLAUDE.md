@@ -180,7 +180,10 @@ Each layer has health checkpoints between steps.
 
 ## Related Documentation
 
-### Platform ADRs (in `/home/lab-user/openshift-aiops-platform/docs/adrs/`)
+### Platform ADRs (separate repository)
+
+The following ADRs live in the `openshift-aiops-platform` repository. They define the overall strategy and are referenced by local ADRs:
+
 - ADR-033: RBAC Permissions for coordination engine ServiceAccount
 - ADR-038: ArgoCD/MCO Integration patterns
 - ADR-039: Non-ArgoCD Remediation strategies
@@ -193,8 +196,8 @@ Each layer has health checkpoints between steps.
 - ADR-011: MCP Server Integration
 
 ### Related Repositories
-- Platform: `/home/lab-user/openshift-aiops-platform`
-- MCP Server: `/home/lab-user/openshift-cluster-health-mcp` (Go implementation reference)
+- Platform: `KubeHeal/openshift-aiops-platform` (GitHub)
+- MCP Server: `KubeHeal/openshift-cluster-health-mcp` (GitHub)
 
 ### External References
 - Go client-go: https://github.com/kubernetes/client-go
@@ -207,7 +210,7 @@ This engine is part of a migration from Python to Go for coordination logic:
 - **Kept**: Python ML/AI service (as separate deployment)
 - **Added**: This Go coordination engine
 
-See `MIGRATION-GUIDE.md` for migration steps and `API-CONTRACT.md` for detailed API specifications.
+See `API-CONTRACT.md` for detailed API specifications and `DESIGN_DOC.md` for the arc42 architecture overview.
 
 ## Code Style Notes
 

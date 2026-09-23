@@ -39,16 +39,16 @@ These ADRs define the **Go implementation** of the coordination engine:
 
 ### Platform ADRs (Reference)
 
-These ADRs from `/home/lab-user/openshift-aiops-platform/docs/adrs/` define the **overall strategy** and are referenced by local ADRs:
+The following ADRs live in the **openshift-aiops-platform** repository. They define the overall strategy and are referenced by local ADRs. These links are for reference only and are not resolvable from this repository.
 
 | ADR | Title | Referenced By |
 |-----|-------|---------------|
-| [Platform ADR-033](../../openshift-aiops-platform/docs/adrs/033-coordination-engine-rbac-permissions.md) | Coordination Engine RBAC Permissions | ADR-006 |
-| [Platform ADR-038](../../openshift-aiops-platform/docs/adrs/038-argocd-mco-integration-boundaries.md) | ArgoCD/MCO Integration Boundaries | ADR-004 |
-| [Platform ADR-039](../../openshift-aiops-platform/docs/adrs/039-non-argocd-application-remediation.md) | Non-ArgoCD Application Remediation | ADR-005 |
-| [Platform ADR-040](../../openshift-aiops-platform/docs/adrs/040-multi-layer-coordination-strategy.md) | Multi-Layer Coordination Strategy | ADR-003 |
-| [Platform ADR-041](../../openshift-aiops-platform/docs/adrs/041-deployment-method-detection-strategy.md) | Deployment Method Detection Strategy | ADR-002 |
-| [Platform ADR-042](../../openshift-aiops-platform/docs/adrs/042-go-based-coordination-engine.md) | Go-Based Coordination Engine | All ADRs |
+| Platform ADR-033 | Coordination Engine RBAC Permissions | ADR-006 |
+| Platform ADR-038 | ArgoCD/MCO Integration Boundaries | ADR-004 |
+| Platform ADR-039 | Non-ArgoCD Application Remediation | ADR-005 |
+| Platform ADR-040 | Multi-Layer Coordination Strategy | ADR-003 |
+| Platform ADR-041 | Deployment Method Detection Strategy | ADR-002 |
+| Platform ADR-042 | Go-Based Coordination Engine | All ADRs |
 
 ## ADR Relationships
 
