@@ -1,0 +1,54 @@
+name: Trivy Scheduled Image Scan
+
+# Scans the latest published container image for newly disclosed CVEs.
+# Runs weekly and on-demand. Results appear on the GitHub Security tab.
+
+on:
+  schedule:
+    - cron: '0 10 * * 1'  # Monday 10:00 UTC
+  workflow_dispatch:
+
+env:
+  REGISTRY: quay.io
+  IMAGE_NAME: takinosh/openshift-coordination-engine
+  # Scan the latest release-4.22 image by default
+  IMAGE_TAG: ocp-4.22-latest
+
+jobs:
+  trivy-image-scan:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Pull container image
+        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy-image-results.sarif') != ''
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+          category: 'trivy-scheduled-image-scan'
+
+      - name: Scan summary
+        if: always()
+        run: |
+          echo "## Trivy Scheduled Image Scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Results uploaded to the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning)." >> $GITHUB_STEP_SUMMARY
