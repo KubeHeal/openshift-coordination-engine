@@ -423,7 +423,8 @@ oc apply -f charts/coordination-engine/templates/rolebinding.yaml
 helm install coordination-engine ./charts/coordination-engine \
   --set image.repository=quay.io/takinosh/openshift-coordination-engine \
   --set image.tag=latest \
-  --set mlServiceUrl=http://aiops-ml-service:8080 \
+  --set kserve.enabled=true \
+  --set kserve.namespace=self-healing-platform \
   --namespace self-healing-platform
 ```
 

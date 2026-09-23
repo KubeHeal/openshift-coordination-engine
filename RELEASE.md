@@ -88,7 +88,7 @@ git config user.email "takinosh@redhat.com"
 - [ ] All issues targeted for this milestone are closed or moved to the next milestone
 - [ ] `CHANGELOG.md` `[Unreleased]` section is complete and accurate
 - [ ] All ADRs for new features are in `Accepted` status (`docs/adrs/`)
-- [ ] `todo.md` reviewed; no high-priority items outstanding
+- [ ] GitHub Issues reviewed; no high-priority items outstanding
 - [ ] CI is green on `main` (all required checks pass)
 - [ ] Integration tests pass: `make integration-test`
 - [ ] Go version in `go.mod` matches the version in `ci.yaml` (`go-version:`)
