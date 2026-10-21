@@ -58,6 +58,9 @@ type Config struct {
 
 	// SelfHealingPolicy engine (Issue #121). Disabled unless a policy file is configured.
 	PolicyEngine PolicyEngineConfig `json:"policy_engine"`
+
+	// EnableSwaggerUI serves Swagger UI at /api/docs/. Off unless explicitly enabled.
+	EnableSwaggerUI bool `json:"enable_swagger_ui"`
 }
 
 // PolicyEngineConfig holds the per-application SelfHealingPolicy engine settings.
@@ -227,6 +230,9 @@ const (
 	// SelfHealingPolicy engine defaults (Issue #121). Off until a policy file is mounted.
 	DefaultPolicyEngineEnabled = false
 	DefaultPolicyConfigPath    = ""
+
+	// Swagger UI is off unless ENABLE_SWAGGER_UI is set.
+	DefaultEnableSwaggerUI = false
 )
 
 // Valid log levels
@@ -298,6 +304,8 @@ func Load() (*Config, error) {
 			Enabled:    getEnvAsBool("ENABLE_POLICY_ENGINE", DefaultPolicyEngineEnabled),
 			ConfigPath: getEnv("POLICY_CONFIG_PATH", DefaultPolicyConfigPath),
 		},
+
+		EnableSwaggerUI: getEnvAsBool("ENABLE_SWAGGER_UI", DefaultEnableSwaggerUI),
 	}
 
 	// Validate configuration

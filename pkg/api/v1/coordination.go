@@ -85,7 +85,23 @@ func (ch *CoordinationHandler) SetMLLayerDetector(mlDetector *coordination.MLLay
 	}
 }
 
+// ListCoordinationWorkflowsResponse is the body of GET /api/v1/coordination/workflows.
+type ListCoordinationWorkflowsResponse struct {
+	Workflows []*CoordinationWorkflow `json:"workflows"`
+	Total     int                     `json:"total"`
+}
+
 // TriggerMultiLayerRemediation handles POST /api/v1/coordination/trigger
+// @Summary Trigger multi-layer remediation
+// @Description Detects affected layers and starts a coordinated remediation workflow
+// @Tags coordination
+// @Accept json
+// @Produce json
+// @Param request body TriggerMultiLayerRemediationRequest true "Multi-layer remediation request"
+// @Success 202 {object} TriggerMultiLayerRemediationResponse
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Failed to generate plan"
+// @Router /api/v1/coordination/trigger [post]
 func (ch *CoordinationHandler) TriggerMultiLayerRemediation(w http.ResponseWriter, r *http.Request) {
 	var req TriggerMultiLayerRemediationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -168,6 +184,14 @@ func (ch *CoordinationHandler) TriggerMultiLayerRemediation(w http.ResponseWrite
 }
 
 // GetCoordinationWorkflow handles GET /api/v1/coordination/workflows/{id}
+// @Summary Get a coordination workflow
+// @Description Returns one multi-layer coordination workflow
+// @Tags coordination
+// @Produce json
+// @Param id path string true "Workflow ID"
+// @Success 200 {object} CoordinationWorkflow
+// @Failure 404 {string} string "workflow not found"
+// @Router /api/v1/coordination/workflows/{id} [get]
 func (ch *CoordinationHandler) GetCoordinationWorkflow(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	workflowID := vars["id"]
@@ -188,6 +212,12 @@ func (ch *CoordinationHandler) GetCoordinationWorkflow(w http.ResponseWriter, r 
 }
 
 // ListCoordinationWorkflows handles GET /api/v1/coordination/workflows
+// @Summary List coordination workflows
+// @Description Lists multi-layer coordination workflows known to this process
+// @Tags coordination
+// @Produce json
+// @Success 200 {object} ListCoordinationWorkflowsResponse
+// @Router /api/v1/coordination/workflows [get]
 func (ch *CoordinationHandler) ListCoordinationWorkflows(w http.ResponseWriter, r *http.Request) {
 	ch.mu.RLock()
 	workflows := make([]*CoordinationWorkflow, 0, len(ch.coordinationWorkflows))

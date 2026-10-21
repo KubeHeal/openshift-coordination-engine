@@ -40,6 +40,7 @@ func TestLoad_Defaults(t *testing.T) {
 
 	assert.False(t, cfg.PolicyEngine.Enabled)
 	assert.Empty(t, cfg.PolicyEngine.ConfigPath)
+	assert.False(t, cfg.EnableSwaggerUI)
 }
 
 func TestLoad_FromEnvironment(t *testing.T) {
@@ -512,6 +513,7 @@ func clearEnv(t *testing.T) {
 		"ENABLE_FEATURE_ENGINEERING", "FEATURE_ENGINEERING_LOOKBACK_HOURS",
 		"FEATURE_ENGINEERING_EXPECTED_COUNT",
 		"ENABLE_POLICY_ENGINE", "POLICY_CONFIG_PATH",
+		"ENABLE_SWAGGER_UI",
 	}
 	for _, key := range envVars {
 		os.Unsetenv(key)
@@ -1148,6 +1150,21 @@ func TestLoad_PolicyEngineDisabledByDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, cfg.PolicyEngine.Enabled)
 	assert.Empty(t, cfg.PolicyEngine.ConfigPath)
+}
+
+func TestLoad_SwaggerUIDisabledByDefault(t *testing.T) {
+	clearEnv(t)
+	t.Cleanup(func() { clearEnv(t) })
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.False(t, cfg.EnableSwaggerUI)
+
+	os.Setenv("ENABLE_SWAGGER_UI", "true")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.True(t, cfg.EnableSwaggerUI)
 }
 
 func TestLoad_PolicyEngineRequiresPath(t *testing.T) {

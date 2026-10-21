@@ -67,6 +67,15 @@ const (
 )
 
 // InvestigateRCA handles POST /api/v1/investigate/rca
+// @Summary Investigate a root cause
+// @Description Correlates pod events, network policies, and Istio config for a service over a time window
+// @Tags rca
+// @Accept json
+// @Produce json
+// @Param request body RCAInvestigateRequest true "RCA investigation request"
+// @Success 200 {object} rca.Result
+// @Failure 400 {object} RCAErrorResponse
+// @Router /api/v1/investigate/rca [post]
 func (h *RCAHandler) InvestigateRCA(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "" && !strings.HasPrefix(contentType, "application/json") {

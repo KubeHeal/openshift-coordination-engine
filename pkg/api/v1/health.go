@@ -42,6 +42,13 @@ func NewHealthHandler(log *logrus.Logger, k8sClient *kubernetes.Clientset, rbacV
 }
 
 // ServeHTTP handles the health check request
+// @Summary Cluster health check
+// @Description Reports Kubernetes, ML service, and RBAC dependency health
+// @Tags health
+// @Produce json
+// @Success 200 {object} models.HealthResponse
+// @Failure 503 {object} models.HealthResponse
+// @Router /api/v1/health [get]
 func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 

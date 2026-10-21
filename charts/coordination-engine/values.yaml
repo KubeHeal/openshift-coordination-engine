@@ -159,6 +159,9 @@ env:
     value: "false"
   - name: POLICY_CONFIG_PATH
     value: "/etc/coordination-engine/policies.json"
+  # Swagger UI (Issue #71). Off in cluster deployments.
+  - name: ENABLE_SWAGGER_UI
+    value: "false"
   # OOM remediation tuning (Issue #62)
   # When an OOMKilled pod is detected, memory limits are multiplied by this factor.
   - name: OOM_MEMORY_MULTIPLIER
