@@ -22,6 +22,7 @@ import (
 	"github.com/KubeHeal/openshift-coordination-engine/internal/coordination"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/policy"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/rbac"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
@@ -258,6 +259,10 @@ func main() {
 	rcaHandler.RegisterRoutes(router)
 	log.Info("RCA investigation endpoint registered: POST /api/v1/investigate/rca")
 
+	policyCtx, stopPolicyWatch := context.WithCancel(context.Background())
+	defer stopPolicyWatch()
+	policyLoader := initPolicyEngine(policyCtx, cfg, k8sClients, prometheusClient, router, log)
+
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
 		kserveProxyHandler.RegisterRoutes(router)
@@ -317,12 +322,31 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal and shut down gracefully
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
+	// SIGINT and SIGTERM stop the process. SIGHUP reloads the policy file.
+	waitForShutdownSignal(policyLoader, log)
+	stopPolicyWatch()
 	gracefulShutdown(server, metricsServer, incidentStore, log)
+}
+
+func waitForShutdownSignal(loader *policy.Loader, log *logrus.Logger) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(quit)
+	for {
+		sig := <-quit
+		if sig != syscall.SIGHUP {
+			return
+		}
+		if loader == nil {
+			log.Info("SIGHUP received; policy engine is disabled")
+			continue
+		}
+		if err := loader.Reload(); err != nil {
+			log.WithError(err).Error("policy reload failed; keeping previous document")
+			continue
+		}
+		log.WithField("policies", loader.Count()).Info("policies reloaded from SIGHUP")
+	}
 }
 
 // gracefulShutdown stops HTTP servers and persists incident data before exit.
@@ -579,6 +603,66 @@ func initKubernetesClient(cfg *config.Config, log *logrus.Logger) (*KubernetesCl
 		DynamicClient: dynamicClient,
 		Config:        restConfig,
 	}, nil
+}
+
+// initPolicyEngine loads self-healing policies and registers POST /api/v1/alerts.
+// The engine stays disabled unless ENABLE_POLICY_ENGINE=true.
+func initPolicyEngine(
+	ctx context.Context,
+	cfg *config.Config,
+	k8sClients *KubernetesClients,
+	prometheusClient *integrations.PrometheusClient,
+	router *mux.Router,
+	log *logrus.Logger,
+) *policy.Loader {
+	if !cfg.PolicyEngine.Enabled {
+		log.Info("SelfHealingPolicy engine disabled")
+		return nil
+	}
+	if prometheusClient == nil {
+		log.Fatal("ENABLE_POLICY_ENGINE requires PROMETHEUS_URL")
+	}
+	loader, err := policy.NewLoader(cfg.PolicyEngine.ConfigPath, log)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to load self-healing policies")
+	}
+	mapper, err := policy.DiscoveryRESTMapper(k8sClients.Clientset.Discovery())
+	if err != nil {
+		log.WithError(err).Fatal("Failed to discover Kubernetes resources for policy actions")
+	}
+	executor, err := policy.NewActionExecutor(
+		k8sClients.Clientset,
+		k8sClients.DynamicClient,
+		mapper,
+		policy.NewSPDYCommandExecutor(k8sClients.Config, k8sClients.Clientset),
+		log,
+	)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create policy action executor")
+	}
+	timeout := cfg.KServe.Timeout
+	if timeout == 0 {
+		timeout = cfg.HTTPTimeout
+	}
+	engine, err := policy.NewEngine(policy.EngineConfig{
+		Loader:         loader,
+		Querier:        prometheusClient,
+		Scorer:         policy.NewHTTPScorer(timeout, log),
+		Actions:        executor,
+		ModelNamespace: cfg.KServe.Namespace,
+		ModelPort:      cfg.KServe.PredictorPort,
+		Log:            log,
+	})
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create policy engine")
+	}
+	v1.NewAlertsHandler(engine, log).RegisterRoutes(router)
+	go loader.Watch(ctx)
+	log.WithFields(logrus.Fields{
+		"path":     cfg.PolicyEngine.ConfigPath,
+		"policies": loader.Count(),
+	}).Info("SelfHealingPolicy engine enabled: POST /api/v1/alerts")
+	return loader
 }
 
 // initIncidentStore initializes the incident store with persistence if DATA_DIR is configured (ADR-014)

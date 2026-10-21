@@ -55,6 +55,18 @@ type Config struct {
 
 	// Alert notification sinks (ADR-022, Issue #75)
 	Notifier NotifierConfig `json:"notifier"`
+
+	// SelfHealingPolicy engine (Issue #121). Disabled unless a policy file is configured.
+	PolicyEngine PolicyEngineConfig `json:"policy_engine"`
+}
+
+// PolicyEngineConfig holds the per-application SelfHealingPolicy engine settings.
+type PolicyEngineConfig struct {
+	// Enabled loads policies and serves POST /api/v1/alerts.
+	Enabled bool `json:"enabled"`
+
+	// ConfigPath is the JSON policy document, usually a mounted ConfigMap file.
+	ConfigPath string `json:"config_path,omitempty"`
 }
 
 // NotifierConfig holds configuration for alert notification sinks (ADR-022).
@@ -211,6 +223,10 @@ const (
 
 	// Notifier defaults (ADR-022, Issue #75)
 	DefaultAlertSeverityThreshold = "critical"
+
+	// SelfHealingPolicy engine defaults (Issue #121). Off until a policy file is mounted.
+	DefaultPolicyEngineEnabled = false
+	DefaultPolicyConfigPath    = ""
 )
 
 // Valid log levels
@@ -275,6 +291,12 @@ func Load() (*Config, error) {
 			PagerDutyRoutingKey: getEnv("KUBEHEAL_PAGERDUTY_ROUTING_KEY", ""),
 			AlertmanagerURL:     getEnv("KUBEHEAL_ALERTMANAGER_URL", ""),
 			SeverityThreshold:   getEnv("KUBEHEAL_ALERT_SEVERITY_THRESHOLD", DefaultAlertSeverityThreshold),
+		},
+
+		// SelfHealingPolicy engine (Issue #121)
+		PolicyEngine: PolicyEngineConfig{
+			Enabled:    getEnvAsBool("ENABLE_POLICY_ENGINE", DefaultPolicyEngineEnabled),
+			ConfigPath: getEnv("POLICY_CONFIG_PATH", DefaultPolicyConfigPath),
 		},
 	}
 
@@ -365,6 +387,10 @@ func (c *Config) Validate() error {
 	}
 	if c.KubernetesBurst <= 0 {
 		errors = append(errors, fmt.Sprintf("kubernetes_burst must be positive: %d", c.KubernetesBurst))
+	}
+
+	if c.PolicyEngine.Enabled && strings.TrimSpace(c.PolicyEngine.ConfigPath) == "" {
+		errors = append(errors, "POLICY_CONFIG_PATH is required when ENABLE_POLICY_ENGINE=true")
 	}
 
 	if len(errors) > 0 {

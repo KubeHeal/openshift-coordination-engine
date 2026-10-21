@@ -188,6 +188,78 @@ Get ML-powered remediation recommendations with predictive analytics.
 }
 ```
 
+#### `POST /api/v1/alerts`
+
+Alertmanager webhook for the SelfHealingPolicy engine. The route is registered only when `ENABLE_POLICY_ENGINE=true`. Any application is one object in the policy file mounted at `POLICY_CONFIG_PATH`. The engine does not hard-code alert names, namespaces, or models.
+
+**Request** (Alertmanager v4 webhook):
+```json
+{
+  "version": "4",
+  "status": "firing",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "CheckoutQueueLag",
+        "namespace": "checkout"
+      },
+      "startsAt": "2026-10-21T20:00:00.000Z",
+      "fingerprint": "abc123"
+    }
+  ]
+}
+```
+
+`labels.namespace` is matched to a policy. If it is absent, `labels.kubernetes_namespace` is used. Only `status=firing` can select a repair. Resolved alerts are ignored.
+
+For each match the engine queries Prometheus for that policy's `model.featureColumns`, in order, and posts one instance to:
+
+`http://{service}.{namespace}.svc.cluster.local:{port}/v1/models/{model.name}:predict`
+
+`service` defaults to `{model.name}-predictor` and `namespace` defaults to `KSERVE_NAMESPACE`. A policy may set `model.service` and `model.namespace`. Feature columns use a built-in PromQL catalog (`cpu_usage`, `memory_usage`, `restart_count`, `response_time`, `error_rate`) unless the policy sets `model.featureQueries`. Query templates may use `$namespace`, `$pod`, and `$deployment`.
+
+Verdict `-1` runs the `repairs[]` entry for that alert. Verdict `1` logs `model says normal, no action` and does not repair. Any other verdict, a query error, or a model error does not repair. Actions always run in the policy namespace.
+
+Standard action types: `restart_pod`, `rollback_deployment`, `scale_deployment`, `delete_resource`, `apply_resource`, `exec_command`, `patch_resource`.
+
+**Response** (200 OK, repair executed):
+```json
+{
+  "status": "processed",
+  "matched_policies": 1,
+  "actions_taken": [
+    {
+      "policy": "checkout",
+      "alert": "CheckoutQueueLag",
+      "model": "checkout-detector",
+      "verdict": -1,
+      "action": "scale_deployment",
+      "result": "success"
+    }
+  ]
+}
+```
+
+**Response** (200 OK, no matching policy):
+```json
+{
+  "status": "processed",
+  "matched_policies": 0,
+  "actions_taken": []
+}
+```
+
+**Error Response** (400 Bad Request):
+```json
+{
+  "status": "error",
+  "error": "Invalid Alertmanager webhook format"
+}
+```
+
+Metrics: `policy_engine_alerts_received_total`, `policy_engine_model_scores_total`, `policy_engine_repairs_executed_total`.
+
 For details, see:
 - MCP ADR-006: Integration Architecture
 - MCP ADR-014: Go Coordination Engine Integration (to be created)

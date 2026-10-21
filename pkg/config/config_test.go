@@ -37,6 +37,9 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.True(t, cfg.KServe.Enabled)
 	assert.Equal(t, DefaultKServeNamespace, cfg.KServe.Namespace)
 	assert.Equal(t, DefaultKServeTimeout, cfg.KServe.Timeout)
+
+	assert.False(t, cfg.PolicyEngine.Enabled)
+	assert.Empty(t, cfg.PolicyEngine.ConfigPath)
 }
 
 func TestLoad_FromEnvironment(t *testing.T) {
@@ -508,6 +511,7 @@ func clearEnv(t *testing.T) {
 		// Feature engineering environment variables (Issue #57)
 		"ENABLE_FEATURE_ENGINEERING", "FEATURE_ENGINEERING_LOOKBACK_HOURS",
 		"FEATURE_ENGINEERING_EXPECTED_COUNT",
+		"ENABLE_POLICY_ENGINE", "POLICY_CONFIG_PATH",
 	}
 	for _, key := range envVars {
 		os.Unsetenv(key)
@@ -1133,6 +1137,41 @@ func TestFeatureEngineeringConfig_Struct(t *testing.T) {
 	assert.False(t, config.Enabled)
 	assert.Equal(t, 12, config.LookbackHours)
 	assert.Equal(t, 5, config.ExpectedFeatureCount)
+}
+
+func TestLoad_PolicyEngineDisabledByDefault(t *testing.T) {
+	clearEnv(t)
+	t.Cleanup(func() { clearEnv(t) })
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.False(t, cfg.PolicyEngine.Enabled)
+	assert.Empty(t, cfg.PolicyEngine.ConfigPath)
+}
+
+func TestLoad_PolicyEngineRequiresPath(t *testing.T) {
+	clearEnv(t)
+	t.Cleanup(func() { clearEnv(t) })
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	os.Setenv("ENABLE_POLICY_ENGINE", "true")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "POLICY_CONFIG_PATH")
+}
+
+func TestLoad_PolicyEngineFromEnvironment(t *testing.T) {
+	clearEnv(t)
+	t.Cleanup(func() { clearEnv(t) })
+	os.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "anomaly-detector-predictor")
+	os.Setenv("ENABLE_POLICY_ENGINE", "true")
+	os.Setenv("POLICY_CONFIG_PATH", "/etc/coordination-engine/policies.json")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.True(t, cfg.PolicyEngine.Enabled)
+	assert.Equal(t, "/etc/coordination-engine/policies.json", cfg.PolicyEngine.ConfigPath)
 }
 
 // TestFeatureEngineering_DefaultConstants verifies the default constants are set correctly
