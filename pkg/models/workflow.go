@@ -15,20 +15,39 @@ const (
 
 // Workflow represents a remediation workflow execution
 type Workflow struct {
-	ID               string         `json:"id"`
-	IncidentID       string         `json:"incident_id"`
-	Status           WorkflowStatus `json:"status"`
-	DeploymentMethod string         `json:"deployment_method"`
-	Namespace        string         `json:"namespace"`
-	ResourceName     string         `json:"resource_name"`
-	ResourceKind     string         `json:"resource_kind"`
-	IssueType        string         `json:"issue_type"`
-	Remediator       string         `json:"remediator,omitempty"`
-	ErrorMessage     string         `json:"error_message,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	StartedAt        *time.Time     `json:"started_at,omitempty"`
-	CompletedAt      *time.Time     `json:"completed_at,omitempty"`
-	Steps            []WorkflowStep `json:"steps,omitempty"`
+	ID                string               `json:"id"`
+	IncidentID        string               `json:"incident_id"`
+	Status            WorkflowStatus       `json:"status"`
+	DeploymentMethod  string               `json:"deployment_method"`
+	Namespace         string               `json:"namespace"`
+	ResourceName      string               `json:"resource_name"`
+	ResourceKind      string               `json:"resource_kind"`
+	IssueType         string               `json:"issue_type"`
+	Remediator        string               `json:"remediator,omitempty"`
+	ErrorMessage      string               `json:"error_message,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	StartedAt         *time.Time           `json:"started_at,omitempty"`
+	CompletedAt       *time.Time           `json:"completed_at,omitempty"`
+	Steps             []WorkflowStep       `json:"steps,omitempty"`
+	Severity          string               `json:"severity,omitempty"`
+	EstimatedDuration string               `json:"estimated_duration,omitempty"`
+	Layers            []string             `json:"layers,omitempty"`
+	Checkpoints       []WorkflowCheckpoint `json:"checkpoints,omitempty"`
+}
+
+// Checkpoint status values stored on a workflow.
+const (
+	CheckpointPending = "pending"
+	CheckpointPassed  = "passed"
+	CheckpointFailed  = "failed"
+)
+
+// WorkflowCheckpoint is a health checkpoint recorded for a remediation workflow.
+type WorkflowCheckpoint struct {
+	Layer     string   `json:"layer"`
+	AfterStep int      `json:"after_step"`
+	Status    string   `json:"status"`
+	Checks    []string `json:"checks"`
 }
 
 // WorkflowStep represents a single step in the workflow

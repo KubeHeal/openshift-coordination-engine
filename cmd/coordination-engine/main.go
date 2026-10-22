@@ -437,7 +437,7 @@ func initRemediationComponents(
 	}
 
 	// Initialize remediation orchestrator
-	orchestrator := remediation.NewOrchestrator(deploymentDetector, strategySelector, log)
+	orchestrator := remediation.NewOrchestrator(deploymentDetector, strategySelector, log, cfg.DataDir)
 	log.WithField("remediators", strategySelector.GetRegisteredRemediators()).Info("Remediation orchestrator initialized")
 
 	return orchestrator, strategySelector
