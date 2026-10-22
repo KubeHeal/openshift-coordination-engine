@@ -4,7 +4,9 @@ This document defines the **two critical integration boundaries** for the Go Coo
 
 ## 1. Upstream API (Consumed by MCP Server)
 
-The Go engine exposes the same REST API as the current Python coordination engine so that the MCP server does not need code changes.
+The sections below describe what this server returns today. `docs/API.md` lists every registered route. Fields that are not returned yet are marked with an issue link.
+
+Against KubeHeal/openshift-cluster-health-mcp commit `90564fa` (`pkg/clients/coordination_engine.go`), disk exhaustion, right-sizing, and RCA match the client. Incident list filters, anomaly JSON names, the create-incident response shape, predict `trend`, and `GET /api/v1/capacity/trends` do not.
 
 ### Base URL
 - `http://coordination-engine:8080/api/v1`
@@ -12,18 +14,57 @@ The Go engine exposes the same REST API as the current Python coordination engin
 ### Endpoints
 
 #### `GET /health`
-Health check endpoint.
+Lightweight liveness check on the API port. It does not check dependencies.
 
 **Response** (200 OK):
 ```json
 {
+  "status": "ok",
+  "version": "1.2.0"
+}
+```
+
+#### `GET /api/v1/health`
+Dependency health. `dependencies.kubernetes` and `dependencies.ml_service` are objects (`name`, `status`, `message`, `latency_ms`, `checked_at`), not strings. There is no `argocd` entry.
+
+`rbac` includes `status`, `critical_ok`, and `message`. `permissions_total`, `permissions_ok`, and `permissions_failed` are returned as `0` because this handler does not count permissions.
+
+`details.namespace` is an empty object (the RBAC verifier has no exported fields). `details.service_account` is `"self-healing-operator"`.
+
+**Response** (200 when `healthy` or `degraded`, 503 when `unhealthy`):
+```json
+{
   "status": "healthy",
   "timestamp": "2025-12-18T10:00:00Z",
-  "version": "1.0.0",
+  "version": "1.2.0",
+  "uptime_seconds": 3600,
   "dependencies": {
-    "kubernetes": "ok",
-    "ml_service": "ok",
-    "argocd": "ok"
+    "kubernetes": {
+      "name": "kubernetes",
+      "status": "ok",
+      "message": "Connected",
+      "latency_ms": 15,
+      "checked_at": "2025-12-18T10:00:00Z"
+    },
+    "ml_service": {
+      "name": "ml_service",
+      "status": "ok",
+      "message": "Connected",
+      "latency_ms": 45,
+      "checked_at": "2025-12-18T10:00:00Z"
+    }
+  },
+  "rbac": {
+    "status": "ok",
+    "permissions_total": 0,
+    "permissions_ok": 0,
+    "permissions_failed": 0,
+    "critical_ok": true,
+    "message": "Critical permissions verified"
+  },
+  "details": {
+    "namespace": {},
+    "service_account": "self-healing-operator"
   }
 }
 ```
@@ -51,39 +92,48 @@ Trigger a remediation workflow.
 **Response** (202 Accepted):
 ```json
 {
-  "workflow_id": "wf-67890",
-  "status": "in_progress",
+  "workflow_id": "wf-67890abc",
+  "status": "pending",
   "deployment_method": "argocd",
   "estimated_duration": "5m"
 }
 ```
 
+`status` at accept time is `pending`. `estimated_duration` is always `"5m"`. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. The workflow is in-memory and is not written back onto the stored incident. Those gaps are [#124](https://github.com/KubeHeal/openshift-coordination-engine/issues/124). Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
+
 #### `GET /incidents`
-List recent incidents and their remediation status.
+Lists stored incidents and workflow-derived rows.
 
-**Query Parameters**:
-- `namespace` (optional): Filter by namespace
-- `severity` (optional): Filter by severity (low, medium, high, critical)
-- `limit` (optional, default: 50): Max results
+**Query parameters that work**:
+- `namespace` (optional): stored incidents whose `target` equals this value, and workflow rows in that namespace
+- `severity` (optional): stored incidents only (`low`, `medium`, `high`, `critical`)
 
-**Response** (200 OK):
+`status`, `limit`, and `offset` are ignored. Stored rows are capped at 50 and workflow rows are then appended. See [#125](https://github.com/KubeHeal/openshift-coordination-engine/issues/125). `severity=all` matches no stored incident: the filter is an exact match on `low`, `medium`, `high`, or `critical`. Workflow rows stay in the list. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. The body field is `total`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent.
+
+**Response** (200 OK). A workflow-derived row looks like this (`severity` is always `"high"`, `source` is `"workflow"`):
 ```json
 {
   "incidents": [
     {
       "id": "inc-12345",
       "namespace": "production",
+      "target": "production",
       "resource": "Deployment/payment-service",
       "issue_type": "pod_crash_loop",
       "severity": "high",
       "created_at": "2025-12-18T09:45:00Z",
       "status": "remediated",
-      "workflow_id": "wf-67890"
+      "workflow_id": "wf-67890abc",
+      "source": "workflow"
     }
   ],
   "total": 1
 }
 ```
+
+Stored rows use `source` `"manual"` and include `title`, `description`, `target`, `severity`, `status` (`active`, `resolved`, or `cancelled`), `affected_resources`, and `labels`. They do not include `namespace`. Workflow rows always use severity `high` and status `remediated`, `failed`, or `in_progress`.
+
+`POST /api/v1/incidents` creates stored rows (`201`). The handler reads `affected_resources` (snake_case) and requires `target`. MCP sends `affectedResources`, `source`, `createdBy`, `correlationId`, `externalId`, `confidence`, and `parameters`, which are ignored. MCP does not require `target`, so a create without `target` is `400`. The body is `status`, `incident_id`, `created_at`, `incident`, and `message`. Top-level `status` is `"success"`. `title`, `description`, `severity`, and status `active` are inside `incident`. There is no `priority`. MCP reads those fields at the top level. Create errors are `{"status":"error","error":"..."}`.
 
 #### `GET /workflows/{id}`
 Get workflow execution details.
@@ -91,36 +141,33 @@ Get workflow execution details.
 **Response** (200 OK):
 ```json
 {
-  "id": "wf-67890",
+  "id": "wf-67890abc",
   "incident_id": "inc-12345",
   "status": "completed",
   "deployment_method": "argocd",
-  "layers": ["application"],
+  "namespace": "production",
+  "resource_name": "payment-service",
+  "resource_kind": "Deployment",
+  "issue_type": "pod_crash_loop",
+  "remediator": "manual",
+  "created_at": "2025-12-18T09:50:00Z",
+  "started_at": "2025-12-18T09:50:00Z",
+  "completed_at": "2025-12-18T09:52:00Z",
+  "duration": "2m0s",
   "steps": [
     {
       "order": 0,
-      "layer": "application",
-      "description": "Trigger ArgoCD sync for payment-service",
-      "status": "completed",
-      "started_at": "2025-12-18T09:50:00Z",
-      "completed_at": "2025-12-18T09:52:00Z"
+      "description": "Detect deployment method for production/payment-service",
+      "status": "pending"
     }
-  ],
-  "checkpoints": [
-    {
-      "layer": "application",
-      "after_step": 0,
-      "status": "passed",
-      "checks": ["pods_running", "endpoints_healthy"]
-    }
-  ],
-  "created_at": "2025-12-18T09:50:00Z",
-  "completed_at": "2025-12-18T09:52:00Z"
+  ]
 }
 ```
 
+`layers` and `checkpoints` are not returned ([#126](https://github.com/KubeHeal/openshift-coordination-engine/issues/126)). `404` is plain text `Workflow not found`. Workflows are in-memory. MCP does not call this route. `layers` and `checkpoints` are on `remediation_plan` from `GET /api/v1/coordination/workflows/{id}`, which MCP does not call.
+
 #### `POST /recommendations`
-Get ML-powered remediation recommendations with predictive analytics.
+Get ML-powered remediation recommendations with predictive analytics. The MCP tool `get-remediation-recommendations` does not call this route. It calls `POST /api/v1/anomalies/analyze`.
 
 **Request Body** (all fields optional):
 ```json
@@ -187,6 +234,19 @@ Get ML-powered remediation recommendations with predictive analytics.
   "error": "Invalid timeframe: must be '1h', '6h', or '24h'"
 }
 ```
+
+#### `POST /api/v1/anomalies/analyze`
+Anomaly analysis on this server. `POST /api/v1/anomaly/detect` is not registered here.
+
+**Request** (all fields optional): `time_range` (`1h`, `6h`, `24h`, `7d`; default `1h`), `namespace`, `deployment`, `pod`, `label_selector`, `threshold` (0–1, default `0.7`), `model_name` (default `anomaly-detector`).
+
+MCP sends `timeRange`, `modelName`, `labelSelector`, `metrics`, and `includePredictions`. The handler binds `time_range`, `model_name`, and `label_selector`, so the camelCase names are dropped. The window stays `1h` and the model stays `anomaly-detector`.
+
+**Response** (200 OK): `status` (`success`), `time_range`, `scope`, `model_used`, `anomalies_detected`, `anomalies`, `summary`, `recommendation`, `features`, and optional `enriched_signals`.
+
+The recommendation field is singular `recommendation`. MCP reads `recommendations`, `alerts`, `analyzed_at`, and anomaly `metric`, `value`, `type`, `expected_min`, and `expected_max`, which are absent. `enriched_signals` matches and is what `get-throttled-pods` uses.
+
+**Errors** (400 or 503): `{"status":"error","error":"...","details":"...","code":"..."}`. Codes include `INVALID_REQUEST`, `KSERVE_UNAVAILABLE`, `MODEL_NOT_FOUND`, and `ANALYSIS_FAILED`. A missing Prometheus client does not fail the call; the handler uses default features and still calls KServe.
 
 #### `POST /api/v1/alerts`
 
@@ -402,57 +462,18 @@ func (c *KServeClient) DetectAnomalies(
 }
 ```
 
-### 2.2 Legacy ML Service (Deprecated)
+### 2.2 Legacy ML Service (outbound client)
 
-The legacy Python ML service integration is deprecated but still supported for backward compatibility.
+These paths are **not** routes on the coordination engine, and MCP does not call them. `internal/integrations/ml_client.go` calls them on `ML_SERVICE_URL` when that client is used. Set `ML_SERVICE_URL` (for example `http://aiops-ml-service:8080`). Anomaly analysis **on this server** is `POST /api/v1/anomalies/analyze`.
 
-**Configuration**:
-```yaml
-env:
-  - name: ENABLE_KSERVE_INTEGRATION
-    value: "false"
-  - name: ML_SERVICE_URL
-    value: "http://aiops-ml-service:8080"
-```
+| Client method | Outbound path | Request fields | Response fields |
+|---------------|---------------|----------------|-----------------|
+| `DetectAnomalies` | `POST {ML_SERVICE_URL}/api/v1/anomaly/detect` | `metrics[]` (`name`, `value`, `timestamp`, `labels`), optional `threshold` | `anomalies[]` (`metric_name`, `value`, `expected`, `deviation`, `severity`, `confidence`, `timestamp`, `reason`), `summary` (`total`, `anomalies_found`, `high_severity`, `confidence`) |
+| `Predict` | `POST {ML_SERVICE_URL}/api/v1/prediction/predict` | `historical_metrics[]`, `predict_ahead`, optional `include_confidence` | `predictions[]` (`metric_name`, `predicted_value`, `confidence`, `timestamp`, `trend`, `risk`), `summary` (`time_range`, `metrics_count`, `overall_confidence`) |
+| `AnalyzePatterns` | `POST {ML_SERVICE_URL}/api/v1/pattern/analyze` | `metrics[]`, `time_range.start`, `time_range.end`, optional `analysis_type` | `patterns[]` (`type`, `description`, `metrics`, `confidence`, `start_time`, `end_time`), `insights`, `summary` (`patterns_found`, `confidence`) |
+| `HealthCheck` | `GET {ML_SERVICE_URL}/health` | none | HTTP status from the ML service |
 
-#### `POST /api/v1/anomaly/detect`
-Detect anomalies in metrics data.
-
-**Request Body**:
-```json
-{
-  "metrics": [
-    {
-      "timestamp": "2025-12-18T10:00:00Z",
-      "metric_name": "pod_cpu_usage",
-      "value": 0.85,
-      "labels": {
-        "namespace": "production",
-        "pod": "payment-service-abc123"
-      }
-    }
-  ],
-  "model": "isolation_forest",
-  "threshold": 0.7
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "anomalies": [
-    {
-      "timestamp": "2025-12-18T10:00:00Z",
-      "metric_name": "pod_cpu_usage",
-      "score": 0.92,
-      "is_anomaly": true,
-      "severity": "high"
-    }
-  ],
-  "overall_score": 0.92,
-  "confidence": 0.88
-}
-```
+### 2.3 Routes on this coordination engine
 
 #### `POST /api/v1/predict`
 Get time-specific resource usage predictions using KServe ML models and Prometheus metrics.
@@ -514,6 +535,8 @@ Sends 5 base metrics (`cpu_usage`, `memory_usage`, `disk_usage`, `network_in`, `
 }
 ```
 
+There is no top-level `trend` or `recommendation`. MCP reads both. MCP also calls `GET /api/v1/capacity/trends?namespace=`, which is not registered. Forecast fields are `trending.forecasted_exhaustion_days` and `trending.recommended_replica_increase` on `GET /api/v1/capacity/namespace/{namespace}`. The trends call is best-effort, so the prediction still returns and MCP `capacity_forecast` stays empty.
+
 **Error Responses**:
 
 | Code | HTTP Status | Condition |
@@ -523,38 +546,8 @@ Sends 5 base metrics (`cpu_usage`, `memory_usage`, `disk_usage`, `network_in`, `
 | `MODEL_NOT_FOUND` | 503 | Requested model not registered in KServe |
 | `PREDICTION_FAILED` | 503 | Model returned an error or empty response |
 
-#### `POST /api/v1/pattern/analyze`
-Analyze patterns in historical data.
-
-**Request Body**:
-```json
-{
-  "namespace": "production",
-  "time_range": {
-    "start": "2025-12-18T00:00:00Z",
-    "end": "2025-12-18T10:00:00Z"
-  },
-  "resource_types": ["Deployment", "StatefulSet"]
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "patterns": [
-    {
-      "pattern_type": "recurring_crash",
-      "frequency": "every 2h",
-      "affected_resources": ["Deployment/payment-service"],
-      "confidence": 0.88,
-      "root_cause_hints": ["memory_leak", "connection_timeout"]
-    }
-  ]
-}
-```
-
 #### `POST /api/v1/investigate/rca`
-Deep root-cause analysis correlating Istio VirtualService misconfigs, NetworkPolicy violations, and pod events (ADR-021, Issue #72).
+Registered on this coordination engine. Deep root-cause analysis correlating Istio VirtualService misconfigs, NetworkPolicy violations, and pod events (ADR-021, Issue #72).
 
 **Request Body**:
 ```json
@@ -650,12 +643,14 @@ response.
 - Severity threshold comparison: `info < warning < critical`.  Setting the
   threshold to `warning` dispatches alerts for both `warning` and `critical`.
 
-## Compatibility Guarantees
+## MCP client compatibility
 
-- MCP server continues to work unchanged
-- KServe integration is the recommended approach (ADR-039)
-- Legacy ML_SERVICE_URL is deprecated but still supported
-- Only the orchestration implementation changes (Python → Go)
+Checked against KubeHeal/openshift-cluster-health-mcp commit `90564fa`.
+
+- Disk exhaustion (`GET /api/v1/predict/disk-exhaustion`), right-sizing (`GET /api/v1/recommendations/rightsizing`), and RCA (`POST /api/v1/investigate/rca`) match the MCP client.
+- Incident list filters, anomaly JSON names, the create-incident response shape, predict `trend`, and `GET /api/v1/capacity/trends` do not.
+- KServe integration is the recommended approach (ADR-039).
+- Legacy `ML_SERVICE_URL` is deprecated but still supported.
 
 ## References
 

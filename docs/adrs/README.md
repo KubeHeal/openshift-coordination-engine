@@ -193,7 +193,7 @@ The engine integrates with Prometheus/Thanos for real-time cluster metrics and p
 - **45-feature vectors**: Real cluster data (CPU, memory, restarts, trends) for anomaly detection
 - **ML accuracy improvement**: 60-70% → 85-95% with real metrics (+20-30%)
 - **Incident tracking**: Persistent JSON storage with CRUD operations for compliance and multi-day correlation
-- **API enhancements**: Manual incident creation via `POST /api/v1/incidents`, enhanced filtering with `status=all`
+- **API enhancements**: Manual incident creation via `POST /api/v1/incidents`. List filters that work are `namespace` and `severity`; `status` is ignored
 
 See: [ADR-014](014-prometheus-thanos-observability-incident-management.md)
 
@@ -226,7 +226,7 @@ The MCP server calls the coordination engine via REST API:
 
 - `GET /api/v1/health` - Health check
 - `POST /api/v1/remediation/trigger` - Trigger remediation workflow
-- `GET /api/v1/incidents?status=all&severity=high` - List incidents with enhanced filtering (ADR-014)
+- `GET /api/v1/incidents?namespace=production&severity=high` - List incidents (`namespace` and `severity` filter stored rows; `status` is ignored)
 - `POST /api/v1/incidents` - Create incident for manual tracking (ADR-014)
 - `GET /api/v1/workflows/{id}` - Get workflow status
 - `POST /api/v1/investigate/rca` - Deep root-cause analysis (ADR-021)

@@ -307,18 +307,17 @@ See [API Documentation](docs/API.md) for complete endpoint details.
 curl -X POST http://localhost:8080/api/v1/remediation/trigger \
   -H "Content-Type: application/json" \
   -d '{
+    "incident_id": "inc-12345",
     "namespace": "production",
-    "resource_type": "pod",
-    "resource_name": "my-app-abc123",
-    "issue_type": "CrashLoopBackOff",
-    "severity": "high"
+    "resource": {"kind": "Deployment", "name": "payment-service"},
+    "issue": {"type": "pod_crash_loop", "severity": "high"}
   }'
 ```
 
 ### List Incidents
 
 ```bash
-curl http://localhost:8080/api/v1/incidents?namespace=production&status=active
+curl "http://localhost:8080/api/v1/incidents?namespace=production&severity=high"
 ```
 
 ### Get Workflow Status
