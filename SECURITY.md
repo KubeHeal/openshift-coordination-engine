@@ -34,7 +34,7 @@ The Coordination Engine follows a rolling 3-version support window aligned with 
 
 ### Go Runtime
 
-The engine requires **Go 1.26+**. Each release branch is tested against the Go version specified in `go.mod`.
+The engine requires **Go 1.27+**. Each release branch is tested against the Go version specified in `go.mod`.
 
 Security vulnerabilities in the Go standard library are addressed by updating the Go toolchain version. The CI pipeline runs `govulncheck` to detect reachable vulnerabilities.
 

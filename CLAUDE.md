@@ -219,5 +219,5 @@ See `API-CONTRACT.md` for detailed API specifications and `DESIGN_DOC.md` for th
 - Use `logrus` or `zap` for structured logging (JSON format)
 - Use `prometheus/client_golang` for metrics
 - Use `testify` for assertions, `ginkgo/gomega` for BDD-style tests
-- Go version: 1.26+
+- Go version: 1.27+
 - Follow standard Go project layout (cmd, internal, pkg)

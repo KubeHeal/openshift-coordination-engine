@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.27.3"
   TEST_NAMESPACE: "coordination-engine-e2e"
   HELM_RELEASE: "ce-e2e"
 

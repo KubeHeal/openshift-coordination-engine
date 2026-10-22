@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go**: 1.26+ (see `go.mod` for exact version)
+- **Go**: 1.27+ (see `go.mod` for exact version)
 - **Docker/Podman**: For building container images
 - **kubectl/oc**: For Kubernetes/OpenShift access
 - **make**: Build automation
