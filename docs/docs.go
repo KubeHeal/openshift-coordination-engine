@@ -599,8 +599,26 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by severity",
+                        "description": "Filter by severity. all matches every severity",
                         "name": "severity",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status. all matches every status. active, running, completed, and failed are aliases",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Maximum rows to return. Defaults to 50",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows to skip after filtering. Defaults to 0",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -1884,6 +1902,26 @@ const docTemplate = `{
                 }
             }
         },
+        "models.WorkflowCheckpoint": {
+            "type": "object",
+            "properties": {
+                "after_step": {
+                    "type": "integer"
+                },
+                "checks": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "layer": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "models.WorkflowStep": {
             "type": "object",
             "properties": {
@@ -2692,17 +2730,38 @@ const docTemplate = `{
         "v1.IncidentListItem": {
             "type": "object",
             "properties": {
+                "action_type": {
+                    "type": "string"
+                },
+                "affected_resources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "completed_at": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "description": {
                     "type": "string"
                 },
+                "duration_seconds": {
+                    "type": "number"
+                },
                 "id": {
                     "type": "string"
                 },
                 "issue_type": {
                     "type": "string"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "namespace": {
                     "type": "string"
@@ -2716,6 +2775,9 @@ const docTemplate = `{
                 "source": {
                     "type": "string"
                 },
+                "started_at": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -2727,6 +2789,29 @@ const docTemplate = `{
                 },
                 "workflow_id": {
                     "type": "string"
+                }
+            }
+        },
+        "v1.IncidentListSummary": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "integer"
+                },
+                "by_severity": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -2752,6 +2837,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/v1.IncidentListItem"
                     }
+                },
+                "summary": {
+                    "$ref": "#/definitions/v1.IncidentListSummary"
                 },
                 "total": {
                     "type": "integer"
@@ -3153,6 +3241,9 @@ const docTemplate = `{
         "v1.TriggerRemediationRequest": {
             "type": "object",
             "properties": {
+                "dry_run": {
+                    "type": "boolean"
+                },
                 "incident_id": {
                     "type": "string"
                 },
@@ -3187,6 +3278,12 @@ const docTemplate = `{
         "v1.WorkflowResponse": {
             "type": "object",
             "properties": {
+                "checkpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.WorkflowCheckpoint"
+                    }
+                },
                 "completed_at": {
                     "type": "string"
                 },
@@ -3210,6 +3307,12 @@ const docTemplate = `{
                 },
                 "issue_type": {
                     "type": "string"
+                },
+                "layers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "namespace": {
                     "type": "string"

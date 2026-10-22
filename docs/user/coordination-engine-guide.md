@@ -37,22 +37,9 @@ Verify the engine and its dependencies are operational:
 curl http://coordination-engine:8080/api/v1/health
 ```
 
-**Expected response:**
+**Expected response:** `status` is `healthy`, `degraded`, or `unhealthy`. `dependencies.kubernetes` and `dependencies.ml_service` are objects with `status`, `message`, and `latency_ms`. There is no ArgoCD dependency. `details.namespace` is an empty object, not a namespace name. `GET /health` returns only `status` (`ok`) and `version`.
 
-```json
-{
-  "status": "healthy",
-  "timestamp": "2026-09-23T10:00:00Z",
-  "version": "1.2.0",
-  "dependencies": {
-    "kubernetes": "ok",
-    "ml_service": "ok",
-    "argocd": "ok"
-  }
-}
-```
-
-A `"status": "healthy"` response means the engine can reach Kubernetes, the ML service, and ArgoCD.
+A `"status": "healthy"` response means the Kubernetes API check succeeded, the ML service URL check succeeded, and critical RBAC permissions are present. See [docs/API.md](../API.md) for the full body.
 
 ### 2. Analyze Anomalies
 
@@ -71,30 +58,33 @@ The engine queries Prometheus for current metrics, sends them to the KServe anom
 View recent incidents and their remediation status:
 
 ```bash
-curl "http://coordination-engine:8080/api/v1/incidents?namespace=production&limit=10"
+curl "http://coordination-engine:8080/api/v1/incidents?namespace=production&severity=high"
 ```
 
 ## API Feature Walkthroughs
 
-The base URL for all endpoints is `http://coordination-engine:8080/api/v1`.
+Versioned routes use `http://coordination-engine:8080/api/v1`. `GET /health` is on the same port and is not under `/api/v1`.
+
+Against MCP commit `90564fa`, disk exhaustion, right-sizing, and RCA match. Incident list filters, anomaly JSON names, the create-incident response shape, predict `trend`, and `GET /api/v1/capacity/trends` do not.
 
 ### Health Check
 
-**Endpoint:** `GET /health`
+**Endpoint:** `GET /health` (server root, not `/api/v1/health`) returns `{"status":"ok","version":"..."}` and does not check dependencies.
 
-Returns the engine status and the health of each dependency.
+**Endpoint:** `GET /api/v1/health` returns dependency health.
 
-| Dependency | Meaning when `"ok"` |
+| Dependency | Meaning when `"status"` is `"ok"` |
 |---|---|
-| `kubernetes` | The engine can reach the Kubernetes API server. |
-| `ml_service` | KServe InferenceServices are responding. |
-| `argocd` | ArgoCD API is reachable (or ArgoCD is not configured). |
+| `kubernetes` | The engine can list namespaces on the Kubernetes API. |
+| `ml_service` | `GET {ML_SERVICE_URL}/health` returned 200. This is the legacy ML URL, not a KServe check. Unreachable is `degraded` and the HTTP status stays 200. |
 
 ### Anomaly Analysis
 
 **Endpoint:** `POST /api/v1/anomalies/analyze`
 
 Queries Prometheus for live metrics and sends them to the KServe anomaly-detector model. Returns a list of detected anomalies with severity scores.
+
+The handler binds `time_range`, `model_name`, and `label_selector`. MCP sends `timeRange`, `modelName`, `labelSelector`, `metrics`, and `includePredictions`, so those camelCase names are dropped. The window stays `1h` and the model stays `anomaly-detector`. The response field is singular `recommendation`. MCP reads `recommendations`, `alerts`, `analyzed_at`, and anomaly `metric`, `value`, `type`, `expected_min`, and `expected_max`, which are absent. `enriched_signals` matches and is what `get-throttled-pods` uses.
 
 When configured, the engine dispatches alerts for anomalies that meet or exceed the severity threshold. See the "Alert Notification Sinks" section for details.
 
@@ -133,13 +123,15 @@ Predicts future resource usage for a target workload at a specified time.
 - `current_metrics` shows rolling averages from Prometheus.
 - `model_info.confidence` is a score from 0.0 to 1.0.
 
+There is no top-level `trend` or `recommendation`. MCP reads both. MCP also calls `GET /api/v1/capacity/trends?namespace=`, which is not registered. That call is best-effort, so the prediction still returns and MCP `capacity_forecast` stays empty. Forecast fields are `trending.forecasted_exhaustion_days` and `trending.recommended_replica_increase` on `GET /api/v1/capacity/namespace/{namespace}`.
+
 When feature engineering is enabled (the default), the engine builds a 3200+ engineered feature vector from Prometheus range queries. When disabled, 5 raw features are sent: `cpu_usage`, `memory_usage`, `disk_usage`, `network_in`, `network_out`.
 
 ### Recommendations
 
 **Endpoint:** `POST /recommendations`
 
-Returns ML-powered remediation recommendations with predictive analytics.
+Returns ML-powered remediation recommendations with predictive analytics. The MCP tool `get-remediation-recommendations` does not call this route. It calls `POST /api/v1/anomalies/analyze`.
 
 **Request body:**
 
@@ -210,11 +202,25 @@ Returns a list of incidents with their remediation status.
 
 **Query parameters:**
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `namespace` | string | (none) | Filter by namespace. |
-| `severity` | string | (none) | Filter: `low`, `medium`, `high`, `critical`. |
-| `limit` | int | `50` | Maximum results to return. |
+| Parameter | Effect |
+|---|---|
+| `namespace` | Rows whose `namespace` or `target` equals this value. |
+| `severity` | Exact match. Empty or `all` matches every severity. |
+| `status` | Empty or `all` matches every status. `active`, `pending`, `running`, and `in_progress` match the same rows. `completed`, `remediated`, and `resolved` match the same rows. `failed` matches failed rows. |
+| `limit` | Maximum rows returned. Defaults to 50. |
+| `offset` | Rows to skip after filtering. Defaults to 0. |
+
+Filters apply to the combined list. `total` and `summary.total` are the match count before `offset` and `limit`. `summary` also includes `active`, `completed`, `failed`, and `by_severity`. The MCP incident list, `cluster://incidents`, and remediation-history send `severity=all`, `status`, `limit`, and `offset`. The list mixes `source` `manual` and `source` `workflow`. `priority`, `confidence`, `parameters`, and `tags` are absent. Workflow rows use status `running`, `completed`, or `failed`, the workflow severity, and `action_type`. Stored rows use `active`, `completed` when the stored status is `resolved`, or `cancelled`.
+
+### Create an incident
+
+**Endpoint:** `POST /api/v1/incidents`
+
+Requires `title`, `description`, `severity`, and `target`. Optional fields the handler reads are `affected_resources` and `labels`.
+
+MCP sends `affectedResources`, `source`, `createdBy`, `correlationId`, `externalId`, `confidence`, and `parameters`, which the handler ignores. MCP does not require `target`, so a create without `target` is `400`.
+
+**Success** (`201`): top-level `status` is `"success"`, with `incident_id`, `created_at`, `incident`, and `message`. `title`, `description`, `severity`, and status `active` are inside `incident`. There is no `priority`. MCP reads those fields at the top level.
 
 ### Remediation
 
@@ -244,12 +250,14 @@ Triggers a remediation workflow for a specific incident.
 
 ```json
 {
-  "workflow_id": "wf-67890",
-  "status": "in_progress",
+  "workflow_id": "wf-67890abc",
+  "status": "pending",
   "deployment_method": "argocd",
-  "estimated_duration": "5m"
+  "estimated_duration": "1m"
 }
 ```
+
+`status` on this response is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes, `"1m"` by default. `dry_run: true` returns `202` with an empty `workflow_id` and does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json`. An empty `DATA_DIR` keeps it in memory. If the incident already exists, a real trigger writes `workflow_id` onto that stored incident.
 
 The engine detects the deployment method (ArgoCD, Helm, Operator, or Manual) and routes remediation accordingly:
 
@@ -262,28 +270,9 @@ The engine detects the deployment method (ArgoCD, Helm, Operator, or Manual) and
 
 **Endpoint:** `GET /workflows/{id}`
 
-Returns execution details for a remediation workflow, including steps, layer progression, and health checkpoints.
+Returns one remediation workflow: `id`, `incident_id`, `status`, `deployment_method`, `namespace`, `resource_name`, `resource_kind`, `issue_type`, steps, timestamps, `layers`, and `checkpoints`. `layers` has one entry from the resource kind. `checkpoints` has one entry after the remediation step, with `status` `pending`, then `passed` or `failed`. A missing id is `404`. When `DATA_DIR` is set, the workflow is loaded from `{DATA_DIR}/workflows`. MCP does not call this route. `GET /api/v1/coordination/workflows/{id}` is a different object and also returns `layers` and `checkpoints` on `remediation_plan`. MCP does not call that route either.
 
-### Pattern Analysis
-
-**Endpoint:** `POST /api/v1/pattern/analyze`
-
-Analyzes historical data for recurring failure patterns.
-
-**Request body:**
-
-```json
-{
-  "namespace": "production",
-  "time_range": {
-    "start": "2026-09-22T00:00:00Z",
-    "end": "2026-09-23T00:00:00Z"
-  },
-  "resource_types": ["Deployment", "StatefulSet"]
-}
-```
-
-Returns patterns with types (for example, `recurring_crash`), frequencies, affected resources, confidence scores, and root cause hints.
+`POST /api/v1/anomaly/detect` and `POST /api/v1/pattern/analyze` are not MCP calls and are not routes on this server. The legacy ML client calls those paths on `ML_SERVICE_URL`. On this engine, anomaly analysis is `POST /api/v1/anomalies/analyze`.
 
 ## Alert Notification Sinks
 
@@ -316,8 +305,8 @@ When anomaly analysis detects issues at or above the configured severity thresho
 | `KUBECONFIG` | (empty) | Path to kubeconfig file. Empty uses in-cluster config. |
 | `NAMESPACE` | `self-healing-platform` | Namespace the engine operates in. |
 | `HTTP_TIMEOUT` | `30s` | HTTP client timeout for outbound calls. |
-| `ENABLE_CORS` | `false` | Enable CORS headers on API responses. |
-| `CORS_ALLOW_ORIGIN` | `*` | Comma-separated list of allowed CORS origins. |
+| `ENABLE_CORS` | `false` | Loaded into config. The server does not apply CORS middleware, so this flag does not add CORS headers. |
+| `CORS_ALLOW_ORIGIN` | `*` | Loaded into config. Unused, because CORS middleware is not installed. |
 
 ### KServe Integration
 
@@ -345,7 +334,7 @@ When anomaly analysis detects issues at or above the configured severity thresho
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATA_DIR` | (empty) | Directory for persistent incident storage. Empty uses in-memory only. |
+| `DATA_DIR` | (empty) | Directory for persistent incident and workflow storage. Empty uses in-memory only. Workflows are written under `{DATA_DIR}/workflows`. |
 | `INCIDENT_RETENTION_DAYS` | `90` | Days to retain resolved incidents. |
 | `KUBEHEAL_MAX_STORED_INCIDENTS` | `10000` | Maximum incidents stored on disk. |
 
@@ -426,7 +415,7 @@ When anomaly analysis detects issues at or above the configured severity thresho
 
 ### Health Endpoint Reports Unhealthy Dependency
 
-**Symptom:** `GET /health` returns `"status": "degraded"` with one or more dependencies not `"ok"`.
+**Symptom:** `GET /api/v1/health` returns `"status": "degraded"` or `"unhealthy"`. `GET /health` only returns `status` `ok` and `version`.
 
 **Steps to resolve:**
 
@@ -439,11 +428,11 @@ When anomaly analysis detects issues at or above the configured severity thresho
 
 ### Remediation Workflow Stuck
 
-**Symptom:** `GET /workflows/{id}` shows `"status": "in_progress"` for longer than the estimated duration.
+**Symptom:** `GET /api/v1/workflows/{id}` stays `"status": "in_progress"`. `estimated_duration` in the trigger response is the checkpoint timeout (`"1m"` by default), not a measured ETA. With an empty `DATA_DIR`, the workflow exists only in memory.
 
 **Steps to resolve:**
 
-1. Check the workflow steps for a failed checkpoint.
+1. Read `steps`, `error_message`, `layers`, and `checkpoints` on the workflow. A failed run marks the checkpoint `failed`.
 2. For ArgoCD-managed workloads, verify the ArgoCD Application sync status:
    ```bash
    kubectl get applications -n argocd
@@ -466,4 +455,4 @@ When anomaly analysis detects issues at or above the configured severity thresho
 | **Remediation** | An automated corrective action (for example, ArgoCD sync, memory limit increase, pod restart). |
 | **RCA** | Root Cause Analysis. The process of correlating signals to identify the underlying cause of an issue. |
 | **Sink** | An external alert destination (Slack, PagerDuty, Alertmanager). |
-| **Workflow** | A sequence of remediation steps with health checkpoints between layers. |
+| **Workflow** | A remediation workflow from `POST /api/v1/remediation/trigger`. `GET /api/v1/workflows/{id}` returns its steps, `layers`, and `checkpoints`. With `DATA_DIR` set, it is stored under `{DATA_DIR}/workflows`. |

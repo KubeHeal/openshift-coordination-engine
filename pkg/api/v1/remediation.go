@@ -3,6 +3,9 @@ package v1
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -62,6 +65,7 @@ type TriggerRemediationRequest struct {
 	Namespace  string              `json:"namespace"`
 	Resource   RemediationResource `json:"resource"`
 	Issue      RemediationIssue    `json:"issue"`
+	DryRun     bool                `json:"dry_run,omitempty"`
 }
 
 // TriggerRemediationResponse represents the response for triggering remediation
@@ -74,21 +78,34 @@ type TriggerRemediationResponse struct {
 
 // WorkflowResponse represents the response for getting workflow details
 type WorkflowResponse struct {
-	ID               string                `json:"id"`
-	IncidentID       string                `json:"incident_id"`
-	Status           string                `json:"status"`
-	DeploymentMethod string                `json:"deployment_method"`
-	Namespace        string                `json:"namespace"`
-	ResourceName     string                `json:"resource_name"`
-	ResourceKind     string                `json:"resource_kind"`
-	IssueType        string                `json:"issue_type"`
-	Remediator       string                `json:"remediator,omitempty"`
-	ErrorMessage     string                `json:"error_message,omitempty"`
-	CreatedAt        string                `json:"created_at"`
-	StartedAt        string                `json:"started_at,omitempty"`
-	CompletedAt      string                `json:"completed_at,omitempty"`
-	Duration         string                `json:"duration,omitempty"`
-	Steps            []models.WorkflowStep `json:"steps,omitempty"`
+	ID               string                      `json:"id"`
+	IncidentID       string                      `json:"incident_id"`
+	Status           string                      `json:"status"`
+	DeploymentMethod string                      `json:"deployment_method"`
+	Namespace        string                      `json:"namespace"`
+	ResourceName     string                      `json:"resource_name"`
+	ResourceKind     string                      `json:"resource_kind"`
+	IssueType        string                      `json:"issue_type"`
+	Remediator       string                      `json:"remediator,omitempty"`
+	ErrorMessage     string                      `json:"error_message,omitempty"`
+	CreatedAt        string                      `json:"created_at"`
+	StartedAt        string                      `json:"started_at,omitempty"`
+	CompletedAt      string                      `json:"completed_at,omitempty"`
+	Duration         string                      `json:"duration,omitempty"`
+	Steps            []models.WorkflowStep       `json:"steps,omitempty"`
+	Layers           []string                    `json:"layers,omitempty"`
+	Checkpoints      []models.WorkflowCheckpoint `json:"checkpoints,omitempty"`
+}
+
+func (h *RemediationHandler) linkWorkflow(incidentID, workflowID string) {
+	incident, err := h.incidentStore.Get(incidentID)
+	if err != nil {
+		return
+	}
+	incident.WorkflowID = workflowID
+	if err := h.incidentStore.Update(incident); err != nil {
+		h.log.WithError(err).WithField("incident_id", incidentID).Warn("failed to record workflow_id on incident")
+	}
 }
 
 // CreateIncidentRequest represents the request body for creating an incident
@@ -155,6 +172,7 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 		"namespace":   req.Namespace,
 		"resource":    req.Resource.Name,
 		"issue_type":  req.Issue.Type,
+		"dry_run":     req.DryRun,
 	}).Info("Triggering remediation workflow")
 
 	// Create issue from request
@@ -169,6 +187,11 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 		DetectedAt:   time.Now(),
 	}
 
+	if req.DryRun {
+		h.writeDryRun(w, r, issue)
+		return
+	}
+
 	// Trigger remediation workflow
 	workflow, err := h.orchestrator.TriggerRemediation(r.Context(), req.IncidentID, issue)
 	if err != nil {
@@ -177,24 +200,44 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Build response
-	response := TriggerRemediationResponse{
+	h.linkWorkflow(req.IncidentID, workflow.ID)
+	h.writeTriggerResponse(w, TriggerRemediationResponse{
 		WorkflowID:        workflow.ID,
 		Status:            string(workflow.Status),
 		DeploymentMethod:  workflow.DeploymentMethod,
-		EstimatedDuration: "5m", // Default estimate
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		h.log.WithError(err).Error("Failed to encode response")
-	}
+		EstimatedDuration: workflow.EstimatedDuration,
+	})
 
 	h.log.WithFields(logrus.Fields{
 		"workflow_id": workflow.ID,
 		"status":      workflow.Status,
 	}).Info("Remediation workflow triggered successfully")
+}
+
+func (h *RemediationHandler) writeDryRun(w http.ResponseWriter, r *http.Request, issue *models.Issue) {
+	method, duration, err := h.orchestrator.PreviewRemediation(r.Context(), issue)
+	if err != nil {
+		h.log.WithError(err).Error("Failed to preview remediation")
+		http.Error(w, "Failed to trigger remediation: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.writeTriggerResponse(w, TriggerRemediationResponse{
+		Status:            string(models.WorkflowStatusPending),
+		DeploymentMethod:  method,
+		EstimatedDuration: duration,
+	})
+	h.log.WithFields(logrus.Fields{
+		"deployment_method": method,
+		"dry_run":           true,
+	}).Info("Remediation dry run completed")
+}
+
+func (h *RemediationHandler) writeTriggerResponse(w http.ResponseWriter, response TriggerRemediationResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.log.WithError(err).Error("Failed to encode response")
+	}
 }
 
 // GetWorkflow handles GET /api/v1/workflows/{id}
@@ -234,6 +277,8 @@ func (h *RemediationHandler) GetWorkflow(w http.ResponseWriter, r *http.Request)
 		ErrorMessage:     workflow.ErrorMessage,
 		CreatedAt:        workflow.CreatedAt.Format(time.RFC3339),
 		Steps:            workflow.Steps,
+		Layers:           workflow.Layers,
+		Checkpoints:      append([]models.WorkflowCheckpoint(nil), workflow.Checkpoints...),
 	}
 
 	if workflow.StartedAt != nil {
@@ -320,24 +365,40 @@ func (h *RemediationHandler) CreateIncident(w http.ResponseWriter, r *http.Reque
 
 // IncidentListItem is one row returned by GET /api/v1/incidents.
 type IncidentListItem struct {
-	ID          string `json:"id,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Target      string `json:"target,omitempty"`
-	Namespace   string `json:"namespace,omitempty"`
-	Resource    string `json:"resource,omitempty"`
-	IssueType   string `json:"issue_type,omitempty"`
-	Severity    string `json:"severity,omitempty"`
-	Status      string `json:"status,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	WorkflowID  string `json:"workflow_id,omitempty"`
-	Source      string `json:"source,omitempty"`
+	ID                string            `json:"id,omitempty"`
+	Title             string            `json:"title,omitempty"`
+	Description       string            `json:"description,omitempty"`
+	Target            string            `json:"target,omitempty"`
+	Namespace         string            `json:"namespace,omitempty"`
+	Resource          string            `json:"resource,omitempty"`
+	IssueType         string            `json:"issue_type,omitempty"`
+	Severity          string            `json:"severity,omitempty"`
+	Status            string            `json:"status,omitempty"`
+	CreatedAt         string            `json:"created_at,omitempty"`
+	StartedAt         string            `json:"started_at,omitempty"`
+	CompletedAt       string            `json:"completed_at,omitempty"`
+	DurationSeconds   float64           `json:"duration_seconds,omitempty"`
+	WorkflowID        string            `json:"workflow_id,omitempty"`
+	ActionType        string            `json:"action_type,omitempty"`
+	Source            string            `json:"source,omitempty"`
+	AffectedResources []string          `json:"affected_resources,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+}
+
+// IncidentListSummary is the count block MCP reads from GET /api/v1/incidents.
+type IncidentListSummary struct {
+	Total      int            `json:"total"`
+	Active     int            `json:"active"`
+	Completed  int            `json:"completed"`
+	Failed     int            `json:"failed"`
+	BySeverity map[string]int `json:"by_severity"`
 }
 
 // ListIncidentsResponse is the body of GET /api/v1/incidents.
 type ListIncidentsResponse struct {
-	Incidents []IncidentListItem `json:"incidents"`
-	Total     int                `json:"total"`
+	Incidents []IncidentListItem  `json:"incidents"`
+	Total     int                 `json:"total"`
+	Summary   IncidentListSummary `json:"summary"`
 }
 
 // ListIncidents handles GET /api/v1/incidents
@@ -346,86 +407,34 @@ type ListIncidentsResponse struct {
 // @Tags remediation
 // @Produce json
 // @Param namespace query string false "Filter by namespace"
-// @Param severity query string false "Filter by severity"
+// @Param severity query string false "Filter by severity. all matches every severity"
+// @Param status query string false "Filter by status. all matches every status. active, running, completed, and failed are aliases"
+// @Param limit query int false "Maximum rows to return. Defaults to 50"
+// @Param offset query int false "Rows to skip after filtering. Defaults to 0"
 // @Success 200 {object} ListIncidentsResponse
 // @Router /api/v1/incidents [get]
 func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("Listing incidents")
 
-	// Parse query parameters for filtering
 	query := r.URL.Query()
-	namespace := query.Get("namespace")
-	severity := query.Get("severity")
+	namespace := strings.TrimSpace(query.Get("namespace"))
+	severity := optionalFilter(query.Get("severity"))
+	status := optionalFilter(query.Get("status"))
+	limit := listLimit(query.Get("limit"))
+	offset := listOffset(query.Get("offset"))
 
-	// Get manually created incidents from the store
-	filter := storage.ListFilter{
-		Namespace: namespace,
-		Severity:  severity,
-		Limit:     50, // Default limit
+	rows := h.incidentRows(namespace)
+	filtered := filterIncidentRows(rows, namespace, severity, status)
+	summary := summarizeIncidents(filtered)
+	page := pageIncidentRows(filtered, offset, limit)
+
+	response := ListIncidentsResponse{
+		Incidents: page,
+		Total:     summary.Total,
+		Summary:   summary,
 	}
-	storedIncidents := h.incidentStore.List(filter)
-
-	// Get workflow-based incidents
-	workflows := h.orchestrator.ListWorkflows()
-
-	// Combine both sources into response
-	incidents := make([]map[string]interface{}, 0, len(storedIncidents)+len(workflows))
-
-	// Add stored incidents first
-	for _, inc := range storedIncidents {
-		incident := map[string]interface{}{
-			"id":                 inc.ID,
-			"title":              inc.Title,
-			"description":        inc.Description,
-			"target":             inc.Target,
-			"severity":           string(inc.Severity),
-			"status":             string(inc.Status),
-			"created_at":         inc.CreatedAt.Format(time.RFC3339),
-			"affected_resources": inc.AffectedResources,
-			"labels":             inc.Labels,
-			"source":             "manual",
-		}
-		if inc.WorkflowID != "" {
-			incident["workflow_id"] = inc.WorkflowID
-		}
-		incidents = append(incidents, incident)
-	}
-
-	// Add workflow-based incidents
-	for _, wf := range workflows {
-		// Apply namespace filter if specified
-		if namespace != "" && wf.Namespace != namespace {
-			continue
-		}
-
-		incident := map[string]interface{}{
-			"id":          wf.IncidentID,
-			"namespace":   wf.Namespace,
-			"target":      wf.Namespace,
-			"resource":    wf.ResourceKind + "/" + wf.ResourceName,
-			"issue_type":  wf.IssueType,
-			"severity":    "high", // Default for workflow-based incidents
-			"created_at":  wf.CreatedAt.Format(time.RFC3339),
-			"workflow_id": wf.ID,
-			"source":      "workflow",
-		}
-
-		// Map workflow status to incident status
-		switch wf.Status {
-		case models.WorkflowStatusCompleted:
-			incident["status"] = "remediated"
-		case models.WorkflowStatusFailed:
-			incident["status"] = "failed"
-		default:
-			incident["status"] = "in_progress"
-		}
-
-		incidents = append(incidents, incident)
-	}
-
-	response := map[string]interface{}{
-		"incidents": incidents,
-		"total":     len(incidents),
+	if response.Incidents == nil {
+		response.Incidents = []IncidentListItem{}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -434,7 +443,198 @@ func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Reques
 		h.log.WithError(err).Error("Failed to encode incidents response")
 	}
 
-	h.log.WithField("count", len(incidents)).Info("Incidents listed successfully")
+	h.log.WithField("count", len(page)).Info("Incidents listed successfully")
+}
+
+func (h *RemediationHandler) incidentRows(namespace string) []IncidentListItem {
+	stored := h.incidentStore.List(storage.ListFilter{Namespace: namespace})
+	rows := make([]IncidentListItem, 0, len(stored)+8)
+	for _, incident := range stored {
+		rows = append(rows, IncidentListItem{
+			ID:                incident.ID,
+			Title:             incident.Title,
+			Description:       incident.Description,
+			Target:            incident.Target,
+			Severity:          string(incident.Severity),
+			Status:            storedListStatus(incident.Status),
+			CreatedAt:         incident.CreatedAt.Format(time.RFC3339),
+			WorkflowID:        incident.WorkflowID,
+			Source:            "manual",
+			AffectedResources: incident.AffectedResources,
+			Labels:            incident.Labels,
+		})
+	}
+	for _, workflow := range h.orchestrator.ListWorkflows() {
+		if namespace != "" && workflow.Namespace != namespace {
+			continue
+		}
+		rows = append(rows, workflowListItem(workflow, h.workflowSeverity(workflow)))
+	}
+	sortIncidentRows(rows)
+	return rows
+}
+
+func (h *RemediationHandler) workflowSeverity(workflow *models.Workflow) string {
+	if workflow.Severity != "" {
+		return workflow.Severity
+	}
+	incident, err := h.incidentStore.Get(workflow.IncidentID)
+	if err != nil {
+		return ""
+	}
+	return string(incident.Severity)
+}
+
+func optionalFilter(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(value, "all") {
+		return ""
+	}
+	return value
+}
+
+func listLimit(raw string) int {
+	const defaultLimit = 50
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultLimit
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return defaultLimit
+	}
+	return parsed
+}
+
+func listOffset(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
+}
+
+func filterIncidentRows(rows []IncidentListItem, namespace, severity, status string) []IncidentListItem {
+	filtered := make([]IncidentListItem, 0, len(rows))
+	for i := range rows {
+		if namespace != "" && rows[i].Namespace != namespace && rows[i].Target != namespace {
+			continue
+		}
+		if severity != "" && rows[i].Severity != severity {
+			continue
+		}
+		if !statusMatches(rows[i].Status, status) {
+			continue
+		}
+		filtered = append(filtered, rows[i])
+	}
+	return filtered
+}
+
+func pageIncidentRows(rows []IncidentListItem, offset, limit int) []IncidentListItem {
+	if offset >= len(rows) {
+		return []IncidentListItem{}
+	}
+	rows = rows[offset:]
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows
+}
+
+func summarizeIncidents(rows []IncidentListItem) IncidentListSummary {
+	summary := IncidentListSummary{
+		Total:      len(rows),
+		BySeverity: map[string]int{},
+	}
+	for i := range rows {
+		switch canonicalStatus(rows[i].Status) {
+		case "active":
+			summary.Active++
+		case "completed":
+			summary.Completed++
+		case "failed":
+			summary.Failed++
+		}
+		if rows[i].Severity != "" {
+			summary.BySeverity[rows[i].Severity]++
+		}
+	}
+	return summary
+}
+
+func statusMatches(rowStatus, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	return canonicalStatus(rowStatus) == canonicalStatus(filter)
+}
+
+func canonicalStatus(status string) string {
+	switch strings.ToLower(status) {
+	case "active", "pending", "running", "in_progress":
+		return "active"
+	case "completed", "remediated", "resolved":
+		return "completed"
+	case "failed":
+		return "failed"
+	default:
+		return strings.ToLower(status)
+	}
+}
+
+func storedListStatus(status models.IncidentStatus) string {
+	if status == models.IncidentStatusResolved {
+		return "completed"
+	}
+	return string(status)
+}
+
+func workflowListItem(workflow *models.Workflow, severity string) IncidentListItem {
+	item := IncidentListItem{
+		ID:         workflow.IncidentID,
+		Namespace:  workflow.Namespace,
+		Target:     workflow.Namespace,
+		Resource:   workflow.ResourceKind + "/" + workflow.ResourceName,
+		IssueType:  workflow.IssueType,
+		ActionType: workflow.IssueType,
+		Severity:   severity,
+		Status:     workflowIncidentStatus(workflow.Status),
+		CreatedAt:  workflow.CreatedAt.Format(time.RFC3339),
+		WorkflowID: workflow.ID,
+		Source:     "workflow",
+	}
+	if workflow.StartedAt != nil {
+		item.StartedAt = workflow.StartedAt.Format(time.RFC3339)
+	}
+	if workflow.CompletedAt != nil {
+		item.CompletedAt = workflow.CompletedAt.Format(time.RFC3339)
+	}
+	if workflow.StartedAt != nil && workflow.CompletedAt != nil {
+		item.DurationSeconds = workflow.CompletedAt.Sub(*workflow.StartedAt).Seconds()
+	}
+	return item
+}
+
+func sortIncidentRows(rows []IncidentListItem) {
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].CreatedAt > rows[j].CreatedAt
+	})
+}
+
+func workflowIncidentStatus(status models.WorkflowStatus) string {
+	switch status {
+	case models.WorkflowStatusCompleted:
+		return "completed"
+	case models.WorkflowStatusFailed:
+		return "failed"
+	default:
+		return "running"
+	}
 }
 
 // sendErrorResponse sends a JSON error response

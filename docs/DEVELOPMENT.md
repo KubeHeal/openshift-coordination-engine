@@ -274,7 +274,7 @@ export KUBEHEAL_ALERT_SEVERITY_THRESHOLD=critical
 
 ## Integration with Python ML Service
 
-The Go engine calls Python ML endpoints for anomaly detection and predictions.
+The legacy client calls the Python ML service at `ML_SERVICE_URL`. These paths are not routes on the coordination engine. Anomaly analysis on this server is `POST /api/v1/anomalies/analyze`.
 
 **Example HTTP Client**:
 
