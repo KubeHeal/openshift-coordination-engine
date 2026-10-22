@@ -28,6 +28,24 @@ jobs:
           version: v2.15.0
           args: --timeout=5m
 
+  generate-docs:
+    name: OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+
+      - name: Regenerate the OpenAPI spec
+        run: make generate-docs
+
+      - name: Fail if the spec is stale
+        run: git diff --exit-code -- docs
+
   test:
     name: Test
     runs-on: ubuntu-latest
