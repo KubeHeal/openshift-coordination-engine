@@ -22,6 +22,7 @@ import (
 	"github.com/KubeHeal/openshift-coordination-engine/internal/coordination"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/integrations"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/policy"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/rbac"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
@@ -46,6 +47,10 @@ type KubernetesClients struct {
 	Config        *rest.Config
 }
 
+// @title OpenShift Coordination Engine API
+// @version 1.2.0
+// @description Kubernetes-native orchestration for multi-layer coordination in OpenShift clusters.
+// @BasePath /
 func main() {
 	// Record start time for uptime tracking
 	startTime = time.Now()
@@ -258,26 +263,23 @@ func main() {
 	rcaHandler.RegisterRoutes(router)
 	log.Info("RCA investigation endpoint registered: POST /api/v1/investigate/rca")
 
+	policyCtx, stopPolicyWatch := context.WithCancel(context.Background())
+	defer stopPolicyWatch()
+	policyLoader := initPolicyEngine(policyCtx, cfg, k8sClients, prometheusClient, router, log)
+
 	// KServe proxy endpoints (ADR-039, ADR-040)
 	if kserveProxyHandler != nil {
 		kserveProxyHandler.RegisterRoutes(router)
 		log.Info("✅ KServe proxy endpoints registered: /api/v1/detect, /api/v1/models")
 	}
 
-	// Add simple /health endpoint for backward compatibility with deployments
-	// This provides a lightweight health check for liveness/readiness probes
-	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		response := map[string]string{
-			"status":  "ok",
-			"version": Version,
-		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.WithError(err).Error("Failed to encode simple health response")
-		}
-	}).Methods("GET")
+	router.HandleFunc("/health", simpleHealth(log, Version)).Methods("GET")
 	log.Info("Simple /health endpoint registered for backward compatibility")
+
+	if cfg.EnableSwaggerUI {
+		v1.RegisterSwaggerUI(router)
+		log.Info("Swagger UI enabled at /api/docs/")
+	}
 
 	// Metrics server (separate port)
 	metricsRouter := mux.NewRouter()
@@ -317,12 +319,31 @@ func main() {
 		}
 	}()
 
-	// Wait for interrupt signal and shut down gracefully
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
+	// SIGINT and SIGTERM stop the process. SIGHUP reloads the policy file.
+	waitForShutdownSignal(policyLoader, log)
+	stopPolicyWatch()
 	gracefulShutdown(server, metricsServer, incidentStore, log)
+}
+
+func waitForShutdownSignal(loader *policy.Loader, log *logrus.Logger) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(quit)
+	for {
+		sig := <-quit
+		if sig != syscall.SIGHUP {
+			return
+		}
+		if loader == nil {
+			log.Info("SIGHUP received; policy engine is disabled")
+			continue
+		}
+		if err := loader.Reload(); err != nil {
+			log.WithError(err).Error("policy reload failed; keeping previous document")
+			continue
+		}
+		log.WithField("policies", loader.Count()).Info("policies reloaded from SIGHUP")
+	}
 }
 
 // gracefulShutdown stops HTTP servers and persists incident data before exit.
@@ -581,6 +602,66 @@ func initKubernetesClient(cfg *config.Config, log *logrus.Logger) (*KubernetesCl
 	}, nil
 }
 
+// initPolicyEngine loads self-healing policies and registers POST /api/v1/alerts.
+// The engine stays disabled unless ENABLE_POLICY_ENGINE=true.
+func initPolicyEngine(
+	ctx context.Context,
+	cfg *config.Config,
+	k8sClients *KubernetesClients,
+	prometheusClient *integrations.PrometheusClient,
+	router *mux.Router,
+	log *logrus.Logger,
+) *policy.Loader {
+	if !cfg.PolicyEngine.Enabled {
+		log.Info("SelfHealingPolicy engine disabled")
+		return nil
+	}
+	if prometheusClient == nil {
+		log.Fatal("ENABLE_POLICY_ENGINE requires PROMETHEUS_URL")
+	}
+	loader, err := policy.NewLoader(cfg.PolicyEngine.ConfigPath, log)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to load self-healing policies")
+	}
+	mapper, err := policy.DiscoveryRESTMapper(k8sClients.Clientset.Discovery())
+	if err != nil {
+		log.WithError(err).Fatal("Failed to discover Kubernetes resources for policy actions")
+	}
+	executor, err := policy.NewActionExecutor(
+		k8sClients.Clientset,
+		k8sClients.DynamicClient,
+		mapper,
+		policy.NewSPDYCommandExecutor(k8sClients.Config, k8sClients.Clientset),
+		log,
+	)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create policy action executor")
+	}
+	timeout := cfg.KServe.Timeout
+	if timeout == 0 {
+		timeout = cfg.HTTPTimeout
+	}
+	engine, err := policy.NewEngine(&policy.EngineConfig{
+		Loader:         loader,
+		Querier:        prometheusClient,
+		Scorer:         policy.NewHTTPScorer(timeout, log),
+		Actions:        executor,
+		ModelNamespace: cfg.KServe.Namespace,
+		ModelPort:      cfg.KServe.PredictorPort,
+		Log:            log,
+	})
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create policy engine")
+	}
+	v1.NewAlertsHandler(engine, log).RegisterRoutes(router)
+	go loader.Watch(ctx)
+	log.WithFields(logrus.Fields{
+		"path":     cfg.PolicyEngine.ConfigPath,
+		"policies": loader.Count(),
+	}).Info("SelfHealingPolicy engine enabled: POST /api/v1/alerts")
+	return loader
+}
+
 // initIncidentStore initializes the incident store with persistence if DATA_DIR is configured (ADR-014)
 func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.IncidentStore {
 	if cfg.DataDir == "" {
@@ -621,4 +702,28 @@ func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.Incident
 	}
 
 	return incidentStore
+}
+
+// SimpleHealthResponse is the lightweight liveness response.
+type SimpleHealthResponse struct {
+	Status  string `json:"status" example:"ok"`
+	Version string `json:"version" example:"1.2.0"`
+}
+
+// simpleHealth handles GET /health.
+// @Summary Lightweight health check
+// @Description Liveness and readiness probe that does not check cluster dependencies
+// @Tags health
+// @Produce json
+// @Success 200 {object} SimpleHealthResponse
+// @Router /health [get]
+func simpleHealth(log *logrus.Logger, version string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		response := SimpleHealthResponse{Status: "ok", Version: version}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.WithError(err).Error("Failed to encode simple health response")
+		}
+	}
 }

@@ -43,19 +43,25 @@ func (h *RemediationHandler) GetIncidentStore() *storage.IncidentStore {
 	return h.incidentStore
 }
 
+// RemediationResource identifies the Kubernetes object to repair.
+type RemediationResource struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+// RemediationIssue describes the detected problem.
+type RemediationIssue struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Severity    string `json:"severity"`
+}
+
 // TriggerRemediationRequest represents the request body for triggering remediation
 type TriggerRemediationRequest struct {
-	IncidentID string `json:"incident_id"`
-	Namespace  string `json:"namespace"`
-	Resource   struct {
-		Kind string `json:"kind"`
-		Name string `json:"name"`
-	} `json:"resource"`
-	Issue struct {
-		Type        string `json:"type"`
-		Description string `json:"description"`
-		Severity    string `json:"severity"`
-	} `json:"issue"`
+	IncidentID string              `json:"incident_id"`
+	Namespace  string              `json:"namespace"`
+	Resource   RemediationResource `json:"resource"`
+	Issue      RemediationIssue    `json:"issue"`
 }
 
 // TriggerRemediationResponse represents the response for triggering remediation
@@ -105,6 +111,16 @@ type CreateIncidentResponse struct {
 }
 
 // TriggerRemediation handles POST /api/v1/remediation/trigger
+// @Summary Trigger a remediation workflow
+// @Description Starts remediation for an incident against a detected deployment method
+// @Tags remediation
+// @Accept json
+// @Produce json
+// @Param request body TriggerRemediationRequest true "Remediation trigger request"
+// @Success 202 {object} TriggerRemediationResponse
+// @Failure 400 {string} string "Invalid request"
+// @Failure 500 {string} string "Failed to trigger remediation"
+// @Router /api/v1/remediation/trigger [post]
 func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("Received remediation trigger request")
 
@@ -182,6 +198,14 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 }
 
 // GetWorkflow handles GET /api/v1/workflows/{id}
+// @Summary Get a remediation workflow
+// @Description Returns the status and steps of a remediation workflow
+// @Tags remediation
+// @Produce json
+// @Param id path string true "Workflow ID"
+// @Success 200 {object} WorkflowResponse
+// @Failure 404 {string} string "Workflow not found"
+// @Router /api/v1/workflows/{id} [get]
 func (h *RemediationHandler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	workflowID := vars["id"]
@@ -233,6 +257,15 @@ func (h *RemediationHandler) GetWorkflow(w http.ResponseWriter, r *http.Request)
 }
 
 // CreateIncident handles POST /api/v1/incidents
+// @Summary Create an incident
+// @Description Records an incident that can later be used to trigger remediation
+// @Tags remediation
+// @Accept json
+// @Produce json
+// @Param request body CreateIncidentRequest true "Incident to create"
+// @Success 201 {object} CreateIncidentResponse
+// @Failure 400 {object} APIErrorResponse
+// @Router /api/v1/incidents [post]
 func (h *RemediationHandler) CreateIncident(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("Received create incident request")
 
@@ -285,7 +318,37 @@ func (h *RemediationHandler) CreateIncident(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// IncidentListItem is one row returned by GET /api/v1/incidents.
+type IncidentListItem struct {
+	ID          string `json:"id,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Namespace   string `json:"namespace,omitempty"`
+	Resource    string `json:"resource,omitempty"`
+	IssueType   string `json:"issue_type,omitempty"`
+	Severity    string `json:"severity,omitempty"`
+	Status      string `json:"status,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	WorkflowID  string `json:"workflow_id,omitempty"`
+	Source      string `json:"source,omitempty"`
+}
+
+// ListIncidentsResponse is the body of GET /api/v1/incidents.
+type ListIncidentsResponse struct {
+	Incidents []IncidentListItem `json:"incidents"`
+	Total     int                `json:"total"`
+}
+
 // ListIncidents handles GET /api/v1/incidents
+// @Summary List incidents
+// @Description Lists stored incidents and incidents derived from remediation workflows
+// @Tags remediation
+// @Produce json
+// @Param namespace query string false "Filter by namespace"
+// @Param severity query string false "Filter by severity"
+// @Success 200 {object} ListIncidentsResponse
+// @Router /api/v1/incidents [get]
 func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("Listing incidents")
 

@@ -23,7 +23,7 @@ A Go-based coordination engine for multi-layer remediation in OpenShift/Kubernet
 
 ### Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - Kubernetes 1.28+ or OpenShift 4.14+
 - kubectl/oc CLI configured
 
