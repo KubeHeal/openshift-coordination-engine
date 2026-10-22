@@ -99,7 +99,7 @@ Trigger a remediation workflow.
 }
 ```
 
-`status` at accept time is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes. The default is `"1m"`. `dry_run: true` returns `202` with an empty `workflow_id` after detection and does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json` before this response returns. An empty `DATA_DIR` keeps it in memory. If `incident_id` exists in the incident store, a real trigger sets `workflow_id` on that incident. An unknown id still returns `202`. Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
+`status` at accept time is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes. The default is `"1m"`. `dry_run: true` returns `202` with an empty `workflow_id` and a `planned_actions` list after detection. It does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json` before this response returns. An empty `DATA_DIR` keeps it in memory. If `incident_id` exists in the incident store, a real trigger sets `workflow_id` on that incident. An unknown id still returns `202`. Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
 
 #### `GET /incidents`
 Lists stored incidents and workflow-derived rows.

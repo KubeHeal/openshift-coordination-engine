@@ -14,7 +14,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
 	"github.com/KubeHeal/openshift-coordination-engine/internal/remediation"
@@ -102,14 +104,31 @@ func TestTriggerWritesWorkflowIDAndListFilters(t *testing.T) {
 }
 
 func TestDryRunDoesNotExecute(t *testing.T) {
-	handler, store, orchestrator := newContractHandler(t, apiStubRemediator{})
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+	client := fake.NewSimpleClientset()
+	var mutations int
+	client.PrependReactor("*", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		switch action.GetVerb() {
+		case "delete", "patch", "update", "create":
+			mutations++
+		}
+		return false, nil, nil
+	})
+	manual := remediation.NewManualRemediator(client, log)
+	selector := remediation.NewStrategySelector(log)
+	selector.SetFallbackRemediator(manual)
+	det := detector.NewDetector(client, log)
+	orchestrator := remediation.NewOrchestrator(det, selector, log, t.TempDir())
+	store := storage.NewIncidentStore()
+	handler := NewRemediationHandlerWithStore(orchestrator, store, log)
 	created := mustCreateIncident(t, store, "checkout")
 
 	recorder := postTrigger(handler, `{
 		"incident_id": "`+created.ID+`",
 		"namespace": "checkout",
-		"resource": {"kind": "Deployment", "name": "checkout-api"},
-		"issue": {"type": "pod_crash_loop", "severity": "high", "description": "crash"},
+		"resource": {"kind": "Pod", "name": "checkout-api"},
+		"issue": {"type": "pod_crash", "severity": "high", "description": "crash"},
 		"dry_run": true
 	}`)
 	require.Equal(t, http.StatusAccepted, recorder.Code)
@@ -120,6 +139,9 @@ func TestDryRunDoesNotExecute(t *testing.T) {
 	require.Equal(t, "pending", triggered.Status)
 	require.Equal(t, "1m", triggered.EstimatedDuration)
 	require.Equal(t, "unknown", triggered.DeploymentMethod)
+	require.NotEmpty(t, triggered.PlannedActions)
+	require.Contains(t, triggered.PlannedActions[0], "Delete Pod checkout/checkout-api")
+	require.Zero(t, mutations)
 	require.Empty(t, orchestrator.ListWorkflows())
 
 	stored, err := store.Get(created.ID)

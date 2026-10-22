@@ -97,6 +97,11 @@ func (ar *ArgoCDRemediator) Remediate(ctx context.Context, deploymentInfo *model
 	return nil
 }
 
+// Plan describes the Argo CD sync without calling the Argo CD API.
+func (ar *ArgoCDRemediator) Plan(_ context.Context, _ *models.DeploymentInfo, issue *models.Issue) ([]string, error) {
+	return []string{fmt.Sprintf("Trigger an Argo CD sync for the application managing %s/%s", issue.Namespace, issue.ResourceName)}, nil
+}
+
 // CanRemediate returns true if deployment is ArgoCD-managed
 func (ar *ArgoCDRemediator) CanRemediate(deploymentInfo *models.DeploymentInfo) bool {
 	return deploymentInfo.Method == models.DeploymentMethodArgoCD || deploymentInfo.IsGitOpsManaged()

@@ -70,10 +70,11 @@ type TriggerRemediationRequest struct {
 
 // TriggerRemediationResponse represents the response for triggering remediation
 type TriggerRemediationResponse struct {
-	WorkflowID        string `json:"workflow_id"`
-	Status            string `json:"status"`
-	DeploymentMethod  string `json:"deployment_method"`
-	EstimatedDuration string `json:"estimated_duration"`
+	WorkflowID        string   `json:"workflow_id"`
+	Status            string   `json:"status"`
+	DeploymentMethod  string   `json:"deployment_method"`
+	EstimatedDuration string   `json:"estimated_duration"`
+	PlannedActions    []string `json:"planned_actions,omitempty"`
 }
 
 // WorkflowResponse represents the response for getting workflow details
@@ -201,7 +202,7 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 	}
 
 	h.linkWorkflow(req.IncidentID, workflow.ID)
-	h.writeTriggerResponse(w, TriggerRemediationResponse{
+	h.writeTriggerResponse(w, &TriggerRemediationResponse{
 		WorkflowID:        workflow.ID,
 		Status:            string(workflow.Status),
 		DeploymentMethod:  workflow.DeploymentMethod,
@@ -215,16 +216,17 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 }
 
 func (h *RemediationHandler) writeDryRun(w http.ResponseWriter, r *http.Request, issue *models.Issue) {
-	method, duration, err := h.orchestrator.PreviewRemediation(r.Context(), issue)
+	method, duration, actions, err := h.orchestrator.PreviewRemediation(r.Context(), issue)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to preview remediation")
 		http.Error(w, "Failed to trigger remediation: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.writeTriggerResponse(w, TriggerRemediationResponse{
+	h.writeTriggerResponse(w, &TriggerRemediationResponse{
 		Status:            string(models.WorkflowStatusPending),
 		DeploymentMethod:  method,
 		EstimatedDuration: duration,
+		PlannedActions:    actions,
 	})
 	h.log.WithFields(logrus.Fields{
 		"deployment_method": method,
@@ -232,7 +234,7 @@ func (h *RemediationHandler) writeDryRun(w http.ResponseWriter, r *http.Request,
 	}).Info("Remediation dry run completed")
 }
 
-func (h *RemediationHandler) writeTriggerResponse(w http.ResponseWriter, response TriggerRemediationResponse) {
+func (h *RemediationHandler) writeTriggerResponse(w http.ResponseWriter, response *TriggerRemediationResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(response); err != nil {

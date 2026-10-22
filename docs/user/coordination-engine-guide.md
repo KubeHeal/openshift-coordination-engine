@@ -257,7 +257,7 @@ Triggers a remediation workflow for a specific incident.
 }
 ```
 
-`status` on this response is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes, `"1m"` by default. `dry_run: true` returns `202` with an empty `workflow_id` and does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json`. An empty `DATA_DIR` keeps it in memory. If the incident already exists, a real trigger writes `workflow_id` onto that stored incident.
+`status` on this response is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes, `"1m"` by default. `dry_run: true` returns `202` with an empty `workflow_id` and `planned_actions` for the steps a real trigger would take. It does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json`. An empty `DATA_DIR` keeps it in memory. If the incident already exists, a real trigger writes `workflow_id` onto that stored incident.
 
 The engine detects the deployment method (ArgoCD, Helm, Operator, or Manual) and routes remediation accordingly:
 

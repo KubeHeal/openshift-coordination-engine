@@ -98,12 +98,28 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 }
 
 // PreviewRemediation detects how a workflow would run without storing or executing it.
-func (o *Orchestrator) PreviewRemediation(ctx context.Context, issue *models.Issue) (string, string, error) {
+func (o *Orchestrator) PreviewRemediation(ctx context.Context, issue *models.Issue) (string, string, []string, error) {
 	if err := issue.Validate(); err != nil {
-		return "", "", fmt.Errorf("invalid issue: %w", err)
+		return "", "", nil, fmt.Errorf("invalid issue: %w", err)
 	}
 	info := o.deploymentForIssue(ctx, issue)
-	return string(info.Method), formatMinutes(defaultCheckpointTimeout), nil
+	actions, err := planRemediation(ctx, o.remediator, info, issue)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return string(info.Method), formatMinutes(defaultCheckpointTimeout), actions, nil
+}
+
+func planRemediation(ctx context.Context, remediator Remediator, info *models.DeploymentInfo, issue *models.Issue) ([]string, error) {
+	planner, ok := remediator.(ActionPlanner)
+	if !ok {
+		return []string{fmt.Sprintf("Run %s remediation for %s/%s", remediator.Name(), issue.Namespace, issue.ResourceName)}, nil
+	}
+	actions, err := planner.Plan(ctx, info, issue)
+	if err != nil {
+		return nil, fmt.Errorf("plan remediation: %w", err)
+	}
+	return actions, nil
 }
 
 func (o *Orchestrator) deploymentForIssue(ctx context.Context, issue *models.Issue) *models.DeploymentInfo {
