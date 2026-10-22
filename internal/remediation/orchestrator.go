@@ -88,12 +88,13 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 	// Create workflow and persist it before the request returns.
 	workflow := o.createWorkflow(incidentID, issue, deploymentInfo)
 	o.saveWorkflow(workflow)
+	snapshot := cloneWorkflow(workflow)
 
 	// Execute remediation in background — context.Background is intentional: the
 	// workflow outlives the HTTP request that triggered it.
 	go o.executeWorkflow(context.Background(), workflow, deploymentInfo, issue) // #nosec G118 -- background goroutine must not use request-scoped context
 
-	return workflow, nil
+	return snapshot, nil
 }
 
 // PreviewRemediation detects how a workflow would run without storing or executing it.
@@ -130,7 +131,7 @@ func (o *Orchestrator) GetWorkflow(workflowID string) (*models.Workflow, error) 
 		return nil, fmt.Errorf("workflow not found: %s", workflowID)
 	}
 
-	return workflow, nil
+	return cloneWorkflow(workflow), nil
 }
 
 // ListWorkflows returns all workflows
@@ -140,7 +141,7 @@ func (o *Orchestrator) ListWorkflows() []*models.Workflow {
 
 	workflows := make([]*models.Workflow, 0, len(o.workflows))
 	for _, wf := range o.workflows {
-		workflows = append(workflows, wf)
+		workflows = append(workflows, cloneWorkflow(wf))
 	}
 
 	return workflows
@@ -179,64 +180,89 @@ func (o *Orchestrator) createWorkflow(incidentID string, issue *models.Issue, de
 // executeWorkflow executes the remediation workflow
 func (o *Orchestrator) executeWorkflow(ctx context.Context, workflow *models.Workflow, deploymentInfo *models.DeploymentInfo, issue *models.Issue) {
 	o.log.WithField("workflow_id", workflow.ID).Info("Starting workflow execution")
-
-	// Record workflow start metrics
 	RecordWorkflowStart()
 
-	// Update workflow status
-	o.updateWorkflowStatus(workflow, models.WorkflowStatusRunning)
 	startTime := time.Now()
-	workflow.StartedAt = &startTime
+	remediatorName := o.remediator.Name()
+	o.mutate(workflow.ID, func(current *models.Workflow) {
+		current.Status = models.WorkflowStatusRunning
+		current.StartedAt = &startTime
+		step := current.AddStep(fmt.Sprintf("Execute %s remediation for %s", remediatorName, issue.Type))
+		if len(current.Layers) > 0 {
+			step.Layer = current.Layers[0]
+		}
+		current.Remediator = remediatorName
+	})
 
-	// Add remediation step
-	step := workflow.AddStep(fmt.Sprintf("Execute %s remediation for %s", o.remediator.Name(), issue.Type))
-	if len(workflow.Layers) > 0 {
-		step.Layer = workflow.Layers[0]
-	}
-	workflow.Remediator = o.remediator.Name()
-
-	// Save workflow state
-	o.saveWorkflow(workflow)
-
-	// Execute remediation
 	err := o.remediator.Remediate(ctx, deploymentInfo, issue)
-
 	completedTime := time.Now()
-	workflow.CompletedAt = &completedTime
 	duration := completedTime.Sub(startTime).Seconds()
-
-	if err != nil {
-		o.log.WithError(err).Error("Remediation failed")
-		workflow.Status = models.WorkflowStatusFailed
-		workflow.ErrorMessage = err.Error()
-		step.Status = "failed"
-		step.ErrorMessage = err.Error()
-		markCheckpoints(workflow, models.CheckpointFailed)
-
-		// Record remediation failure metrics
-		RecordRemediation(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, duration, false)
-		RecordRemediationFailure(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, "remediation_error")
-		RecordWorkflowEnd("failed")
-	} else {
-		o.log.Info("Remediation completed successfully")
-		workflow.Status = models.WorkflowStatusCompleted
-		step.Status = "completed"
-		step.CompletedAt = &completedTime
-		markCheckpoints(workflow, models.CheckpointPassed)
-
-		// Record remediation success metrics
-		RecordRemediation(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, duration, true)
-		RecordWorkflowEnd("completed")
-	}
-
-	// Save final workflow state
-	o.saveWorkflow(workflow)
+	status := o.finishWorkflow(workflow.ID, err, completedTime, duration, deploymentInfo, issue)
 
 	o.log.WithFields(logrus.Fields{
 		"workflow_id": workflow.ID,
-		"status":      workflow.Status,
-		"duration":    workflow.Duration().String(),
+		"status":      status,
+		"duration":    duration,
 	}).Info("Workflow execution completed")
+}
+
+func (o *Orchestrator) finishWorkflow(
+	workflowID string,
+	err error,
+	completedTime time.Time,
+	duration float64,
+	deploymentInfo *models.DeploymentInfo,
+	issue *models.Issue,
+) models.WorkflowStatus {
+	status := models.WorkflowStatusCompleted
+	checkpoint := models.CheckpointPassed
+	if err != nil {
+		status = models.WorkflowStatusFailed
+		checkpoint = models.CheckpointFailed
+		o.log.WithError(err).Error("Remediation failed")
+	} else {
+		o.log.Info("Remediation completed successfully")
+	}
+
+	o.mutate(workflowID, func(current *models.Workflow) {
+		current.Status = status
+		current.CompletedAt = &completedTime
+		step := lastStep(current)
+		if err != nil {
+			current.ErrorMessage = err.Error()
+			if step != nil {
+				step.Status = "failed"
+				step.ErrorMessage = err.Error()
+			}
+		} else if step != nil {
+			step.Status = "completed"
+			step.CompletedAt = &completedTime
+		}
+		markCheckpoints(current, checkpoint)
+	})
+
+	if err != nil {
+		RecordRemediation(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, duration, false)
+		RecordRemediationFailure(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, "remediation_error")
+		RecordWorkflowEnd("failed")
+		return status
+	}
+	RecordRemediation(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, duration, true)
+	RecordWorkflowEnd("completed")
+	return status
+}
+
+func (o *Orchestrator) mutate(workflowID string, update func(*models.Workflow)) {
+	o.mu.Lock()
+	workflow := o.workflows[workflowID]
+	if workflow == nil {
+		o.mu.Unlock()
+		o.log.WithField("workflow_id", workflowID).Error("workflow missing during update")
+		return
+	}
+	update(workflow)
+	o.mu.Unlock()
+	o.saveWorkflow(workflow)
 }
 
 // detectDeploymentMethod detects how the resource was deployed
@@ -262,13 +288,6 @@ func (o *Orchestrator) detectDeploymentMethod(ctx context.Context, issue *models
 		return nil, fmt.Errorf("failed to detect deployment info: %w", err)
 	}
 	return deploymentInfo, nil
-}
-
-// updateWorkflowStatus updates the workflow status
-func (o *Orchestrator) updateWorkflowStatus(workflow *models.Workflow, status models.WorkflowStatus) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	workflow.Status = status
 }
 
 // saveWorkflow persists workflow state in memory and, when configured, on disk.
@@ -315,6 +334,41 @@ func markCheckpoints(workflow *models.Workflow, status string) {
 	for i := range workflow.Checkpoints {
 		workflow.Checkpoints[i].Status = status
 	}
+}
+
+func lastStep(workflow *models.Workflow) *models.WorkflowStep {
+	if len(workflow.Steps) == 0 {
+		return nil
+	}
+	return &workflow.Steps[len(workflow.Steps)-1]
+}
+
+func cloneWorkflow(workflow *models.Workflow) *models.Workflow {
+	if workflow == nil {
+		return nil
+	}
+	cloned := *workflow
+	cloned.StartedAt = copyTime(workflow.StartedAt)
+	cloned.CompletedAt = copyTime(workflow.CompletedAt)
+	cloned.Layers = append([]string(nil), workflow.Layers...)
+	cloned.Steps = append([]models.WorkflowStep(nil), workflow.Steps...)
+	for i := range cloned.Steps {
+		cloned.Steps[i].StartedAt = copyTime(workflow.Steps[i].StartedAt)
+		cloned.Steps[i].CompletedAt = copyTime(workflow.Steps[i].CompletedAt)
+	}
+	cloned.Checkpoints = append([]models.WorkflowCheckpoint(nil), workflow.Checkpoints...)
+	for i := range cloned.Checkpoints {
+		cloned.Checkpoints[i].Checks = append([]string(nil), workflow.Checkpoints[i].Checks...)
+	}
+	return &cloned
+}
+
+func copyTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 // generateWorkflowID generates a unique workflow ID
