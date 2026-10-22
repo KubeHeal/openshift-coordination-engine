@@ -206,10 +206,11 @@ Returns a list of incidents with their remediation status.
 |---|---|
 | `namespace` | Rows whose `namespace` or `target` equals this value. |
 | `severity` | Exact match. Empty or `all` matches every severity. |
-| `status` | Exact match on the row status. Empty or `all` matches every status. |
+| `status` | Empty or `all` matches every status. `active`, `pending`, `running`, and `in_progress` match the same rows. `completed`, `remediated`, and `resolved` match the same rows. `failed` matches failed rows. |
 | `limit` | Maximum rows returned. Defaults to 50. |
+| `offset` | Rows to skip after filtering. Defaults to 0. |
 
-`offset` is ignored. Filters apply to the combined list. `total` is the match count before `limit`. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. `severity=all` returns every severity. `status=completed` does not match workflow rows. The list mixes `source` `manual` and `source` `workflow`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent. Workflow rows use status `remediated`, `failed`, or `in_progress`, and the workflow severity. Stored rows use `active`, `resolved`, or `cancelled`.
+Filters apply to the combined list. `total` and `summary.total` are the match count before `offset` and `limit`. `summary` also includes `active`, `completed`, `failed`, and `by_severity`. The MCP incident list, `cluster://incidents`, and remediation-history send `severity=all`, `status`, `limit`, and `offset`. The list mixes `source` `manual` and `source` `workflow`. `priority`, `confidence`, `parameters`, and `tags` are absent. Workflow rows use status `running`, `completed`, or `failed`, the workflow severity, and `action_type`. Stored rows use `active`, `completed` when the stored status is `resolved`, or `cancelled`.
 
 ### Create an incident
 
@@ -256,7 +257,7 @@ Triggers a remediation workflow for a specific incident.
 }
 ```
 
-`status` on this response is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes, `"1m"` by default. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. When `DATA_DIR` is set, the workflow is written to `{DATA_DIR}/workflows/<id>.json`. An empty `DATA_DIR` keeps it in memory. If the incident already exists, this call writes `workflow_id` onto that stored incident.
+`status` on this response is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes, `"1m"` by default. `dry_run: true` returns `202` with an empty `workflow_id` and does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json`. An empty `DATA_DIR` keeps it in memory. If the incident already exists, a real trigger writes `workflow_id` onto that stored incident.
 
 The engine detects the deployment method (ArgoCD, Helm, Operator, or Manual) and routes remediation accordingly:
 

@@ -65,6 +65,7 @@ type TriggerRemediationRequest struct {
 	Namespace  string              `json:"namespace"`
 	Resource   RemediationResource `json:"resource"`
 	Issue      RemediationIssue    `json:"issue"`
+	DryRun     bool                `json:"dry_run,omitempty"`
 }
 
 // TriggerRemediationResponse represents the response for triggering remediation
@@ -171,6 +172,7 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 		"namespace":   req.Namespace,
 		"resource":    req.Resource.Name,
 		"issue_type":  req.Issue.Type,
+		"dry_run":     req.DryRun,
 	}).Info("Triggering remediation workflow")
 
 	// Create issue from request
@@ -185,6 +187,11 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 		DetectedAt:   time.Now(),
 	}
 
+	if req.DryRun {
+		h.writeDryRun(w, r, issue)
+		return
+	}
+
 	// Trigger remediation workflow
 	workflow, err := h.orchestrator.TriggerRemediation(r.Context(), req.IncidentID, issue)
 	if err != nil {
@@ -194,24 +201,43 @@ func (h *RemediationHandler) TriggerRemediation(w http.ResponseWriter, r *http.R
 	}
 
 	h.linkWorkflow(req.IncidentID, workflow.ID)
-
-	response := TriggerRemediationResponse{
+	h.writeTriggerResponse(w, TriggerRemediationResponse{
 		WorkflowID:        workflow.ID,
 		Status:            string(workflow.Status),
 		DeploymentMethod:  workflow.DeploymentMethod,
 		EstimatedDuration: workflow.EstimatedDuration,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		h.log.WithError(err).Error("Failed to encode response")
-	}
+	})
 
 	h.log.WithFields(logrus.Fields{
 		"workflow_id": workflow.ID,
 		"status":      workflow.Status,
 	}).Info("Remediation workflow triggered successfully")
+}
+
+func (h *RemediationHandler) writeDryRun(w http.ResponseWriter, r *http.Request, issue *models.Issue) {
+	method, duration, err := h.orchestrator.PreviewRemediation(r.Context(), issue)
+	if err != nil {
+		h.log.WithError(err).Error("Failed to preview remediation")
+		http.Error(w, "Failed to trigger remediation: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	h.writeTriggerResponse(w, TriggerRemediationResponse{
+		Status:            string(models.WorkflowStatusPending),
+		DeploymentMethod:  method,
+		EstimatedDuration: duration,
+	})
+	h.log.WithFields(logrus.Fields{
+		"deployment_method": method,
+		"dry_run":           true,
+	}).Info("Remediation dry run completed")
+}
+
+func (h *RemediationHandler) writeTriggerResponse(w http.ResponseWriter, response TriggerRemediationResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.log.WithError(err).Error("Failed to encode response")
+	}
 }
 
 // GetWorkflow handles GET /api/v1/workflows/{id}
@@ -349,16 +375,30 @@ type IncidentListItem struct {
 	Severity          string            `json:"severity,omitempty"`
 	Status            string            `json:"status,omitempty"`
 	CreatedAt         string            `json:"created_at,omitempty"`
+	StartedAt         string            `json:"started_at,omitempty"`
+	CompletedAt       string            `json:"completed_at,omitempty"`
+	DurationSeconds   float64           `json:"duration_seconds,omitempty"`
 	WorkflowID        string            `json:"workflow_id,omitempty"`
+	ActionType        string            `json:"action_type,omitempty"`
 	Source            string            `json:"source,omitempty"`
 	AffectedResources []string          `json:"affected_resources,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 }
 
+// IncidentListSummary is the count block MCP reads from GET /api/v1/incidents.
+type IncidentListSummary struct {
+	Total      int            `json:"total"`
+	Active     int            `json:"active"`
+	Completed  int            `json:"completed"`
+	Failed     int            `json:"failed"`
+	BySeverity map[string]int `json:"by_severity"`
+}
+
 // ListIncidentsResponse is the body of GET /api/v1/incidents.
 type ListIncidentsResponse struct {
-	Incidents []IncidentListItem `json:"incidents"`
-	Total     int                `json:"total"`
+	Incidents []IncidentListItem  `json:"incidents"`
+	Total     int                 `json:"total"`
+	Summary   IncidentListSummary `json:"summary"`
 }
 
 // ListIncidents handles GET /api/v1/incidents
@@ -368,8 +408,9 @@ type ListIncidentsResponse struct {
 // @Produce json
 // @Param namespace query string false "Filter by namespace"
 // @Param severity query string false "Filter by severity. all matches every severity"
-// @Param status query string false "Filter by status. all matches every status"
+// @Param status query string false "Filter by status. all matches every status. active, running, completed, and failed are aliases"
 // @Param limit query int false "Maximum rows to return. Defaults to 50"
+// @Param offset query int false "Rows to skip after filtering. Defaults to 0"
 // @Success 200 {object} ListIncidentsResponse
 // @Router /api/v1/incidents [get]
 func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Request) {
@@ -380,17 +421,17 @@ func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Reques
 	severity := optionalFilter(query.Get("severity"))
 	status := optionalFilter(query.Get("status"))
 	limit := listLimit(query.Get("limit"))
+	offset := listOffset(query.Get("offset"))
 
 	rows := h.incidentRows(namespace)
 	filtered := filterIncidentRows(rows, namespace, severity, status)
-	total := len(filtered)
-	if len(filtered) > limit {
-		filtered = filtered[:limit]
-	}
+	summary := summarizeIncidents(filtered)
+	page := pageIncidentRows(filtered, offset, limit)
 
 	response := ListIncidentsResponse{
-		Incidents: filtered,
-		Total:     total,
+		Incidents: page,
+		Total:     summary.Total,
+		Summary:   summary,
 	}
 	if response.Incidents == nil {
 		response.Incidents = []IncidentListItem{}
@@ -402,7 +443,7 @@ func (h *RemediationHandler) ListIncidents(w http.ResponseWriter, r *http.Reques
 		h.log.WithError(err).Error("Failed to encode incidents response")
 	}
 
-	h.log.WithField("count", len(filtered)).Info("Incidents listed successfully")
+	h.log.WithField("count", len(page)).Info("Incidents listed successfully")
 }
 
 func (h *RemediationHandler) incidentRows(namespace string) []IncidentListItem {
@@ -415,7 +456,7 @@ func (h *RemediationHandler) incidentRows(namespace string) []IncidentListItem {
 			Description:       incident.Description,
 			Target:            incident.Target,
 			Severity:          string(incident.Severity),
-			Status:            string(incident.Status),
+			Status:            storedListStatus(incident.Status),
 			CreatedAt:         incident.CreatedAt.Format(time.RFC3339),
 			WorkflowID:        incident.WorkflowID,
 			Source:            "manual",
@@ -427,18 +468,7 @@ func (h *RemediationHandler) incidentRows(namespace string) []IncidentListItem {
 		if namespace != "" && workflow.Namespace != namespace {
 			continue
 		}
-		rows = append(rows, IncidentListItem{
-			ID:         workflow.IncidentID,
-			Namespace:  workflow.Namespace,
-			Target:     workflow.Namespace,
-			Resource:   workflow.ResourceKind + "/" + workflow.ResourceName,
-			IssueType:  workflow.IssueType,
-			Severity:   h.workflowSeverity(workflow),
-			Status:     workflowIncidentStatus(workflow.Status),
-			CreatedAt:  workflow.CreatedAt.Format(time.RFC3339),
-			WorkflowID: workflow.ID,
-			Source:     "workflow",
-		})
+		rows = append(rows, workflowListItem(workflow, h.workflowSeverity(workflow)))
 	}
 	sortIncidentRows(rows)
 	return rows
@@ -476,6 +506,18 @@ func listLimit(raw string) int {
 	return parsed
 }
 
+func listOffset(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
+}
+
 func filterIncidentRows(rows []IncidentListItem, namespace, severity, status string) []IncidentListItem {
 	filtered := make([]IncidentListItem, 0, len(rows))
 	for i := range rows {
@@ -485,12 +527,97 @@ func filterIncidentRows(rows []IncidentListItem, namespace, severity, status str
 		if severity != "" && rows[i].Severity != severity {
 			continue
 		}
-		if status != "" && rows[i].Status != status {
+		if !statusMatches(rows[i].Status, status) {
 			continue
 		}
 		filtered = append(filtered, rows[i])
 	}
 	return filtered
+}
+
+func pageIncidentRows(rows []IncidentListItem, offset, limit int) []IncidentListItem {
+	if offset >= len(rows) {
+		return []IncidentListItem{}
+	}
+	rows = rows[offset:]
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows
+}
+
+func summarizeIncidents(rows []IncidentListItem) IncidentListSummary {
+	summary := IncidentListSummary{
+		Total:      len(rows),
+		BySeverity: map[string]int{},
+	}
+	for i := range rows {
+		switch canonicalStatus(rows[i].Status) {
+		case "active":
+			summary.Active++
+		case "completed":
+			summary.Completed++
+		case "failed":
+			summary.Failed++
+		}
+		if rows[i].Severity != "" {
+			summary.BySeverity[rows[i].Severity]++
+		}
+	}
+	return summary
+}
+
+func statusMatches(rowStatus, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	return canonicalStatus(rowStatus) == canonicalStatus(filter)
+}
+
+func canonicalStatus(status string) string {
+	switch strings.ToLower(status) {
+	case "active", "pending", "running", "in_progress":
+		return "active"
+	case "completed", "remediated", "resolved":
+		return "completed"
+	case "failed":
+		return "failed"
+	default:
+		return strings.ToLower(status)
+	}
+}
+
+func storedListStatus(status models.IncidentStatus) string {
+	if status == models.IncidentStatusResolved {
+		return "completed"
+	}
+	return string(status)
+}
+
+func workflowListItem(workflow *models.Workflow, severity string) IncidentListItem {
+	item := IncidentListItem{
+		ID:         workflow.IncidentID,
+		Namespace:  workflow.Namespace,
+		Target:     workflow.Namespace,
+		Resource:   workflow.ResourceKind + "/" + workflow.ResourceName,
+		IssueType:  workflow.IssueType,
+		ActionType: workflow.IssueType,
+		Severity:   severity,
+		Status:     workflowIncidentStatus(workflow.Status),
+		CreatedAt:  workflow.CreatedAt.Format(time.RFC3339),
+		WorkflowID: workflow.ID,
+		Source:     "workflow",
+	}
+	if workflow.StartedAt != nil {
+		item.StartedAt = workflow.StartedAt.Format(time.RFC3339)
+	}
+	if workflow.CompletedAt != nil {
+		item.CompletedAt = workflow.CompletedAt.Format(time.RFC3339)
+	}
+	if workflow.StartedAt != nil && workflow.CompletedAt != nil {
+		item.DurationSeconds = workflow.CompletedAt.Sub(*workflow.StartedAt).Seconds()
+	}
+	return item
 }
 
 func sortIncidentRows(rows []IncidentListItem) {
@@ -502,11 +629,11 @@ func sortIncidentRows(rows []IncidentListItem) {
 func workflowIncidentStatus(status models.WorkflowStatus) string {
 	switch status {
 	case models.WorkflowStatusCompleted:
-		return "remediated"
+		return "completed"
 	case models.WorkflowStatusFailed:
 		return "failed"
 	default:
-		return "in_progress"
+		return "running"
 	}
 }
 

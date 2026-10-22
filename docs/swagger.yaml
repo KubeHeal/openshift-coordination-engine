@@ -1162,14 +1162,20 @@ definitions:
     type: object
   v1.IncidentListItem:
     properties:
+      action_type:
+        type: string
       affected_resources:
         items:
           type: string
         type: array
+      completed_at:
+        type: string
       created_at:
         type: string
       description:
         type: string
+      duration_seconds:
+        type: number
       id:
         type: string
       issue_type:
@@ -1186,6 +1192,8 @@ definitions:
         type: string
       source:
         type: string
+      started_at:
+        type: string
       status:
         type: string
       target:
@@ -1194,6 +1202,21 @@ definitions:
         type: string
       workflow_id:
         type: string
+    type: object
+  v1.IncidentListSummary:
+    properties:
+      active:
+        type: integer
+      by_severity:
+        additionalProperties:
+          type: integer
+        type: object
+      completed:
+        type: integer
+      failed:
+        type: integer
+      total:
+        type: integer
     type: object
   v1.ListCoordinationWorkflowsResponse:
     properties:
@@ -1210,6 +1233,8 @@ definitions:
         items:
           $ref: '#/definitions/v1.IncidentListItem'
         type: array
+      summary:
+        $ref: '#/definitions/v1.IncidentListSummary'
       total:
         type: integer
     type: object
@@ -1477,6 +1502,8 @@ definitions:
     type: object
   v1.TriggerRemediationRequest:
     properties:
+      dry_run:
+        type: boolean
       incident_id:
         type: string
       issue:
@@ -1938,13 +1965,18 @@ paths:
         in: query
         name: severity
         type: string
-      - description: Filter by status. all matches every status
+      - description: Filter by status. all matches every status. active, running,
+          completed, and failed are aliases
         in: query
         name: status
         type: string
       - description: Maximum rows to return. Defaults to 50
         in: query
         name: limit
+        type: integer
+      - description: Rows to skip after filtering. Defaults to 0
+        in: query
+        name: offset
         type: integer
       produces:
       - application/json

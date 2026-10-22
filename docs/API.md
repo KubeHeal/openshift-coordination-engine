@@ -197,7 +197,7 @@ Starts a remediation workflow.
 }
 ```
 
-`status` at accept time is `pending`. The workflow then runs in the background and can move to `in_progress`, `completed`, or `failed`. `deployment_method` is the detected method (`argocd`, `helm`, `operator`, `manual`) or `unknown` when detection fails. `estimated_duration` is the checkpoint timeout formatted in whole minutes. The default timeout is one minute, so the value is `"1m"`. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts.
+`status` at accept time is `pending`. The workflow then runs in the background and can move to `in_progress`, `completed`, or `failed`. `deployment_method` is the detected method (`argocd`, `helm`, `operator`, `manual`) or `unknown` when detection fails. `estimated_duration` is the checkpoint timeout formatted in whole minutes. The default timeout is one minute, so the value is `"1m"`. `dry_run: true` returns this same shape with an empty `workflow_id` after detection. It does not store a workflow, write `workflow_id` on the incident, or start remediation.
 
 When `DATA_DIR` is set, the workflow is written to `{DATA_DIR}/workflows/<id>.json` before the response returns and is reloaded on startup. An empty `DATA_DIR` keeps the workflow in memory. If `incident_id` already exists in the incident store, the handler sets `workflow_id` on that incident. An unknown `incident_id` still returns `202`.
 
@@ -239,10 +239,11 @@ Lists incidents from two sources.
 |-----------|--------|
 | `namespace` | Rows whose `namespace` or `target` equals this value. Empty matches every namespace. |
 | `severity` | Exact match on the row severity (`low`, `medium`, `high`, `critical`). Empty or `all` matches every severity. |
-| `status` | Exact match on the row status. Empty or `all` matches every status. |
+| `status` | Empty or `all` matches every status. `active`, `pending`, `running`, and `in_progress` match the same rows. `completed`, `remediated`, and `resolved` match the same rows. `failed` matches failed rows. `cancelled` matches only cancelled stored rows. |
 | `limit` | Maximum rows returned. Defaults to 50 when omitted, invalid, or not positive. |
+| `offset` | Rows to skip after filtering. Empty, invalid, or negative means `0`. |
 
-`offset` is not read. Filters apply to the combined stored and workflow list. `total` is the number of rows that matched before `limit`. The returned array is the page. The MCP incident list, `cluster://incidents`, and remediation-history send `severity=all`, `status`, `limit`, and `offset`. `severity=all` and `status=all` return every severity and status. `status=completed` does not match workflow rows, whose status is `remediated`. The body field is `total`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent.
+Filters apply to the combined stored and workflow list. `total` and `summary.total` are the match count before `offset` and `limit`. `summary` also includes `active`, `completed`, `failed`, and `by_severity` for that same set. The returned array is the page. The MCP incident list, `cluster://incidents`, and remediation-history send `severity=all`, `status`, `limit`, and `offset`. `priority`, `confidence`, `parameters`, and `tags` are absent.
 
 **Success**: `200`
 
@@ -253,9 +254,9 @@ Lists incidents from two sources.
 }
 ```
 
-Stored rows (`source` `manual`) include `id`, `title`, `description`, `target`, `severity`, `status` (`active`, `resolved`, or `cancelled`), `created_at`, `affected_resources`, `labels`, and `workflow_id` when one is already on the record. They do not include `namespace`.
+Stored rows (`source` `manual`) include `id`, `title`, `description`, `target`, `severity`, `status` (`active`, `completed` for a resolved incident, or `cancelled`), `created_at`, `affected_resources`, `labels`, and `workflow_id` when one is already on the record. They do not include `namespace`.
 
-Workflow rows (`source` `workflow`) include `id` (the workflow's incident id), `namespace`, `target` (same as the namespace), `resource` (`kind/name`), `issue_type`, `severity` (the workflow severity, or the stored incident severity when the workflow has none), `created_at`, `workflow_id`, and `status` (`remediated`, `failed`, or `in_progress`).
+Workflow rows (`source` `workflow`) include `id` (the workflow's incident id), `namespace`, `target` (same as the namespace), `resource` (`kind/name`), `issue_type`, `action_type` (the issue type), `severity` (the workflow severity, or the stored incident severity when the workflow has none), `created_at`, `started_at`, `completed_at`, `duration_seconds` when those times exist, `workflow_id`, and `status` (`running`, `completed`, or `failed`).
 
 Stored incidents persist when `DATA_DIR` is set. Workflow rows come from the same store: `{DATA_DIR}/workflows` when `DATA_DIR` is set, and memory when it is empty.
 
@@ -579,7 +580,7 @@ The versioned surface is `/api/v1`. `GET /health` and `GET /metrics` are unversi
 
 ## Contract gaps
 
-MCP still sends `offset` on the incident list, and it still treats workflow history status `completed` as the list filter. This list uses `remediated` for a completed workflow. `dry_run` on the trigger body is still ignored, so the workflow starts. Anomaly request fields stay camelCase on the MCP client (`timeRange`, `modelName`, `labelSelector`). `GET /api/v1/capacity/trends` is not a route on this server.
+MCP still sends camelCase anomaly fields (`timeRange`, `modelName`, `labelSelector`). `POST /api/v1/incidents` still requires `target` and nests `title`, `description`, `severity`, and `status` under `incident`. `GET /api/v1/capacity/trends` and `GET /api/v1/cluster/status` are not routes on this server.
 
 ## Examples
 

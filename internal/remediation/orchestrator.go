@@ -83,19 +83,7 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 		return nil, fmt.Errorf("invalid issue: %w", err)
 	}
 
-	// Detect deployment method
-	deploymentInfo, err := o.detectDeploymentMethod(ctx, issue)
-	if err != nil {
-		o.log.WithError(err).Warn("Failed to detect deployment method, using manual remediation")
-		// Create unknown deployment info for manual remediation
-		deploymentInfo = models.NewDeploymentInfo(
-			issue.Namespace,
-			issue.ResourceName,
-			issue.ResourceType,
-			models.DeploymentMethodUnknown,
-			0.5,
-		)
-	}
+	deploymentInfo := o.deploymentForIssue(ctx, issue)
 
 	// Create workflow and persist it before the request returns.
 	workflow := o.createWorkflow(incidentID, issue, deploymentInfo)
@@ -106,6 +94,30 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 	go o.executeWorkflow(context.Background(), workflow, deploymentInfo, issue) // #nosec G118 -- background goroutine must not use request-scoped context
 
 	return workflow, nil
+}
+
+// PreviewRemediation detects how a workflow would run without storing or executing it.
+func (o *Orchestrator) PreviewRemediation(ctx context.Context, issue *models.Issue) (string, string, error) {
+	if err := issue.Validate(); err != nil {
+		return "", "", fmt.Errorf("invalid issue: %w", err)
+	}
+	info := o.deploymentForIssue(ctx, issue)
+	return string(info.Method), formatMinutes(defaultCheckpointTimeout), nil
+}
+
+func (o *Orchestrator) deploymentForIssue(ctx context.Context, issue *models.Issue) *models.DeploymentInfo {
+	info, err := o.detectDeploymentMethod(ctx, issue)
+	if err != nil {
+		o.log.WithError(err).Warn("Failed to detect deployment method, using manual remediation")
+		return models.NewDeploymentInfo(
+			issue.Namespace,
+			issue.ResourceName,
+			issue.ResourceType,
+			models.DeploymentMethodUnknown,
+			0.5,
+		)
+	}
+	return info
 }
 
 // GetWorkflow retrieves a workflow by ID

@@ -6,7 +6,7 @@ This document defines the **two critical integration boundaries** for the Go Coo
 
 The sections below describe what this server returns today. `docs/API.md` lists every registered route. Fields that are not returned yet are marked with an issue link.
 
-Against KubeHeal/openshift-cluster-health-mcp commit `90564fa` (`pkg/clients/coordination_engine.go`), disk exhaustion, right-sizing, and RCA match the client. Anomaly JSON names, the create-incident response shape, predict `trend`, and `GET /api/v1/capacity/trends` do not. Incident list `severity=all`, `status`, and `limit` match. `offset` is still ignored, and `status=completed` does not match workflow rows whose status is `remediated`.
+Against KubeHeal/openshift-cluster-health-mcp commit `90564fa` (`pkg/clients/coordination_engine.go`), disk exhaustion, right-sizing, RCA, remediation trigger, and the incident list match the client. Anomaly JSON names, the create-incident response shape, predict `trend`, `GET /api/v1/capacity/trends`, and `GET /api/v1/cluster/status` do not.
 
 ### Base URL
 - `http://coordination-engine:8080/api/v1`
@@ -99,7 +99,7 @@ Trigger a remediation workflow.
 }
 ```
 
-`status` at accept time is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes. The default is `"1m"`. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. When `DATA_DIR` is set, the workflow is written to `{DATA_DIR}/workflows/<id>.json` before this response returns. An empty `DATA_DIR` keeps it in memory. If `incident_id` exists in the incident store, this call sets `workflow_id` on that incident. An unknown id still returns `202`. Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
+`status` at accept time is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes. The default is `"1m"`. `dry_run: true` returns `202` with an empty `workflow_id` after detection and does not store or execute a workflow. When `DATA_DIR` is set, a real trigger writes the workflow to `{DATA_DIR}/workflows/<id>.json` before this response returns. An empty `DATA_DIR` keeps it in memory. If `incident_id` exists in the incident store, a real trigger sets `workflow_id` on that incident. An unknown id still returns `202`. Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
 
 #### `GET /incidents`
 Lists stored incidents and workflow-derived rows.
@@ -107,10 +107,11 @@ Lists stored incidents and workflow-derived rows.
 **Query parameters**:
 - `namespace` (optional): rows whose `namespace` or `target` equals this value
 - `severity` (optional): exact match. Empty or `all` matches every severity
-- `status` (optional): exact match on the row status. Empty or `all` matches every status
+- `status` (optional): empty or `all` matches every status. `active`, `pending`, `running`, and `in_progress` match the same rows. `completed`, `remediated`, and `resolved` match the same rows. `failed` matches failed rows
 - `limit` (optional): maximum rows returned. Defaults to 50
+- `offset` (optional): rows to skip after filtering. Defaults to 0
 
-`offset` is ignored. Filters apply to the combined list. `total` is the match count before `limit`. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. `severity=all` returns every severity. `status=completed` does not match workflow rows, whose status is `remediated`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent.
+Filters apply to the combined list. `total` and `summary.total` are the match count before `offset` and `limit`. `summary` also includes `active`, `completed`, `failed`, and `by_severity`. The MCP incident list, `cluster://incidents`, and remediation-history send `severity=all`, `status`, `limit`, and `offset`. `priority`, `confidence`, `parameters`, and `tags` are absent.
 
 **Response** (200 OK). A workflow-derived row looks like this (`source` is `"workflow"`, and `severity` is the workflow severity):
 ```json
@@ -122,18 +123,29 @@ Lists stored incidents and workflow-derived rows.
       "target": "production",
       "resource": "Deployment/payment-service",
       "issue_type": "pod_crash_loop",
+      "action_type": "pod_crash_loop",
       "severity": "high",
       "created_at": "2025-12-18T09:45:00Z",
-      "status": "remediated",
+      "started_at": "2025-12-18T09:50:00Z",
+      "completed_at": "2025-12-18T09:52:00Z",
+      "duration_seconds": 120,
+      "status": "completed",
       "workflow_id": "wf-67890abc",
       "source": "workflow"
     }
   ],
-  "total": 1
+  "total": 1,
+  "summary": {
+    "total": 1,
+    "active": 0,
+    "completed": 1,
+    "failed": 0,
+    "by_severity": {"high": 1}
+  }
 }
 ```
 
-Stored rows use `source` `"manual"` and include `title`, `description`, `target`, `severity`, `status` (`active`, `resolved`, or `cancelled`), `affected_resources`, and `labels`. They do not include `namespace`. Workflow rows use the workflow severity, falling back to the stored incident severity, and status `remediated`, `failed`, or `in_progress`. When `DATA_DIR` is set, workflow rows are loaded from `{DATA_DIR}/workflows`.
+Stored rows use `source` `"manual"` and include `title`, `description`, `target`, `severity`, `status` (`active`, `completed` for a resolved incident, or `cancelled`), `affected_resources`, and `labels`. They do not include `namespace`. Workflow rows use the workflow severity, falling back to the stored incident severity, and status `running`, `completed`, or `failed`. They include `action_type` and, once execution has times, `started_at`, `completed_at`, and `duration_seconds`. When `DATA_DIR` is set, workflow rows are loaded from `{DATA_DIR}/workflows`.
 
 `POST /api/v1/incidents` creates stored rows (`201`). The handler reads `affected_resources` (snake_case) and requires `target`. MCP sends `affectedResources`, `source`, `createdBy`, `correlationId`, `externalId`, `confidence`, and `parameters`, which are ignored. MCP does not require `target`, so a create without `target` is `400`. The body is `status`, `incident_id`, `created_at`, `incident`, and `message`. Top-level `status` is `"success"`. `title`, `description`, `severity`, and status `active` are inside `incident`. There is no `priority`. MCP reads those fields at the top level. Create errors are `{"status":"error","error":"..."}`.
 

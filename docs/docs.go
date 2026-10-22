@@ -605,7 +605,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by status. all matches every status",
+                        "description": "Filter by status. all matches every status. active, running, completed, and failed are aliases",
                         "name": "status",
                         "in": "query"
                     },
@@ -613,6 +613,12 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Maximum rows to return. Defaults to 50",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Rows to skip after filtering. Defaults to 0",
+                        "name": "offset",
                         "in": "query"
                     }
                 ],
@@ -2724,17 +2730,26 @@ const docTemplate = `{
         "v1.IncidentListItem": {
             "type": "object",
             "properties": {
+                "action_type": {
+                    "type": "string"
+                },
                 "affected_resources": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
                 },
+                "completed_at": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
                 "description": {
                     "type": "string"
+                },
+                "duration_seconds": {
+                    "type": "number"
                 },
                 "id": {
                     "type": "string"
@@ -2760,6 +2775,9 @@ const docTemplate = `{
                 "source": {
                     "type": "string"
                 },
+                "started_at": {
+                    "type": "string"
+                },
                 "status": {
                     "type": "string"
                 },
@@ -2771,6 +2789,29 @@ const docTemplate = `{
                 },
                 "workflow_id": {
                     "type": "string"
+                }
+            }
+        },
+        "v1.IncidentListSummary": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "integer"
+                },
+                "by_severity": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -2796,6 +2837,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/v1.IncidentListItem"
                     }
+                },
+                "summary": {
+                    "$ref": "#/definitions/v1.IncidentListSummary"
                 },
                 "total": {
                     "type": "integer"
@@ -3197,6 +3241,9 @@ const docTemplate = `{
         "v1.TriggerRemediationRequest": {
             "type": "object",
             "properties": {
+                "dry_run": {
+                    "type": "boolean"
+                },
                 "incident_id": {
                     "type": "string"
                 },
