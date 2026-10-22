@@ -1,10 +1,20 @@
 module github.com/KubeHeal/openshift-coordination-engine
 
-go 1.26.0
+go 1.27.0
 
-toolchain go1.26.8
+toolchain go1.27.3
 
 require (
+	// Utilities
+	github.com/google/uuid v1.6.0
+	// HTTP routing
+	github.com/gorilla/mux v1.8.1
+
+	// Metrics and monitoring
+	github.com/prometheus/client_golang v1.23.2
+
+	// Logging
+	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	k8s.io/api v0.33.0
 	k8s.io/apimachinery v0.33.0
@@ -38,7 +48,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
@@ -55,19 +65,6 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
-)
-
-require (
-	// Utilities
-	github.com/google/uuid v1.6.0
-	// HTTP routing
-	github.com/gorilla/mux v1.8.1
-
-	// Metrics and monitoring
-	github.com/prometheus/client_golang v1.23.2
-
-	// Logging
-	github.com/sirupsen/logrus v1.9.4
 )
 
 // Uncomment to use local development versions
