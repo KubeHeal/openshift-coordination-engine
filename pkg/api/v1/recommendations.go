@@ -93,6 +93,15 @@ type GetRecommendationsResponse struct {
 }
 
 // GetRecommendations handles POST /api/v1/recommendations
+// @Summary Get remediation recommendations
+// @Description Returns ML-powered remediation recommendations for the requested timeframe
+// @Tags recommendations
+// @Accept json
+// @Produce json
+// @Param request body GetRecommendationsRequest true "Recommendation query"
+// @Success 200 {object} GetRecommendationsResponse
+// @Failure 400 {object} APIErrorResponse
+// @Router /api/v1/recommendations [post]
 func (h *RecommendationsHandler) GetRecommendations(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	h.log.Info("Received get recommendations request")

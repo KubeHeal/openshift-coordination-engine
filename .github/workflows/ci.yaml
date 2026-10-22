@@ -7,7 +7,7 @@ on:
     branches: [ main, develop, 'release-4.20', 'release-4.21', 'release-4.22' ]
 
 env:
-  GO_VERSION: '1.26'
+  GO_VERSION: '1.27.3'
 
 jobs:
   lint:
@@ -18,15 +18,33 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27.3'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.13.2
+          version: v2.15.0
           args: --timeout=5m
+
+  generate-docs:
+    name: OpenAPI spec
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+
+      - name: Regenerate the OpenAPI spec
+        run: make generate-docs
+
+      - name: Fail if the spec is stale
+        run: git diff --exit-code -- docs
 
   test:
     name: Test
@@ -36,9 +54,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27.3'
 
       - name: Download dependencies
         run: go mod download
@@ -65,9 +83,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27.3'
 
       - name: Build binary
         run: make build
@@ -99,9 +117,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27.3'
 
       - name: Run govulncheck
         run: |

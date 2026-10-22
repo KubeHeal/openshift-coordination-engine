@@ -1,0 +1,3234 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Kubernetes-native orchestration for multi-layer coordination in OpenShift clusters.",
+        "title": "OpenShift Coordination Engine API",
+        "contact": {},
+        "version": "1.2.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/api/v1/alerts": {
+            "post": {
+                "description": "Matches firing alerts to SelfHealingPolicy entries and runs the model-gated repair for each match. Unmatched alerts return 200 with matched_policies 0.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "policy"
+                ],
+                "summary": "Accept an Alertmanager webhook",
+                "parameters": [
+                    {
+                        "description": "Alertmanager v4 webhook",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.AlertmanagerWebhook"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/policy.AlertsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.AlertsErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/anomalies/analyze": {
+            "post": {
+                "description": "Queries Prometheus for metrics, performs 45-feature engineering, and calls KServe anomaly-detector model",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "anomaly"
+                ],
+                "summary": "Analyze anomalies with ML-powered feature engineering",
+                "parameters": [
+                    {
+                        "description": "Anomaly analysis request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.AnomalyAnalyzeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.AnomalyAnalyzeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.AnomalyErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/v1.AnomalyErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/capacity/cluster": {
+            "get": {
+                "description": "Returns cluster-wide capacity analysis including total capacity, usage, and namespace breakdown",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "capacity"
+                ],
+                "summary": "Get cluster-wide capacity analysis",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ClusterCapacityResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/capacity/namespace/{namespace}": {
+            "get": {
+                "description": "Returns capacity analysis for a specific namespace including quota, usage, availability, trending, and infrastructure impact",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "capacity"
+                ],
+                "summary": "Get namespace capacity analysis",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Namespace name",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include trending analysis (default: true)",
+                        "name": "include_trending",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Include infrastructure impact analysis (default: false)",
+                        "name": "include_infrastructure",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Trending window - 7d, 14d, 30d (default: 7d)",
+                        "name": "window",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.NamespaceCapacityResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/coordination/trigger": {
+            "post": {
+                "description": "Detects affected layers and starts a coordinated remediation workflow",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "coordination"
+                ],
+                "summary": "Trigger multi-layer remediation",
+                "parameters": [
+                    {
+                        "description": "Multi-layer remediation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.TriggerMultiLayerRemediationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/v1.TriggerMultiLayerRemediationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to generate plan",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/coordination/workflows": {
+            "get": {
+                "description": "Lists multi-layer coordination workflows known to this process",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "coordination"
+                ],
+                "summary": "List coordination workflows",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ListCoordinationWorkflowsResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/coordination/workflows/{id}": {
+            "get": {
+                "description": "Returns one multi-layer coordination workflow",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "coordination"
+                ],
+                "summary": "Get a coordination workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.CoordinationWorkflow"
+                        }
+                    },
+                    "404": {
+                        "description": "workflow not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/detect": {
+            "post": {
+                "description": "Proxies prediction requests to KServe InferenceServices",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "kserve"
+                ],
+                "summary": "Call KServe model for predictions",
+                "parameters": [
+                    {
+                        "description": "Detection request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/kserve.DetectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/kserve.DetectResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/detect/cache/clear": {
+            "post": {
+                "description": "Clears all cached deployment detection results",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "detection"
+                ],
+                "summary": "Clear detection cache",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/detect/cache/stats": {
+            "get": {
+                "description": "Returns statistics about the detection cache",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "detection"
+                ],
+                "summary": "Get cache statistics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/detect/daemonset/{namespace}/{name}": {
+            "get": {
+                "description": "Detects how a DaemonSet was deployed (ArgoCD, Helm, Operator, Manual)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "detection"
+                ],
+                "summary": "Detect deployment method for a DaemonSet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "DaemonSet name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/detect/deployment/{namespace}/{name}": {
+            "get": {
+                "description": "Detects how a Deployment was deployed (ArgoCD, Helm, Operator, Manual)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "detection"
+                ],
+                "summary": "Detect deployment method for a Deployment",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Deployment name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/detect/statefulset/{namespace}/{name}": {
+            "get": {
+                "description": "Detects how a StatefulSet was deployed (ArgoCD, Helm, Operator, Manual)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "detection"
+                ],
+                "summary": "Detect deployment method for a StatefulSet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "StatefulSet name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DetectionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/health": {
+            "get": {
+                "description": "Reports Kubernetes, ML service, and RBAC dependency health",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Cluster health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/models.HealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/incidents": {
+            "get": {
+                "description": "Lists stored incidents and incidents derived from remediation workflows",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remediation"
+                ],
+                "summary": "List incidents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by namespace",
+                        "name": "namespace",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by severity",
+                        "name": "severity",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ListIncidentsResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Records an incident that can later be used to trigger remediation",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remediation"
+                ],
+                "summary": "Create an incident",
+                "parameters": [
+                    {
+                        "description": "Incident to create",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.CreateIncidentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/v1.CreateIncidentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.APIErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/investigate/rca": {
+            "post": {
+                "description": "Correlates pod events, network policies, and Istio config for a service over a time window",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rca"
+                ],
+                "summary": "Investigate a root cause",
+                "parameters": [
+                    {
+                        "description": "RCA investigation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.RCAInvestigateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rca.Result"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.RCAErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/models": {
+            "get": {
+                "description": "Returns a list of all registered KServe InferenceServices",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "kserve"
+                ],
+                "summary": "List all registered KServe models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ModelsListResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/models/{model}/health": {
+            "get": {
+                "description": "Checks the health status of a specific KServe model",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "kserve"
+                ],
+                "summary": "Check KServe model health",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model name",
+                        "name": "model",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/kserve.ModelHealthResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/v1.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/predict": {
+            "post": {
+                "description": "Provides time-specific resource usage predictions using KServe ML models and Prometheus metrics",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "prediction"
+                ],
+                "summary": "Get time-specific resource usage predictions",
+                "parameters": [
+                    {
+                        "description": "Prediction request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.PredictRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.PredictResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.PredictErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/v1.PredictErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/predict/disk-exhaustion": {
+            "get": {
+                "description": "Computes days-until-full for all monitored filesystems using a 7-day",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "prediction"
+                ],
+                "summary": "Predict disk exhaustion ETA per node/filesystem",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by node name",
+                        "name": "node",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by mount path (e.g. /)",
+                        "name": "mountpoint",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.DiskExhaustionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/predict/memory-leak": {
+            "get": {
+                "description": "Applies linear regression to container_memory_working_set_bytes over a",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "prediction"
+                ],
+                "summary": "Detect memory leaks by slope analysis",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by namespace",
+                        "name": "namespace",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.MemoryLeakResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/recommendations": {
+            "post": {
+                "description": "Returns ML-powered remediation recommendations for the requested timeframe",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recommendations"
+                ],
+                "summary": "Get remediation recommendations",
+                "parameters": [
+                    {
+                        "description": "Recommendation query",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.GetRecommendationsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.GetRecommendationsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/v1.APIErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/recommendations/rightsizing": {
+            "get": {
+                "description": "Compares 30-day P95 resource usage against current requests/limits",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "recommendations"
+                ],
+                "summary": "Get CPU and memory right-sizing recommendations",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by namespace",
+                        "name": "namespace",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by pod name (prefix)",
+                        "name": "pod",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Analysis window: 7d, 14d, 30d (default: 30d)",
+                        "name": "window",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.RightSizingResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/remediation/trigger": {
+            "post": {
+                "description": "Starts remediation for an incident against a detected deployment method",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remediation"
+                ],
+                "summary": "Trigger a remediation workflow",
+                "parameters": [
+                    {
+                        "description": "Remediation trigger request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/v1.TriggerRemediationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/v1.TriggerRemediationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to trigger remediation",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/workflows/{id}": {
+            "get": {
+                "description": "Returns the status and steps of a remediation workflow",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "remediation"
+                ],
+                "summary": "Get a remediation workflow",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Workflow ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/v1.WorkflowResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Workflow not found",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Liveness and readiness probe that does not check cluster dependencies",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Lightweight health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.SimpleHealthResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "capacity.AvailableCapacity": {
+            "type": "object",
+            "properties": {
+                "cpu": {
+                    "$ref": "#/definitions/capacity.CPUAvailable"
+                },
+                "memory": {
+                    "$ref": "#/definitions/capacity.MemoryAvailable"
+                },
+                "pod_slots": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.CPUAvailable": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "string"
+                },
+                "available_numeric": {
+                    "type": "number"
+                },
+                "percent": {
+                    "type": "number"
+                }
+            }
+        },
+        "capacity.CPUQuota": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "string"
+                },
+                "limit_numeric": {
+                    "type": "number"
+                }
+            }
+        },
+        "capacity.CPUUsage": {
+            "type": "object",
+            "properties": {
+                "percent": {
+                    "type": "number"
+                },
+                "used": {
+                    "type": "string"
+                },
+                "used_numeric": {
+                    "type": "number"
+                }
+            }
+        },
+        "capacity.ClusterCapacity": {
+            "type": "object",
+            "properties": {
+                "allocatable_cpu": {
+                    "type": "string"
+                },
+                "allocatable_memory": {
+                    "type": "string"
+                },
+                "total_cpu": {
+                    "type": "string"
+                },
+                "total_memory": {
+                    "type": "string"
+                }
+            }
+        },
+        "capacity.ClusterInfrastructure": {
+            "type": "object",
+            "properties": {
+                "control_plane_cpu_percent": {
+                    "type": "number"
+                },
+                "control_plane_memory_percent": {
+                    "type": "number"
+                },
+                "etcd_health": {
+                    "type": "string"
+                }
+            }
+        },
+        "capacity.ClusterUsage": {
+            "type": "object",
+            "properties": {
+                "cpu": {
+                    "$ref": "#/definitions/capacity.CPUUsage"
+                },
+                "memory": {
+                    "$ref": "#/definitions/capacity.MemoryUsage"
+                },
+                "pod_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.InfrastructureImpact": {
+            "type": "object",
+            "properties": {
+                "api_server_qps": {
+                    "type": "number"
+                },
+                "control_plane_health": {
+                    "type": "string"
+                },
+                "etcd_capacity_percent": {
+                    "type": "number"
+                },
+                "etcd_object_count": {
+                    "type": "integer"
+                },
+                "scheduler_queue_length": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.MemoryAvailable": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "string"
+                },
+                "available_bytes": {
+                    "type": "integer"
+                },
+                "percent": {
+                    "type": "number"
+                }
+            }
+        },
+        "capacity.MemoryQuota": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "string"
+                },
+                "limit_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.MemoryUsage": {
+            "type": "object",
+            "properties": {
+                "percent": {
+                    "type": "number"
+                },
+                "used": {
+                    "type": "string"
+                },
+                "used_bytes": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.NamespaceQuota": {
+            "type": "object",
+            "properties": {
+                "cpu": {
+                    "$ref": "#/definitions/capacity.CPUQuota"
+                },
+                "has_quota": {
+                    "type": "boolean"
+                },
+                "memory": {
+                    "$ref": "#/definitions/capacity.MemoryQuota"
+                },
+                "pod_count_limit": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.NamespaceSummary": {
+            "type": "object",
+            "properties": {
+                "cpu_percent": {
+                    "type": "number"
+                },
+                "memory_percent": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pod_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.ResourceTrend": {
+            "type": "object",
+            "properties": {
+                "daily_change_percent": {
+                    "type": "number"
+                },
+                "direction": {
+                    "$ref": "#/definitions/capacity.TrendDirection"
+                },
+                "weekly_change_percent": {
+                    "type": "number"
+                }
+            }
+        },
+        "capacity.ResourceUsage": {
+            "type": "object",
+            "properties": {
+                "cpu": {
+                    "$ref": "#/definitions/capacity.CPUUsage"
+                },
+                "memory": {
+                    "$ref": "#/definitions/capacity.MemoryUsage"
+                },
+                "pod_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "capacity.TrendDirection": {
+            "type": "string",
+            "enum": [
+                "increasing",
+                "decreasing",
+                "stable"
+            ],
+            "x-enum-varnames": [
+                "TrendDirectionIncreasing",
+                "TrendDirectionDecreasing",
+                "TrendDirectionStable"
+            ]
+        },
+        "capacity.TrendingInfo": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "cpu": {
+                    "$ref": "#/definitions/capacity.ResourceTrend"
+                },
+                "days_until_85_percent": {
+                    "type": "integer"
+                },
+                "forecasted_exhaustion_days": {
+                    "description": "ForecastedExhaustionDays is the estimated days until the fastest-growing resource\nhits 100% of its limit (vs 85% used by DaysUntil85Percent).\n-1 means usage is stable or no limit is set.",
+                    "type": "integer"
+                },
+                "memory": {
+                    "$ref": "#/definitions/capacity.ResourceTrend"
+                },
+                "projected_exhaustion_date": {
+                    "type": "string"
+                },
+                "recommended_replica_increase": {
+                    "description": "RecommendedReplicaIncrease is the suggested number of additional replicas to add\nto keep the resource below 70% utilisation after scaling.\n0 means no scaling action recommended.",
+                    "type": "integer"
+                }
+            }
+        },
+        "coordination.ExecutionResult": {
+            "type": "object",
+            "properties": {
+                "completed_at": {
+                    "type": "string"
+                },
+                "executed_steps": {
+                    "type": "integer"
+                },
+                "failed_step": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "success, failed, rolled_back",
+                    "type": "string"
+                }
+            }
+        },
+        "kserve.DetectRequest": {
+            "type": "object",
+            "properties": {
+                "instances": {
+                    "description": "Instances is a list of input instances for prediction\nEach instance is a list of feature values",
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        }
+                    }
+                },
+                "model": {
+                    "description": "Model is the name of the model to call (e.g., \"anomaly-detector\")",
+                    "type": "string"
+                }
+            }
+        },
+        "kserve.DetectResponse": {
+            "type": "object",
+            "properties": {
+                "model_name": {
+                    "description": "ModelName is the name of the model that made the prediction",
+                    "type": "string"
+                },
+                "model_version": {
+                    "description": "ModelVersion is the version of the model",
+                    "type": "string"
+                },
+                "predictions": {
+                    "description": "Predictions contains the model predictions (for anomaly-detector: []int)",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "kserve.ModelHealthResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "description": "Message contains additional information",
+                    "type": "string"
+                },
+                "model": {
+                    "description": "Model is the name of the model",
+                    "type": "string"
+                },
+                "namespace": {
+                    "description": "Namespace is where the model is deployed",
+                    "type": "string"
+                },
+                "service": {
+                    "description": "Service is the KServe InferenceService name",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Status is the health status (ready, unavailable, unknown)",
+                    "type": "string"
+                }
+            }
+        },
+        "main.SimpleHealthResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.2.0"
+                }
+            }
+        },
+        "models.ComponentStatus": {
+            "type": "string",
+            "enum": [
+                "ok",
+                "degraded",
+                "down"
+            ],
+            "x-enum-varnames": [
+                "ComponentStatusOK",
+                "ComponentStatusDegraded",
+                "ComponentStatusDown"
+            ]
+        },
+        "models.DependencyHealth": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "latency_ms": {
+                    "description": "Response time in milliseconds",
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.ComponentStatus"
+                }
+            }
+        },
+        "models.DeploymentInfo": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "description": "Confidence is a score between 0.0 and 1.0 indicating detection confidence\nHigher values indicate more certainty in the detection",
+                    "type": "number"
+                },
+                "details": {
+                    "description": "Details contains method-specific information",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "detected_at": {
+                    "description": "DetectedAt is the timestamp when detection occurred",
+                    "type": "string"
+                },
+                "method": {
+                    "description": "Method is the detected deployment method",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.DeploymentMethod"
+                        }
+                    ]
+                },
+                "namespace": {
+                    "description": "Namespace is the Kubernetes namespace",
+                    "type": "string"
+                },
+                "resource_kind": {
+                    "description": "ResourceKind is the kind of resource (Pod, Deployment, etc.)",
+                    "type": "string"
+                },
+                "resource_name": {
+                    "description": "ResourceName is the name of the resource (pod, deployment, etc.)",
+                    "type": "string"
+                },
+                "source": {
+                    "description": "Source is the metadata source used for detection (e.g., \"annotation\", \"label\")",
+                    "type": "string"
+                }
+            }
+        },
+        "models.DeploymentMethod": {
+            "type": "string",
+            "enum": [
+                "argocd",
+                "helm",
+                "operator",
+                "manual",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "DeploymentMethodArgoCD",
+                "DeploymentMethodHelm",
+                "DeploymentMethodOperator",
+                "DeploymentMethodManual",
+                "DeploymentMethodUnknown"
+            ]
+        },
+        "models.HealthCheckpoint": {
+            "type": "object",
+            "properties": {
+                "after_step": {
+                    "type": "integer"
+                },
+                "checks": {
+                    "description": "Health check descriptions",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "layer": {
+                    "$ref": "#/definitions/models.Layer"
+                },
+                "required": {
+                    "description": "If false, continue on failure",
+                    "type": "boolean"
+                },
+                "timeout": {
+                    "description": "Max time to wait for health",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/time.Duration"
+                        }
+                    ]
+                }
+            }
+        },
+        "models.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "dependencies": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/models.DependencyHealth"
+                    }
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "rbac": {
+                    "$ref": "#/definitions/models.RBACStatus"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.HealthStatus"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "uptime_seconds": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.HealthStatus": {
+            "type": "string",
+            "enum": [
+                "healthy",
+                "degraded",
+                "unhealthy"
+            ],
+            "x-enum-varnames": [
+                "HealthStatusHealthy",
+                "HealthStatusDegraded",
+                "HealthStatusUnhealthy"
+            ]
+        },
+        "models.Incident": {
+            "type": "object",
+            "properties": {
+                "affected_resources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "severity": {
+                    "$ref": "#/definitions/models.IncidentSeverity"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.IncidentStatus"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "workflow_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IncidentSeverity": {
+            "type": "string",
+            "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+            ],
+            "x-enum-varnames": [
+                "IncidentSeverityLow",
+                "IncidentSeverityMedium",
+                "IncidentSeverityHigh",
+                "IncidentSeverityCritical"
+            ]
+        },
+        "models.IncidentStatus": {
+            "type": "string",
+            "enum": [
+                "active",
+                "resolved",
+                "cancelled"
+            ],
+            "x-enum-varnames": [
+                "IncidentStatusActive",
+                "IncidentStatusResolved",
+                "IncidentStatusCancelled"
+            ]
+        },
+        "models.Layer": {
+            "type": "string",
+            "enum": [
+                "infrastructure",
+                "platform",
+                "application"
+            ],
+            "x-enum-varnames": [
+                "LayerInfrastructure",
+                "LayerPlatform",
+                "LayerApplication"
+            ]
+        },
+        "models.LayerPrediction": {
+            "type": "object",
+            "properties": {
+                "affected": {
+                    "type": "boolean"
+                },
+                "evidence": {
+                    "description": "Supporting evidence (e.g., \"high_disk_usage\", \"node_pressure\")",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "is_root_cause": {
+                    "type": "boolean"
+                },
+                "probability": {
+                    "description": "0.0 to 1.0",
+                    "type": "number"
+                }
+            }
+        },
+        "models.LayeredIssue": {
+            "type": "object",
+            "properties": {
+                "affected_layers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Layer"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "detection_method": {
+                    "description": "\"keyword\", \"ml_enhanced\", \"ml_only\"",
+                    "type": "string"
+                },
+                "historical_pattern": {
+                    "description": "e.g., \"infrastructure_cascading_failure\"",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "impacted_resources": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/definitions/models.Resource"
+                        }
+                    }
+                },
+                "layer_confidence": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "ml_predictions": {
+                    "description": "ML-enhanced fields (Phase 6)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/models.MLLayerPredictions"
+                        }
+                    ]
+                },
+                "root_cause_layer": {
+                    "$ref": "#/definitions/models.Layer"
+                },
+                "severity": {
+                    "description": "critical, high, medium, low",
+                    "type": "string"
+                }
+            }
+        },
+        "models.MLLayerPredictions": {
+            "type": "object",
+            "properties": {
+                "analysis_type": {
+                    "description": "\"pattern\", \"anomaly\", \"prediction\"",
+                    "type": "string"
+                },
+                "application": {
+                    "$ref": "#/definitions/models.LayerPrediction"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "infrastructure": {
+                    "$ref": "#/definitions/models.LayerPrediction"
+                },
+                "platform": {
+                    "$ref": "#/definitions/models.LayerPrediction"
+                },
+                "predicted_at": {
+                    "type": "string"
+                },
+                "root_cause_suggestion": {
+                    "$ref": "#/definitions/models.Layer"
+                }
+            }
+        },
+        "models.RBACStatus": {
+            "type": "object",
+            "properties": {
+                "critical_ok": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "permissions_failed": {
+                    "type": "integer"
+                },
+                "permissions_ok": {
+                    "type": "integer"
+                },
+                "permissions_total": {
+                    "type": "integer"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.ComponentStatus"
+                }
+            }
+        },
+        "models.RemediationPlan": {
+            "type": "object",
+            "properties": {
+                "checkpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.HealthCheckpoint"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_step": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "issue_id": {
+                    "type": "string"
+                },
+                "layers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Layer"
+                    }
+                },
+                "rollback_steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.RemediationStep"
+                    }
+                },
+                "status": {
+                    "description": "pending, executing, completed, failed, rolled_back",
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.RemediationStep"
+                    }
+                }
+            }
+        },
+        "models.RemediationStep": {
+            "type": "object",
+            "properties": {
+                "action_type": {
+                    "description": "restart, rollback, scale, drain, etc.",
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "layer": {
+                    "$ref": "#/definitions/models.Layer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "required": {
+                    "description": "If false, continue on failure",
+                    "type": "boolean"
+                },
+                "target": {
+                    "description": "Resource identifier",
+                    "type": "string"
+                },
+                "wait_time": {
+                    "description": "Time to wait after this step",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/time.Duration"
+                        }
+                    ]
+                }
+            }
+        },
+        "models.Resource": {
+            "type": "object",
+            "properties": {
+                "issue": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.WorkflowStep": {
+            "type": "object",
+            "properties": {
+                "completed_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "layer": {
+                    "description": "\"infrastructure\", \"platform\", \"application\"",
+                    "type": "string"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"pending\", \"running\", \"completed\", \"failed\"",
+                    "type": "string"
+                }
+            }
+        },
+        "policy.ActionTaken": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "alert": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "policy": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "verdict": {
+                    "type": "integer"
+                }
+            }
+        },
+        "policy.AlertsResponse": {
+            "type": "object",
+            "properties": {
+                "actions_taken": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/policy.ActionTaken"
+                    }
+                },
+                "matched_policies": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "rca.CorrStat": {
+            "type": "object",
+            "properties": {
+                "duration_ms": {
+                    "$ref": "#/definitions/time.Duration"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "findings": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "rca.Result": {
+            "type": "object",
+            "properties": {
+                "affected_components": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "confidence_score": {
+                    "type": "number"
+                },
+                "correlator_stats": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/rca.CorrStat"
+                    }
+                },
+                "istio_available": {
+                    "type": "boolean"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "root_causes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/rca.RootCause"
+                    }
+                },
+                "service": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "time_range": {
+                    "$ref": "#/definitions/rca.TimeRange"
+                }
+            }
+        },
+        "rca.RootCause": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "evidence": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "remediation_steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "signal_type": {
+                    "$ref": "#/definitions/rca.SignalType"
+                }
+            }
+        },
+        "rca.SignalType": {
+            "type": "string",
+            "enum": [
+                "pod_event",
+                "network_policy",
+                "istio_virtual_service"
+            ],
+            "x-enum-varnames": [
+                "SignalPodEvent",
+                "SignalNetworkPolicy",
+                "SignalIstioVS"
+            ]
+        },
+        "rca.TimeRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "string"
+                },
+                "start": {
+                    "type": "string"
+                }
+            }
+        },
+        "time.Duration": {
+            "type": "integer",
+            "enum": [
+                -9223372036854775808,
+                9223372036854775807,
+                1,
+                1000,
+                1000000,
+                1000000000,
+                60000000000,
+                3600000000000
+            ],
+            "x-enum-varnames": [
+                "minDuration",
+                "maxDuration",
+                "Nanosecond",
+                "Microsecond",
+                "Millisecond",
+                "Second",
+                "Minute",
+                "Hour"
+            ]
+        },
+        "v1.APIErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "error"
+                }
+            }
+        },
+        "v1.AlertmanagerAlert": {
+            "type": "object",
+            "properties": {
+                "fingerprint": {
+                    "type": "string"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "startsAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AlertmanagerWebhook": {
+            "type": "object",
+            "properties": {
+                "alerts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.AlertmanagerAlert"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AlertsErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Invalid Alertmanager webhook format"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "error"
+                }
+            }
+        },
+        "v1.AnomalyAnalyzeRequest": {
+            "type": "object",
+            "properties": {
+                "deployment": {
+                    "description": "Optional: scope to deployment",
+                    "type": "string"
+                },
+                "label_selector": {
+                    "description": "Optional: label selector",
+                    "type": "string"
+                },
+                "model_name": {
+                    "description": "KServe model to use (default: anomaly-detector)",
+                    "type": "string"
+                },
+                "namespace": {
+                    "description": "Optional: scope to namespace",
+                    "type": "string"
+                },
+                "pod": {
+                    "description": "Optional: scope to specific pod",
+                    "type": "string"
+                },
+                "threshold": {
+                    "description": "Anomaly score threshold (0.0-1.0)",
+                    "type": "number"
+                },
+                "time_range": {
+                    "description": "Options: 1h, 6h, 24h, 7d",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AnomalyAnalyzeResponse": {
+            "type": "object",
+            "properties": {
+                "anomalies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.AnomalyResult"
+                    }
+                },
+                "anomalies_detected": {
+                    "type": "integer"
+                },
+                "enriched_signals": {
+                    "$ref": "#/definitions/v1.EnrichedSignals"
+                },
+                "features": {
+                    "$ref": "#/definitions/v1.FeatureInfo"
+                },
+                "model_used": {
+                    "type": "string"
+                },
+                "recommendation": {
+                    "type": "string"
+                },
+                "scope": {
+                    "$ref": "#/definitions/v1.AnomalyScope"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/v1.AnomalySummary"
+                },
+                "time_range": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AnomalyErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AnomalyResult": {
+            "type": "object",
+            "properties": {
+                "anomaly_score": {
+                    "description": "0.0-1.0",
+                    "type": "number"
+                },
+                "confidence": {
+                    "description": "0.0-1.0",
+                    "type": "number"
+                },
+                "explanation": {
+                    "type": "string"
+                },
+                "metrics": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "recommended_action": {
+                    "type": "string"
+                },
+                "severity": {
+                    "description": "critical, warning, info",
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AnomalyScope": {
+            "type": "object",
+            "properties": {
+                "deployment": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "pod": {
+                    "type": "string"
+                },
+                "target_description": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.AnomalySummary": {
+            "type": "object",
+            "properties": {
+                "average_score": {
+                    "type": "number"
+                },
+                "features_generated": {
+                    "type": "integer"
+                },
+                "max_score": {
+                    "type": "number"
+                },
+                "metrics_analyzed": {
+                    "type": "integer"
+                }
+            }
+        },
+        "v1.ClusterCapacityResponse": {
+            "type": "object",
+            "properties": {
+                "cluster_capacity": {
+                    "$ref": "#/definitions/capacity.ClusterCapacity"
+                },
+                "cluster_usage": {
+                    "$ref": "#/definitions/capacity.ClusterUsage"
+                },
+                "infrastructure": {
+                    "$ref": "#/definitions/capacity.ClusterInfrastructure"
+                },
+                "namespaces": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/capacity.NamespaceSummary"
+                    }
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ContainerRightSizingRecommendation": {
+            "type": "object",
+            "properties": {
+                "container": {
+                    "type": "string"
+                },
+                "cpu_sizing": {
+                    "description": "Classification\nSizing is \"over-provisioned\", \"under-provisioned\", or \"right-sized\".",
+                    "type": "string"
+                },
+                "current_cpu_limit": {
+                    "type": "string"
+                },
+                "current_cpu_request": {
+                    "description": "CPU fields (all in cores)",
+                    "type": "string"
+                },
+                "current_memory_limit": {
+                    "type": "string"
+                },
+                "current_memory_request": {
+                    "description": "Memory fields (all in bytes)",
+                    "type": "string"
+                },
+                "memory_sizing": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "p95_cpu_usage_cores": {
+                    "type": "number"
+                },
+                "p95_memory_usage_bytes": {
+                    "type": "number"
+                },
+                "pod": {
+                    "type": "string"
+                },
+                "recommended_cpu_limit": {
+                    "type": "string"
+                },
+                "recommended_cpu_request": {
+                    "type": "string"
+                },
+                "recommended_memory_limit": {
+                    "type": "string"
+                },
+                "recommended_memory_request": {
+                    "type": "string"
+                },
+                "throttle_rate_pct": {
+                    "description": "ThrottleRatePct is the CPU throttle rate (%) over the analysis window.\nNil when cAdvisor CFS metrics are not available.",
+                    "type": "number"
+                }
+            }
+        },
+        "v1.CoordinationWorkflow": {
+            "type": "object",
+            "properties": {
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "execution_result": {
+                    "$ref": "#/definitions/coordination.ExecutionResult"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "layered_issue": {
+                    "$ref": "#/definitions/models.LayeredIssue"
+                },
+                "remediation_plan": {
+                    "$ref": "#/definitions/models.RemediationPlan"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "pending, planning, executing, completed, failed",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.CreateIncidentRequest": {
+            "type": "object",
+            "properties": {
+                "affected_resources": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.CreateIncidentResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "incident": {
+                    "$ref": "#/definitions/models.Incident"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.CurrentMetrics": {
+            "type": "object",
+            "properties": {
+                "cpu_rolling_mean": {
+                    "type": "number"
+                },
+                "disk_usage": {
+                    "type": "number"
+                },
+                "memory_rolling_mean": {
+                    "type": "number"
+                },
+                "network_in": {
+                    "type": "number"
+                },
+                "network_out": {
+                    "type": "number"
+                },
+                "time_range": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.DetectionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/models.DeploymentInfo"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "v1.DiskExhaustionResponse": {
+            "type": "object",
+            "properties": {
+                "critical_count": {
+                    "description": "CriticalCount is the number of filesystems with urgency == \"critical\".",
+                    "type": "integer"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.DiskExhaustionResult"
+                    }
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "warning_count": {
+                    "description": "WarningCount is the number of filesystems with urgency == \"warning\".",
+                    "type": "integer"
+                }
+            }
+        },
+        "v1.DiskExhaustionResult": {
+            "type": "object",
+            "properties": {
+                "available_bytes": {
+                    "description": "AvailableBytes is the current free space in bytes.",
+                    "type": "number"
+                },
+                "daily_fill_rate_bytes": {
+                    "description": "DailyFillRateBytes is the average bytes consumed per day (negative = shrinking).",
+                    "type": "number"
+                },
+                "days_until_full": {
+                    "description": "DaysUntilFull is days until the filesystem is 100% full.\n-1 means usage is stable or shrinking.",
+                    "type": "integer"
+                },
+                "mountpoint": {
+                    "description": "Mountpoint is the filesystem mount path (e.g. \"/\", \"/var/lib/containers\").",
+                    "type": "string"
+                },
+                "node": {
+                    "description": "Node is the Kubernetes node hosting this filesystem.",
+                    "type": "string"
+                },
+                "projected_full_date": {
+                    "description": "ProjectedFullDate is the ISO-8601 date when the filesystem will be full (empty when stable).",
+                    "type": "string"
+                },
+                "total_bytes": {
+                    "description": "TotalBytes is the total filesystem size in bytes.",
+                    "type": "number"
+                },
+                "urgency": {
+                    "description": "Urgency is \"critical\" (\u003c3d), \"warning\" (\u003c7d), \"info\" (\u003e=7d), or \"stable\".",
+                    "type": "string"
+                },
+                "used_percent": {
+                    "description": "UsedPercent is the current usage as a fraction (0.0–1.0).",
+                    "type": "number"
+                }
+            }
+        },
+        "v1.EnrichedSignals": {
+            "type": "object",
+            "properties": {
+                "cpu_throttle_rate": {
+                    "description": "CPUThrottleRate is the ratio of throttled CPU time (0.0–1.0).\nSource: container_cpu_cfs_throttled_seconds_total / container_cpu_cfs_periods_total\nNil when cAdvisor CFS metrics are not available in Prometheus.",
+                    "type": "number"
+                },
+                "http_degraded": {
+                    "description": "HTTPDegraded is true when error rate \u003e 5% or P99 latency \u003e 1000ms.",
+                    "type": "boolean"
+                },
+                "http_error_rate": {
+                    "description": "HTTPErrorRate is the fraction of requests returning 5xx status codes.\nSource: rate(container_http_requests_total{status=~\"5..\"}[5m]) / rate(container_http_requests_total[5m])\nNil when HTTP metrics are not available (requires Istio/OSSm or instrumented apps).",
+                    "type": "number"
+                },
+                "http_response_time_p99_ms": {
+                    "description": "HTTPResponseTimeP99Ms is the 99th-percentile HTTP response time in milliseconds.\nSource: histogram_quantile(0.99, istio_request_duration_milliseconds_bucket)\nNil when Istio metrics are not available.",
+                    "type": "number"
+                },
+                "throttling_detected": {
+                    "description": "ThrottlingDetected is true when CPUThrottleRate exceeds 25%.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "v1.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "v1.FeatureInfo": {
+            "type": "object",
+            "properties": {
+                "base_metrics": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "feature_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "features_per_metric": {
+                    "type": "integer"
+                },
+                "total_features": {
+                    "type": "integer"
+                }
+            }
+        },
+        "v1.GetRecommendationsRequest": {
+            "type": "object",
+            "properties": {
+                "confidence_threshold": {
+                    "description": "Minimum confidence 0.0-1.0 (default: 0.7)",
+                    "type": "number"
+                },
+                "include_predictions": {
+                    "description": "Include ML predictions (default: true)",
+                    "type": "boolean"
+                },
+                "namespace": {
+                    "description": "Optional: filter by namespace",
+                    "type": "string"
+                },
+                "timeframe": {
+                    "description": "\"1h\", \"6h\", \"24h\" (default: \"6h\")",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.GetRecommendationsResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "ml_enabled": {
+                    "type": "boolean"
+                },
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.Recommendation"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timeframe": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "total_recommendations": {
+                    "type": "integer"
+                }
+            }
+        },
+        "v1.IncidentListItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "issue_type": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "resource": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "workflow_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ListCoordinationWorkflowsResponse": {
+            "type": "object",
+            "properties": {
+                "total": {
+                    "type": "integer"
+                },
+                "workflows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.CoordinationWorkflow"
+                    }
+                }
+            }
+        },
+        "v1.ListIncidentsResponse": {
+            "type": "object",
+            "properties": {
+                "incidents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.IncidentListItem"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "v1.MemoryLeakResponse": {
+            "type": "object",
+            "properties": {
+                "leak_count": {
+                    "type": "integer"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.MemoryLeakResult"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.MemoryLeakResult": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "description": "Confidence is a 0.0–1.0 score indicating certainty of the leak classification.",
+                    "type": "number"
+                },
+                "container": {
+                    "type": "string"
+                },
+                "current_memory_bytes": {
+                    "type": "number"
+                },
+                "daily_growth_bytes": {
+                    "description": "DailyGrowthBytes is the average memory increase per day.",
+                    "type": "number"
+                },
+                "growth_r_squared": {
+                    "description": "GrowthRSquared is the R² of the linear regression (higher = more confident trend).",
+                    "type": "number"
+                },
+                "leak_detected": {
+                    "description": "LeakDetected is true when growth is monotonically increasing with high confidence.",
+                    "type": "boolean"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "pod": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ModelInfo": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ModelsListResponse": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "v1.NamespaceCapacityResponse": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "$ref": "#/definitions/capacity.AvailableCapacity"
+                },
+                "current_usage": {
+                    "$ref": "#/definitions/capacity.ResourceUsage"
+                },
+                "infrastructure_impact": {
+                    "$ref": "#/definitions/capacity.InfrastructureImpact"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "quota": {
+                    "$ref": "#/definitions/capacity.NamespaceQuota"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "trending": {
+                    "$ref": "#/definitions/capacity.TrendingInfo"
+                }
+            }
+        },
+        "v1.PredictErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.PredictRequest": {
+            "type": "object",
+            "properties": {
+                "day_of_week": {
+                    "description": "Required: 0=Monday, 6=Sunday",
+                    "type": "integer"
+                },
+                "deployment": {
+                    "description": "Optional: deployment filter",
+                    "type": "string"
+                },
+                "hour": {
+                    "description": "Required: 0-23 (hour of day)",
+                    "type": "integer"
+                },
+                "model": {
+                    "description": "Optional: KServe model name (default: predictive-analytics)",
+                    "type": "string"
+                },
+                "namespace": {
+                    "description": "Optional: namespace filter",
+                    "type": "string"
+                },
+                "pod": {
+                    "description": "Optional: specific pod filter",
+                    "type": "string"
+                },
+                "scope": {
+                    "description": "Optional: pod, deployment, namespace, cluster (default: namespace)",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.PredictResponse": {
+            "type": "object",
+            "properties": {
+                "current_metrics": {
+                    "$ref": "#/definitions/v1.CurrentMetrics"
+                },
+                "model_info": {
+                    "$ref": "#/definitions/v1.ModelInfo"
+                },
+                "predictions": {
+                    "$ref": "#/definitions/v1.PredictionValues"
+                },
+                "scope": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "target_time": {
+                    "$ref": "#/definitions/v1.TargetTimeInfo"
+                }
+            }
+        },
+        "v1.PredictionValues": {
+            "type": "object",
+            "properties": {
+                "cpu_percent": {
+                    "type": "number"
+                },
+                "memory_percent": {
+                    "type": "number"
+                }
+            }
+        },
+        "v1.RCAErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.RCAInvestigateRequest": {
+            "type": "object",
+            "properties": {
+                "end_time": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "service": {
+                    "type": "string"
+                },
+                "start_time": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.Recommendation": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "issue_type": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "predicted_time": {
+                    "type": "string"
+                },
+                "recommended_actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "related_incident_id": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.RemediationIssue": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.RemediationResource": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.RightSizingResponse": {
+            "type": "object",
+            "properties": {
+                "analysis_window": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "over_provisioned_count": {
+                    "type": "integer"
+                },
+                "recommendations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.ContainerRightSizingRecommendation"
+                    }
+                },
+                "right_sized_count": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "under_provisioned_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "v1.TargetTimeInfo": {
+            "type": "object",
+            "properties": {
+                "day_of_week": {
+                    "type": "integer"
+                },
+                "hour": {
+                    "type": "integer"
+                },
+                "iso_timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.TriggerMultiLayerRemediationRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Resource"
+                    }
+                }
+            }
+        },
+        "v1.TriggerMultiLayerRemediationResponse": {
+            "type": "object",
+            "properties": {
+                "affected_layers": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.Layer"
+                    }
+                },
+                "estimated_steps": {
+                    "type": "integer"
+                },
+                "root_cause_layer": {
+                    "$ref": "#/definitions/models.Layer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "workflow_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.TriggerRemediationRequest": {
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string"
+                },
+                "issue": {
+                    "$ref": "#/definitions/v1.RemediationIssue"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/v1.RemediationResource"
+                }
+            }
+        },
+        "v1.TriggerRemediationResponse": {
+            "type": "object",
+            "properties": {
+                "deployment_method": {
+                    "type": "string"
+                },
+                "estimated_duration": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "workflow_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "v1.WorkflowResponse": {
+            "type": "object",
+            "properties": {
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "deployment_method": {
+                    "type": "string"
+                },
+                "duration": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "incident_id": {
+                    "type": "string"
+                },
+                "issue_type": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "remediator": {
+                    "type": "string"
+                },
+                "resource_kind": {
+                    "type": "string"
+                },
+                "resource_name": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.WorkflowStep"
+                    }
+                }
+            }
+        }
+    }
+}

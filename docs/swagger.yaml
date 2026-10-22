@@ -1,0 +1,2203 @@
+basePath: /
+definitions:
+  capacity.AvailableCapacity:
+    properties:
+      cpu:
+        $ref: '#/definitions/capacity.CPUAvailable'
+      memory:
+        $ref: '#/definitions/capacity.MemoryAvailable'
+      pod_slots:
+        type: integer
+    type: object
+  capacity.CPUAvailable:
+    properties:
+      available:
+        type: string
+      available_numeric:
+        type: number
+      percent:
+        type: number
+    type: object
+  capacity.CPUQuota:
+    properties:
+      limit:
+        type: string
+      limit_numeric:
+        type: number
+    type: object
+  capacity.CPUUsage:
+    properties:
+      percent:
+        type: number
+      used:
+        type: string
+      used_numeric:
+        type: number
+    type: object
+  capacity.ClusterCapacity:
+    properties:
+      allocatable_cpu:
+        type: string
+      allocatable_memory:
+        type: string
+      total_cpu:
+        type: string
+      total_memory:
+        type: string
+    type: object
+  capacity.ClusterInfrastructure:
+    properties:
+      control_plane_cpu_percent:
+        type: number
+      control_plane_memory_percent:
+        type: number
+      etcd_health:
+        type: string
+    type: object
+  capacity.ClusterUsage:
+    properties:
+      cpu:
+        $ref: '#/definitions/capacity.CPUUsage'
+      memory:
+        $ref: '#/definitions/capacity.MemoryUsage'
+      pod_count:
+        type: integer
+    type: object
+  capacity.InfrastructureImpact:
+    properties:
+      api_server_qps:
+        type: number
+      control_plane_health:
+        type: string
+      etcd_capacity_percent:
+        type: number
+      etcd_object_count:
+        type: integer
+      scheduler_queue_length:
+        type: integer
+    type: object
+  capacity.MemoryAvailable:
+    properties:
+      available:
+        type: string
+      available_bytes:
+        type: integer
+      percent:
+        type: number
+    type: object
+  capacity.MemoryQuota:
+    properties:
+      limit:
+        type: string
+      limit_bytes:
+        type: integer
+    type: object
+  capacity.MemoryUsage:
+    properties:
+      percent:
+        type: number
+      used:
+        type: string
+      used_bytes:
+        type: integer
+    type: object
+  capacity.NamespaceQuota:
+    properties:
+      cpu:
+        $ref: '#/definitions/capacity.CPUQuota'
+      has_quota:
+        type: boolean
+      memory:
+        $ref: '#/definitions/capacity.MemoryQuota'
+      pod_count_limit:
+        type: integer
+    type: object
+  capacity.NamespaceSummary:
+    properties:
+      cpu_percent:
+        type: number
+      memory_percent:
+        type: number
+      name:
+        type: string
+      pod_count:
+        type: integer
+    type: object
+  capacity.ResourceTrend:
+    properties:
+      daily_change_percent:
+        type: number
+      direction:
+        $ref: '#/definitions/capacity.TrendDirection'
+      weekly_change_percent:
+        type: number
+    type: object
+  capacity.ResourceUsage:
+    properties:
+      cpu:
+        $ref: '#/definitions/capacity.CPUUsage'
+      memory:
+        $ref: '#/definitions/capacity.MemoryUsage'
+      pod_count:
+        type: integer
+    type: object
+  capacity.TrendDirection:
+    enum:
+    - increasing
+    - decreasing
+    - stable
+    type: string
+    x-enum-varnames:
+    - TrendDirectionIncreasing
+    - TrendDirectionDecreasing
+    - TrendDirectionStable
+  capacity.TrendingInfo:
+    properties:
+      confidence:
+        type: number
+      cpu:
+        $ref: '#/definitions/capacity.ResourceTrend'
+      days_until_85_percent:
+        type: integer
+      forecasted_exhaustion_days:
+        description: |-
+          ForecastedExhaustionDays is the estimated days until the fastest-growing resource
+          hits 100% of its limit (vs 85% used by DaysUntil85Percent).
+          -1 means usage is stable or no limit is set.
+        type: integer
+      memory:
+        $ref: '#/definitions/capacity.ResourceTrend'
+      projected_exhaustion_date:
+        type: string
+      recommended_replica_increase:
+        description: |-
+          RecommendedReplicaIncrease is the suggested number of additional replicas to add
+          to keep the resource below 70% utilisation after scaling.
+          0 means no scaling action recommended.
+        type: integer
+    type: object
+  coordination.ExecutionResult:
+    properties:
+      completed_at:
+        type: string
+      executed_steps:
+        type: integer
+      failed_step:
+        type: integer
+      reason:
+        type: string
+      status:
+        description: success, failed, rolled_back
+        type: string
+    type: object
+  kserve.DetectRequest:
+    properties:
+      instances:
+        description: |-
+          Instances is a list of input instances for prediction
+          Each instance is a list of feature values
+        items:
+          items:
+            type: number
+          type: array
+        type: array
+      model:
+        description: Model is the name of the model to call (e.g., "anomaly-detector")
+        type: string
+    type: object
+  kserve.DetectResponse:
+    properties:
+      model_name:
+        description: ModelName is the name of the model that made the prediction
+        type: string
+      model_version:
+        description: ModelVersion is the version of the model
+        type: string
+      predictions:
+        description: 'Predictions contains the model predictions (for anomaly-detector:
+          []int)'
+        items:
+          type: integer
+        type: array
+    type: object
+  kserve.ModelHealthResponse:
+    properties:
+      message:
+        description: Message contains additional information
+        type: string
+      model:
+        description: Model is the name of the model
+        type: string
+      namespace:
+        description: Namespace is where the model is deployed
+        type: string
+      service:
+        description: Service is the KServe InferenceService name
+        type: string
+      status:
+        description: Status is the health status (ready, unavailable, unknown)
+        type: string
+    type: object
+  main.SimpleHealthResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+      version:
+        example: 1.2.0
+        type: string
+    type: object
+  models.ComponentStatus:
+    enum:
+    - ok
+    - degraded
+    - down
+    type: string
+    x-enum-varnames:
+    - ComponentStatusOK
+    - ComponentStatusDegraded
+    - ComponentStatusDown
+  models.DependencyHealth:
+    properties:
+      checked_at:
+        type: string
+      latency_ms:
+        description: Response time in milliseconds
+        type: integer
+      message:
+        type: string
+      name:
+        type: string
+      status:
+        $ref: '#/definitions/models.ComponentStatus'
+    type: object
+  models.DeploymentInfo:
+    properties:
+      confidence:
+        description: |-
+          Confidence is a score between 0.0 and 1.0 indicating detection confidence
+          Higher values indicate more certainty in the detection
+        type: number
+      details:
+        additionalProperties:
+          type: string
+        description: Details contains method-specific information
+        type: object
+      detected_at:
+        description: DetectedAt is the timestamp when detection occurred
+        type: string
+      method:
+        allOf:
+        - $ref: '#/definitions/models.DeploymentMethod'
+        description: Method is the detected deployment method
+      namespace:
+        description: Namespace is the Kubernetes namespace
+        type: string
+      resource_kind:
+        description: ResourceKind is the kind of resource (Pod, Deployment, etc.)
+        type: string
+      resource_name:
+        description: ResourceName is the name of the resource (pod, deployment, etc.)
+        type: string
+      source:
+        description: Source is the metadata source used for detection (e.g., "annotation",
+          "label")
+        type: string
+    type: object
+  models.DeploymentMethod:
+    enum:
+    - argocd
+    - helm
+    - operator
+    - manual
+    - unknown
+    type: string
+    x-enum-varnames:
+    - DeploymentMethodArgoCD
+    - DeploymentMethodHelm
+    - DeploymentMethodOperator
+    - DeploymentMethodManual
+    - DeploymentMethodUnknown
+  models.HealthCheckpoint:
+    properties:
+      after_step:
+        type: integer
+      checks:
+        description: Health check descriptions
+        items:
+          type: string
+        type: array
+      layer:
+        $ref: '#/definitions/models.Layer'
+      required:
+        description: If false, continue on failure
+        type: boolean
+      timeout:
+        allOf:
+        - $ref: '#/definitions/time.Duration'
+        description: Max time to wait for health
+    type: object
+  models.HealthResponse:
+    properties:
+      dependencies:
+        additionalProperties:
+          $ref: '#/definitions/models.DependencyHealth'
+        type: object
+      details:
+        additionalProperties: true
+        type: object
+      rbac:
+        $ref: '#/definitions/models.RBACStatus'
+      status:
+        $ref: '#/definitions/models.HealthStatus'
+      timestamp:
+        type: string
+      uptime_seconds:
+        type: integer
+      version:
+        type: string
+    type: object
+  models.HealthStatus:
+    enum:
+    - healthy
+    - degraded
+    - unhealthy
+    type: string
+    x-enum-varnames:
+    - HealthStatusHealthy
+    - HealthStatusDegraded
+    - HealthStatusUnhealthy
+  models.Incident:
+    properties:
+      affected_resources:
+        items:
+          type: string
+        type: array
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      labels:
+        additionalProperties:
+          type: string
+        type: object
+      resolved_at:
+        type: string
+      severity:
+        $ref: '#/definitions/models.IncidentSeverity'
+      status:
+        $ref: '#/definitions/models.IncidentStatus'
+      target:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      workflow_id:
+        type: string
+    type: object
+  models.IncidentSeverity:
+    enum:
+    - low
+    - medium
+    - high
+    - critical
+    type: string
+    x-enum-varnames:
+    - IncidentSeverityLow
+    - IncidentSeverityMedium
+    - IncidentSeverityHigh
+    - IncidentSeverityCritical
+  models.IncidentStatus:
+    enum:
+    - active
+    - resolved
+    - cancelled
+    type: string
+    x-enum-varnames:
+    - IncidentStatusActive
+    - IncidentStatusResolved
+    - IncidentStatusCancelled
+  models.Layer:
+    enum:
+    - infrastructure
+    - platform
+    - application
+    type: string
+    x-enum-varnames:
+    - LayerInfrastructure
+    - LayerPlatform
+    - LayerApplication
+  models.LayerPrediction:
+    properties:
+      affected:
+        type: boolean
+      evidence:
+        description: Supporting evidence (e.g., "high_disk_usage", "node_pressure")
+        items:
+          type: string
+        type: array
+      is_root_cause:
+        type: boolean
+      probability:
+        description: 0.0 to 1.0
+        type: number
+    type: object
+  models.LayeredIssue:
+    properties:
+      affected_layers:
+        items:
+          $ref: '#/definitions/models.Layer'
+        type: array
+      description:
+        type: string
+      detected_at:
+        type: string
+      detection_method:
+        description: '"keyword", "ml_enhanced", "ml_only"'
+        type: string
+      historical_pattern:
+        description: e.g., "infrastructure_cascading_failure"
+        type: string
+      id:
+        type: string
+      impacted_resources:
+        additionalProperties:
+          items:
+            $ref: '#/definitions/models.Resource'
+          type: array
+        type: object
+      layer_confidence:
+        additionalProperties:
+          type: number
+        type: object
+      ml_predictions:
+        allOf:
+        - $ref: '#/definitions/models.MLLayerPredictions'
+        description: ML-enhanced fields (Phase 6)
+      root_cause_layer:
+        $ref: '#/definitions/models.Layer'
+      severity:
+        description: critical, high, medium, low
+        type: string
+    type: object
+  models.MLLayerPredictions:
+    properties:
+      analysis_type:
+        description: '"pattern", "anomaly", "prediction"'
+        type: string
+      application:
+        $ref: '#/definitions/models.LayerPrediction'
+      confidence:
+        type: number
+      infrastructure:
+        $ref: '#/definitions/models.LayerPrediction'
+      platform:
+        $ref: '#/definitions/models.LayerPrediction'
+      predicted_at:
+        type: string
+      root_cause_suggestion:
+        $ref: '#/definitions/models.Layer'
+    type: object
+  models.RBACStatus:
+    properties:
+      critical_ok:
+        type: boolean
+      message:
+        type: string
+      permissions_failed:
+        type: integer
+      permissions_ok:
+        type: integer
+      permissions_total:
+        type: integer
+      status:
+        $ref: '#/definitions/models.ComponentStatus'
+    type: object
+  models.RemediationPlan:
+    properties:
+      checkpoints:
+        items:
+          $ref: '#/definitions/models.HealthCheckpoint'
+        type: array
+      created_at:
+        type: string
+      current_step:
+        type: integer
+      id:
+        type: string
+      issue_id:
+        type: string
+      layers:
+        items:
+          $ref: '#/definitions/models.Layer'
+        type: array
+      rollback_steps:
+        items:
+          $ref: '#/definitions/models.RemediationStep'
+        type: array
+      status:
+        description: pending, executing, completed, failed, rolled_back
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/models.RemediationStep'
+        type: array
+    type: object
+  models.RemediationStep:
+    properties:
+      action_type:
+        description: restart, rollback, scale, drain, etc.
+        type: string
+      description:
+        type: string
+      layer:
+        $ref: '#/definitions/models.Layer'
+      metadata:
+        additionalProperties:
+          type: string
+        type: object
+      order:
+        type: integer
+      required:
+        description: If false, continue on failure
+        type: boolean
+      target:
+        description: Resource identifier
+        type: string
+      wait_time:
+        allOf:
+        - $ref: '#/definitions/time.Duration'
+        description: Time to wait after this step
+    type: object
+  models.Resource:
+    properties:
+      issue:
+        type: string
+      kind:
+        type: string
+      name:
+        type: string
+      namespace:
+        type: string
+    type: object
+  models.WorkflowStep:
+    properties:
+      completed_at:
+        type: string
+      description:
+        type: string
+      error_message:
+        type: string
+      layer:
+        description: '"infrastructure", "platform", "application"'
+        type: string
+      order:
+        type: integer
+      started_at:
+        type: string
+      status:
+        description: '"pending", "running", "completed", "failed"'
+        type: string
+    type: object
+  policy.ActionTaken:
+    properties:
+      action:
+        type: string
+      alert:
+        type: string
+      error:
+        type: string
+      model:
+        type: string
+      policy:
+        type: string
+      result:
+        type: string
+      verdict:
+        type: integer
+    type: object
+  policy.AlertsResponse:
+    properties:
+      actions_taken:
+        items:
+          $ref: '#/definitions/policy.ActionTaken'
+        type: array
+      matched_policies:
+        type: integer
+      status:
+        type: string
+    type: object
+  rca.CorrStat:
+    properties:
+      duration_ms:
+        $ref: '#/definitions/time.Duration'
+      error:
+        type: string
+      findings:
+        type: integer
+      name:
+        type: string
+    type: object
+  rca.Result:
+    properties:
+      affected_components:
+        items:
+          type: string
+        type: array
+      confidence_score:
+        type: number
+      correlator_stats:
+        items:
+          $ref: '#/definitions/rca.CorrStat'
+        type: array
+      istio_available:
+        type: boolean
+      namespace:
+        type: string
+      root_causes:
+        items:
+          $ref: '#/definitions/rca.RootCause'
+        type: array
+      service:
+        type: string
+      status:
+        type: string
+      time_range:
+        $ref: '#/definitions/rca.TimeRange'
+    type: object
+  rca.RootCause:
+    properties:
+      confidence:
+        type: number
+      description:
+        type: string
+      evidence:
+        additionalProperties: true
+        type: object
+      remediation_steps:
+        items:
+          type: string
+        type: array
+      signal_type:
+        $ref: '#/definitions/rca.SignalType'
+    type: object
+  rca.SignalType:
+    enum:
+    - pod_event
+    - network_policy
+    - istio_virtual_service
+    type: string
+    x-enum-varnames:
+    - SignalPodEvent
+    - SignalNetworkPolicy
+    - SignalIstioVS
+  rca.TimeRange:
+    properties:
+      end:
+        type: string
+      start:
+        type: string
+    type: object
+  time.Duration:
+    enum:
+    - -9223372036854775808
+    - 9223372036854775807
+    - 1
+    - 1000
+    - 1000000
+    - 1000000000
+    - 60000000000
+    - 3600000000000
+    type: integer
+    x-enum-varnames:
+    - minDuration
+    - maxDuration
+    - Nanosecond
+    - Microsecond
+    - Millisecond
+    - Second
+    - Minute
+    - Hour
+  v1.APIErrorResponse:
+    properties:
+      error:
+        type: string
+      status:
+        example: error
+        type: string
+    type: object
+  v1.AlertmanagerAlert:
+    properties:
+      fingerprint:
+        type: string
+      labels:
+        additionalProperties:
+          type: string
+        type: object
+      startsAt:
+        type: string
+      status:
+        type: string
+    type: object
+  v1.AlertmanagerWebhook:
+    properties:
+      alerts:
+        items:
+          $ref: '#/definitions/v1.AlertmanagerAlert'
+        type: array
+      status:
+        type: string
+    type: object
+  v1.AlertsErrorResponse:
+    properties:
+      error:
+        example: Invalid Alertmanager webhook format
+        type: string
+      status:
+        example: error
+        type: string
+    type: object
+  v1.AnomalyAnalyzeRequest:
+    properties:
+      deployment:
+        description: 'Optional: scope to deployment'
+        type: string
+      label_selector:
+        description: 'Optional: label selector'
+        type: string
+      model_name:
+        description: 'KServe model to use (default: anomaly-detector)'
+        type: string
+      namespace:
+        description: 'Optional: scope to namespace'
+        type: string
+      pod:
+        description: 'Optional: scope to specific pod'
+        type: string
+      threshold:
+        description: Anomaly score threshold (0.0-1.0)
+        type: number
+      time_range:
+        description: 'Options: 1h, 6h, 24h, 7d'
+        type: string
+    type: object
+  v1.AnomalyAnalyzeResponse:
+    properties:
+      anomalies:
+        items:
+          $ref: '#/definitions/v1.AnomalyResult'
+        type: array
+      anomalies_detected:
+        type: integer
+      enriched_signals:
+        $ref: '#/definitions/v1.EnrichedSignals'
+      features:
+        $ref: '#/definitions/v1.FeatureInfo'
+      model_used:
+        type: string
+      recommendation:
+        type: string
+      scope:
+        $ref: '#/definitions/v1.AnomalyScope'
+      status:
+        type: string
+      summary:
+        $ref: '#/definitions/v1.AnomalySummary'
+      time_range:
+        type: string
+    type: object
+  v1.AnomalyErrorResponse:
+    properties:
+      code:
+        type: string
+      details:
+        type: string
+      error:
+        type: string
+      status:
+        type: string
+    type: object
+  v1.AnomalyResult:
+    properties:
+      anomaly_score:
+        description: 0.0-1.0
+        type: number
+      confidence:
+        description: 0.0-1.0
+        type: number
+      explanation:
+        type: string
+      metrics:
+        additionalProperties:
+          type: number
+        type: object
+      recommended_action:
+        type: string
+      severity:
+        description: critical, warning, info
+        type: string
+      timestamp:
+        type: string
+    type: object
+  v1.AnomalyScope:
+    properties:
+      deployment:
+        type: string
+      namespace:
+        type: string
+      pod:
+        type: string
+      target_description:
+        type: string
+    type: object
+  v1.AnomalySummary:
+    properties:
+      average_score:
+        type: number
+      features_generated:
+        type: integer
+      max_score:
+        type: number
+      metrics_analyzed:
+        type: integer
+    type: object
+  v1.ClusterCapacityResponse:
+    properties:
+      cluster_capacity:
+        $ref: '#/definitions/capacity.ClusterCapacity'
+      cluster_usage:
+        $ref: '#/definitions/capacity.ClusterUsage'
+      infrastructure:
+        $ref: '#/definitions/capacity.ClusterInfrastructure'
+      namespaces:
+        items:
+          $ref: '#/definitions/capacity.NamespaceSummary'
+        type: array
+      scope:
+        type: string
+      status:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  v1.ContainerRightSizingRecommendation:
+    properties:
+      container:
+        type: string
+      cpu_sizing:
+        description: |-
+          Classification
+          Sizing is "over-provisioned", "under-provisioned", or "right-sized".
+        type: string
+      current_cpu_limit:
+        type: string
+      current_cpu_request:
+        description: CPU fields (all in cores)
+        type: string
+      current_memory_limit:
+        type: string
+      current_memory_request:
+        description: Memory fields (all in bytes)
+        type: string
+      memory_sizing:
+        type: string
+      namespace:
+        type: string
+      p95_cpu_usage_cores:
+        type: number
+      p95_memory_usage_bytes:
+        type: number
+      pod:
+        type: string
+      recommended_cpu_limit:
+        type: string
+      recommended_cpu_request:
+        type: string
+      recommended_memory_limit:
+        type: string
+      recommended_memory_request:
+        type: string
+      throttle_rate_pct:
+        description: |-
+          ThrottleRatePct is the CPU throttle rate (%) over the analysis window.
+          Nil when cAdvisor CFS metrics are not available.
+        type: number
+    type: object
+  v1.CoordinationWorkflow:
+    properties:
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      error_message:
+        type: string
+      execution_result:
+        $ref: '#/definitions/coordination.ExecutionResult'
+      id:
+        type: string
+      incident_id:
+        type: string
+      layered_issue:
+        $ref: '#/definitions/models.LayeredIssue'
+      remediation_plan:
+        $ref: '#/definitions/models.RemediationPlan'
+      started_at:
+        type: string
+      status:
+        description: pending, planning, executing, completed, failed
+        type: string
+    type: object
+  v1.CreateIncidentRequest:
+    properties:
+      affected_resources:
+        items:
+          type: string
+        type: array
+      description:
+        type: string
+      labels:
+        additionalProperties:
+          type: string
+        type: object
+      severity:
+        type: string
+      target:
+        type: string
+      title:
+        type: string
+    type: object
+  v1.CreateIncidentResponse:
+    properties:
+      created_at:
+        type: string
+      incident:
+        $ref: '#/definitions/models.Incident'
+      incident_id:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  v1.CurrentMetrics:
+    properties:
+      cpu_rolling_mean:
+        type: number
+      disk_usage:
+        type: number
+      memory_rolling_mean:
+        type: number
+      network_in:
+        type: number
+      network_out:
+        type: number
+      time_range:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  v1.DetectionResponse:
+    properties:
+      data:
+        $ref: '#/definitions/models.DeploymentInfo'
+      error:
+        type: string
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+  v1.DiskExhaustionResponse:
+    properties:
+      critical_count:
+        description: CriticalCount is the number of filesystems with urgency == "critical".
+        type: integer
+      results:
+        items:
+          $ref: '#/definitions/v1.DiskExhaustionResult'
+        type: array
+      scope:
+        type: string
+      status:
+        type: string
+      timestamp:
+        type: string
+      warning_count:
+        description: WarningCount is the number of filesystems with urgency == "warning".
+        type: integer
+    type: object
+  v1.DiskExhaustionResult:
+    properties:
+      available_bytes:
+        description: AvailableBytes is the current free space in bytes.
+        type: number
+      daily_fill_rate_bytes:
+        description: DailyFillRateBytes is the average bytes consumed per day (negative
+          = shrinking).
+        type: number
+      days_until_full:
+        description: |-
+          DaysUntilFull is days until the filesystem is 100% full.
+          -1 means usage is stable or shrinking.
+        type: integer
+      mountpoint:
+        description: Mountpoint is the filesystem mount path (e.g. "/", "/var/lib/containers").
+        type: string
+      node:
+        description: Node is the Kubernetes node hosting this filesystem.
+        type: string
+      projected_full_date:
+        description: ProjectedFullDate is the ISO-8601 date when the filesystem will
+          be full (empty when stable).
+        type: string
+      total_bytes:
+        description: TotalBytes is the total filesystem size in bytes.
+        type: number
+      urgency:
+        description: Urgency is "critical" (<3d), "warning" (<7d), "info" (>=7d),
+          or "stable".
+        type: string
+      used_percent:
+        description: UsedPercent is the current usage as a fraction (0.0–1.0).
+        type: number
+    type: object
+  v1.EnrichedSignals:
+    properties:
+      cpu_throttle_rate:
+        description: |-
+          CPUThrottleRate is the ratio of throttled CPU time (0.0–1.0).
+          Source: container_cpu_cfs_throttled_seconds_total / container_cpu_cfs_periods_total
+          Nil when cAdvisor CFS metrics are not available in Prometheus.
+        type: number
+      http_degraded:
+        description: HTTPDegraded is true when error rate > 5% or P99 latency > 1000ms.
+        type: boolean
+      http_error_rate:
+        description: |-
+          HTTPErrorRate is the fraction of requests returning 5xx status codes.
+          Source: rate(container_http_requests_total{status=~"5.."}[5m]) / rate(container_http_requests_total[5m])
+          Nil when HTTP metrics are not available (requires Istio/OSSm or instrumented apps).
+        type: number
+      http_response_time_p99_ms:
+        description: |-
+          HTTPResponseTimeP99Ms is the 99th-percentile HTTP response time in milliseconds.
+          Source: histogram_quantile(0.99, istio_request_duration_milliseconds_bucket)
+          Nil when Istio metrics are not available.
+        type: number
+      throttling_detected:
+        description: ThrottlingDetected is true when CPUThrottleRate exceeds 25%.
+        type: boolean
+    type: object
+  v1.ErrorResponse:
+    properties:
+      error:
+        type: string
+      success:
+        type: boolean
+    type: object
+  v1.FeatureInfo:
+    properties:
+      base_metrics:
+        items:
+          type: string
+        type: array
+      feature_names:
+        items:
+          type: string
+        type: array
+      features_per_metric:
+        type: integer
+      total_features:
+        type: integer
+    type: object
+  v1.GetRecommendationsRequest:
+    properties:
+      confidence_threshold:
+        description: 'Minimum confidence 0.0-1.0 (default: 0.7)'
+        type: number
+      include_predictions:
+        description: 'Include ML predictions (default: true)'
+        type: boolean
+      namespace:
+        description: 'Optional: filter by namespace'
+        type: string
+      timeframe:
+        description: '"1h", "6h", "24h" (default: "6h")'
+        type: string
+    type: object
+  v1.GetRecommendationsResponse:
+    properties:
+      message:
+        type: string
+      ml_enabled:
+        type: boolean
+      recommendations:
+        items:
+          $ref: '#/definitions/v1.Recommendation'
+        type: array
+      status:
+        type: string
+      timeframe:
+        type: string
+      timestamp:
+        type: string
+      total_recommendations:
+        type: integer
+    type: object
+  v1.IncidentListItem:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      issue_type:
+        type: string
+      namespace:
+        type: string
+      resource:
+        type: string
+      severity:
+        type: string
+      source:
+        type: string
+      status:
+        type: string
+      target:
+        type: string
+      title:
+        type: string
+      workflow_id:
+        type: string
+    type: object
+  v1.ListCoordinationWorkflowsResponse:
+    properties:
+      total:
+        type: integer
+      workflows:
+        items:
+          $ref: '#/definitions/v1.CoordinationWorkflow'
+        type: array
+    type: object
+  v1.ListIncidentsResponse:
+    properties:
+      incidents:
+        items:
+          $ref: '#/definitions/v1.IncidentListItem'
+        type: array
+      total:
+        type: integer
+    type: object
+  v1.MemoryLeakResponse:
+    properties:
+      leak_count:
+        type: integer
+      namespace:
+        type: string
+      results:
+        items:
+          $ref: '#/definitions/v1.MemoryLeakResult'
+        type: array
+      status:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  v1.MemoryLeakResult:
+    properties:
+      confidence:
+        description: Confidence is a 0.0–1.0 score indicating certainty of the leak
+          classification.
+        type: number
+      container:
+        type: string
+      current_memory_bytes:
+        type: number
+      daily_growth_bytes:
+        description: DailyGrowthBytes is the average memory increase per day.
+        type: number
+      growth_r_squared:
+        description: GrowthRSquared is the R² of the linear regression (higher = more
+          confident trend).
+        type: number
+      leak_detected:
+        description: LeakDetected is true when growth is monotonically increasing
+          with high confidence.
+        type: boolean
+      namespace:
+        type: string
+      pod:
+        type: string
+    type: object
+  v1.ModelInfo:
+    properties:
+      confidence:
+        type: number
+      name:
+        type: string
+      version:
+        type: string
+    type: object
+  v1.ModelsListResponse:
+    properties:
+      count:
+        type: integer
+      models:
+        items:
+          type: string
+        type: array
+    type: object
+  v1.NamespaceCapacityResponse:
+    properties:
+      available:
+        $ref: '#/definitions/capacity.AvailableCapacity'
+      current_usage:
+        $ref: '#/definitions/capacity.ResourceUsage'
+      infrastructure_impact:
+        $ref: '#/definitions/capacity.InfrastructureImpact'
+      namespace:
+        type: string
+      quota:
+        $ref: '#/definitions/capacity.NamespaceQuota'
+      status:
+        type: string
+      timestamp:
+        type: string
+      trending:
+        $ref: '#/definitions/capacity.TrendingInfo'
+    type: object
+  v1.PredictErrorResponse:
+    properties:
+      code:
+        type: string
+      details:
+        type: string
+      error:
+        type: string
+      status:
+        type: string
+    type: object
+  v1.PredictRequest:
+    properties:
+      day_of_week:
+        description: 'Required: 0=Monday, 6=Sunday'
+        type: integer
+      deployment:
+        description: 'Optional: deployment filter'
+        type: string
+      hour:
+        description: 'Required: 0-23 (hour of day)'
+        type: integer
+      model:
+        description: 'Optional: KServe model name (default: predictive-analytics)'
+        type: string
+      namespace:
+        description: 'Optional: namespace filter'
+        type: string
+      pod:
+        description: 'Optional: specific pod filter'
+        type: string
+      scope:
+        description: 'Optional: pod, deployment, namespace, cluster (default: namespace)'
+        type: string
+    type: object
+  v1.PredictResponse:
+    properties:
+      current_metrics:
+        $ref: '#/definitions/v1.CurrentMetrics'
+      model_info:
+        $ref: '#/definitions/v1.ModelInfo'
+      predictions:
+        $ref: '#/definitions/v1.PredictionValues'
+      scope:
+        type: string
+      status:
+        type: string
+      target:
+        type: string
+      target_time:
+        $ref: '#/definitions/v1.TargetTimeInfo'
+    type: object
+  v1.PredictionValues:
+    properties:
+      cpu_percent:
+        type: number
+      memory_percent:
+        type: number
+    type: object
+  v1.RCAErrorResponse:
+    properties:
+      code:
+        type: string
+      details:
+        type: string
+      error:
+        type: string
+      status:
+        type: string
+    type: object
+  v1.RCAInvestigateRequest:
+    properties:
+      end_time:
+        type: string
+      namespace:
+        type: string
+      service:
+        type: string
+      start_time:
+        type: string
+    type: object
+  v1.Recommendation:
+    properties:
+      confidence:
+        type: number
+      evidence:
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      issue_type:
+        type: string
+      namespace:
+        type: string
+      predicted_time:
+        type: string
+      recommended_actions:
+        items:
+          type: string
+        type: array
+      related_incident_id:
+        type: string
+      severity:
+        type: string
+      source:
+        type: string
+      target:
+        type: string
+      type:
+        type: string
+    type: object
+  v1.RemediationIssue:
+    properties:
+      description:
+        type: string
+      severity:
+        type: string
+      type:
+        type: string
+    type: object
+  v1.RemediationResource:
+    properties:
+      kind:
+        type: string
+      name:
+        type: string
+    type: object
+  v1.RightSizingResponse:
+    properties:
+      analysis_window:
+        type: string
+      namespace:
+        type: string
+      over_provisioned_count:
+        type: integer
+      recommendations:
+        items:
+          $ref: '#/definitions/v1.ContainerRightSizingRecommendation'
+        type: array
+      right_sized_count:
+        type: integer
+      status:
+        type: string
+      timestamp:
+        type: string
+      under_provisioned_count:
+        type: integer
+    type: object
+  v1.TargetTimeInfo:
+    properties:
+      day_of_week:
+        type: integer
+      hour:
+        type: integer
+      iso_timestamp:
+        type: string
+    type: object
+  v1.TriggerMultiLayerRemediationRequest:
+    properties:
+      description:
+        type: string
+      incident_id:
+        type: string
+      resources:
+        items:
+          $ref: '#/definitions/models.Resource'
+        type: array
+    type: object
+  v1.TriggerMultiLayerRemediationResponse:
+    properties:
+      affected_layers:
+        items:
+          $ref: '#/definitions/models.Layer'
+        type: array
+      estimated_steps:
+        type: integer
+      root_cause_layer:
+        $ref: '#/definitions/models.Layer'
+      status:
+        type: string
+      workflow_id:
+        type: string
+    type: object
+  v1.TriggerRemediationRequest:
+    properties:
+      incident_id:
+        type: string
+      issue:
+        $ref: '#/definitions/v1.RemediationIssue'
+      namespace:
+        type: string
+      resource:
+        $ref: '#/definitions/v1.RemediationResource'
+    type: object
+  v1.TriggerRemediationResponse:
+    properties:
+      deployment_method:
+        type: string
+      estimated_duration:
+        type: string
+      status:
+        type: string
+      workflow_id:
+        type: string
+    type: object
+  v1.WorkflowResponse:
+    properties:
+      completed_at:
+        type: string
+      created_at:
+        type: string
+      deployment_method:
+        type: string
+      duration:
+        type: string
+      error_message:
+        type: string
+      id:
+        type: string
+      incident_id:
+        type: string
+      issue_type:
+        type: string
+      namespace:
+        type: string
+      remediator:
+        type: string
+      resource_kind:
+        type: string
+      resource_name:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      steps:
+        items:
+          $ref: '#/definitions/models.WorkflowStep'
+        type: array
+    type: object
+info:
+  contact: {}
+  description: Kubernetes-native orchestration for multi-layer coordination in OpenShift
+    clusters.
+  title: OpenShift Coordination Engine API
+  version: 1.2.0
+paths:
+  /api/v1/alerts:
+    post:
+      consumes:
+      - application/json
+      description: Matches firing alerts to SelfHealingPolicy entries and runs the
+        model-gated repair for each match. Unmatched alerts return 200 with matched_policies
+        0.
+      parameters:
+      - description: Alertmanager v4 webhook
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.AlertmanagerWebhook'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/policy.AlertsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.AlertsErrorResponse'
+      summary: Accept an Alertmanager webhook
+      tags:
+      - policy
+  /api/v1/anomalies/analyze:
+    post:
+      consumes:
+      - application/json
+      description: Queries Prometheus for metrics, performs 45-feature engineering,
+        and calls KServe anomaly-detector model
+      parameters:
+      - description: Anomaly analysis request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.AnomalyAnalyzeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.AnomalyAnalyzeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.AnomalyErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/v1.AnomalyErrorResponse'
+      summary: Analyze anomalies with ML-powered feature engineering
+      tags:
+      - anomaly
+  /api/v1/capacity/cluster:
+    get:
+      description: Returns cluster-wide capacity analysis including total capacity,
+        usage, and namespace breakdown
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.ClusterCapacityResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+      summary: Get cluster-wide capacity analysis
+      tags:
+      - capacity
+  /api/v1/capacity/namespace/{namespace}:
+    get:
+      description: Returns capacity analysis for a specific namespace including quota,
+        usage, availability, trending, and infrastructure impact
+      parameters:
+      - description: Namespace name
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: 'Include trending analysis (default: true)'
+        in: query
+        name: include_trending
+        type: boolean
+      - description: 'Include infrastructure impact analysis (default: false)'
+        in: query
+        name: include_infrastructure
+        type: boolean
+      - description: 'Trending window - 7d, 14d, 30d (default: 7d)'
+        in: query
+        name: window
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.NamespaceCapacityResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+      summary: Get namespace capacity analysis
+      tags:
+      - capacity
+  /api/v1/coordination/trigger:
+    post:
+      consumes:
+      - application/json
+      description: Detects affected layers and starts a coordinated remediation workflow
+      parameters:
+      - description: Multi-layer remediation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.TriggerMultiLayerRemediationRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/v1.TriggerMultiLayerRemediationResponse'
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "500":
+          description: Failed to generate plan
+          schema:
+            type: string
+      summary: Trigger multi-layer remediation
+      tags:
+      - coordination
+  /api/v1/coordination/workflows:
+    get:
+      description: Lists multi-layer coordination workflows known to this process
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.ListCoordinationWorkflowsResponse'
+      summary: List coordination workflows
+      tags:
+      - coordination
+  /api/v1/coordination/workflows/{id}:
+    get:
+      description: Returns one multi-layer coordination workflow
+      parameters:
+      - description: Workflow ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.CoordinationWorkflow'
+        "404":
+          description: workflow not found
+          schema:
+            type: string
+      summary: Get a coordination workflow
+      tags:
+      - coordination
+  /api/v1/detect:
+    post:
+      consumes:
+      - application/json
+      description: Proxies prediction requests to KServe InferenceServices
+      parameters:
+      - description: Detection request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/kserve.DetectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/kserve.DetectResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+      summary: Call KServe model for predictions
+      tags:
+      - kserve
+  /api/v1/detect/cache/clear:
+    post:
+      description: Clears all cached deployment detection results
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+      summary: Clear detection cache
+      tags:
+      - detection
+  /api/v1/detect/cache/stats:
+    get:
+      description: Returns statistics about the detection cache
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get cache statistics
+      tags:
+      - detection
+  /api/v1/detect/daemonset/{namespace}/{name}:
+    get:
+      description: Detects how a DaemonSet was deployed (ArgoCD, Helm, Operator, Manual)
+      parameters:
+      - description: Namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: DaemonSet name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+      summary: Detect deployment method for a DaemonSet
+      tags:
+      - detection
+  /api/v1/detect/deployment/{namespace}/{name}:
+    get:
+      description: Detects how a Deployment was deployed (ArgoCD, Helm, Operator,
+        Manual)
+      parameters:
+      - description: Namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Deployment name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+      summary: Detect deployment method for a Deployment
+      tags:
+      - detection
+  /api/v1/detect/statefulset/{namespace}/{name}:
+    get:
+      description: Detects how a StatefulSet was deployed (ArgoCD, Helm, Operator,
+        Manual)
+      parameters:
+      - description: Namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: StatefulSet name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/v1.DetectionResponse'
+      summary: Detect deployment method for a StatefulSet
+      tags:
+      - detection
+  /api/v1/health:
+    get:
+      description: Reports Kubernetes, ML service, and RBAC dependency health
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/models.HealthResponse'
+      summary: Cluster health check
+      tags:
+      - health
+  /api/v1/incidents:
+    get:
+      description: Lists stored incidents and incidents derived from remediation workflows
+      parameters:
+      - description: Filter by namespace
+        in: query
+        name: namespace
+        type: string
+      - description: Filter by severity
+        in: query
+        name: severity
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.ListIncidentsResponse'
+      summary: List incidents
+      tags:
+      - remediation
+    post:
+      consumes:
+      - application/json
+      description: Records an incident that can later be used to trigger remediation
+      parameters:
+      - description: Incident to create
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.CreateIncidentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/v1.CreateIncidentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.APIErrorResponse'
+      summary: Create an incident
+      tags:
+      - remediation
+  /api/v1/investigate/rca:
+    post:
+      consumes:
+      - application/json
+      description: Correlates pod events, network policies, and Istio config for a
+        service over a time window
+      parameters:
+      - description: RCA investigation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.RCAInvestigateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rca.Result'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.RCAErrorResponse'
+      summary: Investigate a root cause
+      tags:
+      - rca
+  /api/v1/models:
+    get:
+      description: Returns a list of all registered KServe InferenceServices
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.ModelsListResponse'
+      summary: List all registered KServe models
+      tags:
+      - kserve
+  /api/v1/models/{model}/health:
+    get:
+      description: Checks the health status of a specific KServe model
+      parameters:
+      - description: Model name
+        in: path
+        name: model
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/kserve.ModelHealthResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/v1.ErrorResponse'
+      summary: Check KServe model health
+      tags:
+      - kserve
+  /api/v1/predict:
+    post:
+      consumes:
+      - application/json
+      description: Provides time-specific resource usage predictions using KServe
+        ML models and Prometheus metrics
+      parameters:
+      - description: Prediction request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.PredictRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.PredictResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.PredictErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/v1.PredictErrorResponse'
+      summary: Get time-specific resource usage predictions
+      tags:
+      - prediction
+  /api/v1/predict/disk-exhaustion:
+    get:
+      description: Computes days-until-full for all monitored filesystems using a
+        7-day
+      parameters:
+      - description: Filter by node name
+        in: query
+        name: node
+        type: string
+      - description: Filter by mount path (e.g. /)
+        in: query
+        name: mountpoint
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.DiskExhaustionResponse'
+      summary: Predict disk exhaustion ETA per node/filesystem
+      tags:
+      - prediction
+  /api/v1/predict/memory-leak:
+    get:
+      description: Applies linear regression to container_memory_working_set_bytes
+        over a
+      parameters:
+      - description: Filter by namespace
+        in: query
+        name: namespace
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.MemoryLeakResponse'
+      summary: Detect memory leaks by slope analysis
+      tags:
+      - prediction
+  /api/v1/recommendations:
+    post:
+      consumes:
+      - application/json
+      description: Returns ML-powered remediation recommendations for the requested
+        timeframe
+      parameters:
+      - description: Recommendation query
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.GetRecommendationsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.GetRecommendationsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/v1.APIErrorResponse'
+      summary: Get remediation recommendations
+      tags:
+      - recommendations
+  /api/v1/recommendations/rightsizing:
+    get:
+      description: Compares 30-day P95 resource usage against current requests/limits
+      parameters:
+      - description: Filter by namespace
+        in: query
+        name: namespace
+        type: string
+      - description: Filter by pod name (prefix)
+        in: query
+        name: pod
+        type: string
+      - description: 'Analysis window: 7d, 14d, 30d (default: 30d)'
+        in: query
+        name: window
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.RightSizingResponse'
+      summary: Get CPU and memory right-sizing recommendations
+      tags:
+      - recommendations
+  /api/v1/remediation/trigger:
+    post:
+      consumes:
+      - application/json
+      description: Starts remediation for an incident against a detected deployment
+        method
+      parameters:
+      - description: Remediation trigger request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/v1.TriggerRemediationRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/v1.TriggerRemediationResponse'
+        "400":
+          description: Invalid request
+          schema:
+            type: string
+        "500":
+          description: Failed to trigger remediation
+          schema:
+            type: string
+      summary: Trigger a remediation workflow
+      tags:
+      - remediation
+  /api/v1/workflows/{id}:
+    get:
+      description: Returns the status and steps of a remediation workflow
+      parameters:
+      - description: Workflow ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/v1.WorkflowResponse'
+        "404":
+          description: Workflow not found
+          schema:
+            type: string
+      summary: Get a remediation workflow
+      tags:
+      - remediation
+  /health:
+    get:
+      description: Liveness and readiness probe that does not check cluster dependencies
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.SimpleHealthResponse'
+      summary: Lightweight health check
+      tags:
+      - health
+swagger: "2.0"
