@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -21,9 +22,9 @@ import (
 func TestActionExecutor_RestartDeletesOnlyPolicyNamespace(t *testing.T) {
 	client := k8sfake.NewSimpleClientset(
 		deployment("parasol-insurance", "ic-app", "2", "ic-app:v2"),
-		pod("parasol-insurance", "ic-app-aaa", "ic-app", corev1.PodRunning),
-		pod("parasol-insurance", "other-app", "other", corev1.PodRunning),
-		pod("other-ns", "ic-app-bbb", "ic-app", corev1.PodRunning),
+		pod("parasol-insurance", "ic-app-aaa", "ic-app"),
+		pod("parasol-insurance", "other-app", "other"),
+		pod("other-ns", "ic-app-bbb", "ic-app"),
 	)
 	executor := testExecutor(t, client, nil)
 
@@ -45,8 +46,8 @@ func TestActionExecutor_RollbackToPreviousRevision(t *testing.T) {
 	deploy := deployment("checkout", "checkout-api", "2", "checkout:v2")
 	client := k8sfake.NewSimpleClientset(
 		deploy,
-		replicaSet("checkout", "checkout-api-v1", "checkout-api", "1", deploy.UID, "checkout:v1"),
-		replicaSet("checkout", "checkout-api-v2", "checkout-api", "2", deploy.UID, "checkout:v2"),
+		replicaSet("checkout-api-v1", "1", deploy.UID, "checkout:v1"),
+		replicaSet("checkout-api-v2", "2", deploy.UID, "checkout:v2"),
 	)
 	executor := testExecutor(t, client, nil)
 
@@ -65,8 +66,8 @@ func TestActionExecutor_RollbackToSpecifiedRevision(t *testing.T) {
 	deploy := deployment("checkout", "checkout-api", "3", "checkout:v3")
 	client := k8sfake.NewSimpleClientset(
 		deploy,
-		replicaSet("checkout", "checkout-api-v1", "checkout-api", "1", deploy.UID, "checkout:v1"),
-		replicaSet("checkout", "checkout-api-v2", "checkout-api", "2", deploy.UID, "checkout:v2"),
+		replicaSet("checkout-api-v1", "1", deploy.UID, "checkout:v1"),
+		replicaSet("checkout-api-v2", "2", deploy.UID, "checkout:v2"),
 	)
 	executor := testExecutor(t, client, nil)
 
@@ -137,11 +138,11 @@ func TestActionExecutor_ApplyForcesPolicyNamespace(t *testing.T) {
 		}
 		obj := &unstructured.Unstructured{}
 		if err := obj.UnmarshalJSON(patch.GetPatch()); err != nil {
-			return true, nil, err
+			return true, nil, fmt.Errorf("decode apply patch: %w", err)
 		}
 		obj.SetNamespace(patch.GetNamespace())
 		if err := dyn.Tracker().Add(obj); err != nil {
-			return true, nil, err
+			return true, nil, fmt.Errorf("store applied object: %w", err)
 		}
 		return true, obj, nil
 	})
@@ -199,9 +200,9 @@ func TestActionExecutor_PatchUsesStrategicMergeInPolicyNamespace(t *testing.T) {
 
 func TestActionExecutor_ExecUsesArgvInPolicyNamespace(t *testing.T) {
 	client := k8sfake.NewSimpleClientset(
-		podWithContainer("checkout", "pg-b", "postgresql", "postgres", corev1.PodRunning),
-		podWithContainer("checkout", "pg-a", "postgresql", "postgres", corev1.PodRunning),
-		podWithContainer("other-ns", "pg-a", "postgresql", "postgres", corev1.PodRunning),
+		podWithContainer("checkout", "pg-b", "postgresql", "postgres"),
+		podWithContainer("checkout", "pg-a", "postgresql", "postgres"),
+		podWithContainer("other-ns", "pg-a", "postgresql", "postgres"),
 	)
 	recorder := &recordingExec{}
 	executor := testExecutor(t, client, recorder)
@@ -221,7 +222,7 @@ func TestActionExecutor_ExecUsesArgvInPolicyNamespace(t *testing.T) {
 }
 
 func TestActionExecutor_UnknownActionDoesNotCallKubernetes(t *testing.T) {
-	client := k8sfake.NewSimpleClientset(pod("checkout", "keep", "checkout-api", corev1.PodRunning))
+	client := k8sfake.NewSimpleClientset(pod("checkout", "keep", "checkout-api"))
 	executor := testExecutor(t, client, nil)
 
 	err := executor.Run(context.Background(), "checkout", Repair{
@@ -295,17 +296,17 @@ func deployment(namespace, name, revision, image string) *appsv1.Deployment {
 	}
 }
 
-func replicaSet(namespace, name, app, revision string, owner types.UID, image string) *appsv1.ReplicaSet {
+func replicaSet(name, revision string, owner types.UID, image string) *appsv1.ReplicaSet {
 	return &appsv1.ReplicaSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
-			Namespace:   namespace,
-			Labels:      map[string]string{"app": app},
+			Namespace:   "checkout",
+			Labels:      map[string]string{"app": "checkout-api"},
 			Annotations: map[string]string{deploymentRevisionAnnotation: revision},
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: "apps/v1",
 				Kind:       "Deployment",
-				Name:       app,
+				Name:       "checkout-api",
 				UID:        owner,
 			}},
 		},
@@ -319,11 +320,11 @@ func replicaSet(namespace, name, app, revision string, owner types.UID, image st
 	}
 }
 
-func pod(namespace, name, app string, phase corev1.PodPhase) *corev1.Pod {
-	return podWithContainer(namespace, name, app, "app", phase)
+func pod(namespace, name, app string) *corev1.Pod {
+	return podWithContainer(namespace, name, app, "app")
 }
 
-func podWithContainer(namespace, name, app, container string, phase corev1.PodPhase) *corev1.Pod {
+func podWithContainer(namespace, name, app, container string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -333,7 +334,7 @@ func podWithContainer(namespace, name, app, container string, phase corev1.PodPh
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: container, Image: "app:v1"}},
 		},
-		Status: corev1.PodStatus{Phase: phase},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
 }
 

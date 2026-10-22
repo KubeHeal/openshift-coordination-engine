@@ -99,7 +99,10 @@ func (e *ActionExecutor) execCommand(ctx context.Context, namespace string, para
 	if err != nil {
 		return err
 	}
-	return e.exec.Exec(ctx, namespace, pod.Name, container, command)
+	if err := e.exec.Exec(ctx, namespace, pod.Name, container, command); err != nil {
+		return fmt.Errorf("exec command: %w", err)
+	}
+	return nil
 }
 
 func (e *ActionExecutor) runningPod(ctx context.Context, namespace, selector string) (*corev1.Pod, error) {
@@ -140,8 +143,8 @@ func containerName(pod *corev1.Pod, requested string) (string, error) {
 		}
 		return pod.Spec.Containers[0].Name, nil
 	}
-	for _, container := range pod.Spec.Containers {
-		if container.Name == requested {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == requested {
 			return requested, nil
 		}
 	}

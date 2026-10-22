@@ -53,7 +53,7 @@ func LoadFile(path string) (*Document, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
+	if strings.TrimSpace(string(data)) == "" {
 		return nil, errors.New("policy file is empty")
 	}
 	var doc Document
@@ -143,17 +143,9 @@ func (l *Loader) Watch(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if !policyFileEvent(event, base) {
+			if !l.scheduleReload(event, base, &debounce) {
 				continue
 			}
-			if debounce != nil {
-				debounce.Stop()
-			}
-			debounce = time.AfterFunc(200*time.Millisecond, func() {
-				if err := l.Reload(); err != nil {
-					l.log.WithError(err).Error("policy reload failed; keeping previous document")
-				}
-			})
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
@@ -161,6 +153,21 @@ func (l *Loader) Watch(ctx context.Context) {
 			l.log.WithError(err).Warn("policy watch error")
 		}
 	}
+}
+
+func (l *Loader) scheduleReload(event fsnotify.Event, base string, debounce **time.Timer) bool {
+	if !policyFileEvent(event, base) {
+		return false
+	}
+	if *debounce != nil {
+		(*debounce).Stop()
+	}
+	*debounce = time.AfterFunc(200*time.Millisecond, func() {
+		if err := l.Reload(); err != nil {
+			l.log.WithError(err).Error("policy reload failed; keeping previous document")
+		}
+	})
+	return true
 }
 
 func policyFileEvent(event fsnotify.Event, base string) bool {

@@ -641,7 +641,7 @@ func initPolicyEngine(
 	if timeout == 0 {
 		timeout = cfg.HTTPTimeout
 	}
-	engine, err := policy.NewEngine(policy.EngineConfig{
+	engine, err := policy.NewEngine(&policy.EngineConfig{
 		Loader:         loader,
 		Querier:        prometheusClient,
 		Scorer:         policy.NewHTTPScorer(timeout, log),

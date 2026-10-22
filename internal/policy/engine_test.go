@@ -14,7 +14,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -24,7 +23,7 @@ import (
 func TestEngine_SecondApplicationIsConfiguredNotCompiled(t *testing.T) {
 	client := k8sfake.NewSimpleClientset(
 		deployment("parasol-insurance", "ic-app", "1", "ic-app:v1"),
-		pod("parasol-insurance", "ic-app-aaa", "ic-app", corev1.PodRunning),
+		pod("parasol-insurance", "ic-app-aaa", "ic-app"),
 		deployment("checkout", "checkout-api", "1", "checkout:v1"),
 	)
 	querier := &scriptQuerier{}
@@ -96,7 +95,7 @@ func TestEngine_SecondApplicationIsConfiguredNotCompiled(t *testing.T) {
 func TestEngine_AnomalyVerdictRepairsOnlyMatchingAlert(t *testing.T) {
 	client := k8sfake.NewSimpleClientset(
 		deployment("parasol-insurance", "ic-app", "1", "ic-app:v1"),
-		pod("parasol-insurance", "ic-app-aaa", "ic-app", corev1.PodRunning),
+		pod("parasol-insurance", "ic-app-aaa", "ic-app"),
 		deployment("checkout", "checkout-api", "1", "checkout:v1"),
 	)
 	scorer := &recordingScorer{verdictFor: func(url string) int {
@@ -122,7 +121,7 @@ func TestEngine_AnomalyVerdictRepairsOnlyMatchingAlert(t *testing.T) {
 }
 
 func TestEngine_UnmatchedAndResolvedDoNotCallKubernetes(t *testing.T) {
-	client := k8sfake.NewSimpleClientset(pod("checkout", "keep", "checkout-api", corev1.PodRunning))
+	client := k8sfake.NewSimpleClientset(pod("checkout", "keep", "checkout-api"))
 	scorer := &recordingScorer{verdictFor: func(string) int { return -1 }}
 	engine := testEngine(t, twoApplicationPolicyJSON, client, &scriptQuerier{}, scorer, discardLogger())
 
@@ -167,7 +166,7 @@ func TestEngine_UnknownFeatureDoesNotRepair(t *testing.T) {
     }`
 	client := k8sfake.NewSimpleClientset(
 		deployment("checkout", "checkout-api", "1", "checkout:v1"),
-		pod("checkout", "keep", "checkout-api", corev1.PodRunning),
+		pod("checkout", "keep", "checkout-api"),
 	)
 	scorer := &recordingScorer{verdictFor: func(string) int { return -1 }}
 	engine := testEngine(t, raw, client, &scriptQuerier{}, scorer, discardLogger())
@@ -214,7 +213,7 @@ func testEngine(t *testing.T, raw string, client *k8sfake.Clientset, querier Que
 	loader, err := NewLoader(path, log)
 	require.NoError(t, err)
 	executor := testExecutorWithDynamic(t, client, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()), nil)
-	engine, err := NewEngine(EngineConfig{
+	engine, err := NewEngine(&EngineConfig{
 		Loader:         loader,
 		Querier:        querier,
 		Scorer:         scorer,

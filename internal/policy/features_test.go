@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,7 +11,7 @@ import (
 func decodeDocument(data []byte) (*Document, error) {
 	var doc Document
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode policy document: %w", err)
 	}
 	return &doc, nil
 }
@@ -21,7 +22,7 @@ func TestResolveFeatureQuery_CatalogOrderAndScope(t *testing.T) {
 
 	queries := make([]string, 0, len(model.FeatureColumns))
 	for _, column := range model.FeatureColumns {
-		query, err := resolveFeatureQuery(model, column, scope)
+		query, err := resolveFeatureQuery(&model, column, scope)
 		require.NoError(t, err)
 		queries = append(queries, query)
 	}
@@ -38,7 +39,7 @@ func TestResolveFeatureQuery_CatalogOrderAndScope(t *testing.T) {
 }
 
 func TestResolveFeatureQuery_PodBeatsDeployment(t *testing.T) {
-	query, err := resolveFeatureQuery(ModelSpec{}, "cpu_usage", FeatureScope{
+	query, err := resolveFeatureQuery(&ModelSpec{}, "cpu_usage", FeatureScope{
 		Namespace:  "checkout",
 		Pod:        "checkout-api-0",
 		Deployment: "checkout-api",
@@ -54,13 +55,13 @@ func TestResolveFeatureQuery_PolicyOverrideWins(t *testing.T) {
 			"cpu_usage": `sum(custom_cpu{namespace="$namespace",pod="$pod"})`,
 		},
 	}
-	query, err := resolveFeatureQuery(model, "cpu_usage", FeatureScope{Namespace: "checkout", Pod: "checkout-api-0"})
+	query, err := resolveFeatureQuery(&model, "cpu_usage", FeatureScope{Namespace: "checkout", Pod: "checkout-api-0"})
 	require.NoError(t, err)
 	require.Equal(t, `sum(custom_cpu{namespace="checkout",pod="checkout-api-0"})`, query)
 }
 
 func TestResolveFeatureQuery_UnknownColumn(t *testing.T) {
-	_, err := resolveFeatureQuery(ModelSpec{}, "queue_depth", FeatureScope{Namespace: "checkout"})
+	_, err := resolveFeatureQuery(&ModelSpec{}, "queue_depth", FeatureScope{Namespace: "checkout"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "queue_depth")
 }

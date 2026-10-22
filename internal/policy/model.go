@@ -25,8 +25,8 @@ type Scorer interface {
 // The service defaults to {model.name}-predictor in defaultNamespace.
 // Optional model.service and model.namespace override that derivation.
 // This does not consult KSERVE_*_SERVICE environment variables.
-func PredictURL(model ModelSpec, defaultNamespace string, port int) (string, error) {
-	if model.Name == "" {
+func PredictURL(model *ModelSpec, defaultNamespace string, port int) (string, error) {
+	if model == nil || model.Name == "" {
 		return "", errors.New("model name is required")
 	}
 	namespace := model.Namespace
@@ -52,7 +52,10 @@ func PredictURL(model ModelSpec, defaultNamespace string, port int) (string, err
 	), nil
 }
 
-func resolvedService(model ModelSpec) (string, error) {
+func resolvedService(model *ModelSpec) (string, error) {
+	if model == nil {
+		return "", errors.New("model name is required")
+	}
 	service := model.Service
 	if service == "" {
 		service = model.Name + "-predictor"

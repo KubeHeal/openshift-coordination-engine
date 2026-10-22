@@ -29,7 +29,7 @@ var (
 	)
 )
 
-func recordAlertOutcome(outcome alertOutcome) {
+func recordAlertOutcome(outcome *alertOutcome) {
 	alertsReceived.WithLabelValues(outcome.policyLabel(), outcome.result).Inc()
 	if outcome.modelCalled {
 		modelScores.WithLabelValues(outcome.policyLabel(), outcome.verdictLabel()).Inc()

@@ -122,7 +122,7 @@ func testAlertsHandler(t *testing.T) *AlertsHandler {
 		log,
 	)
 	require.NoError(t, err)
-	engine, err := policy.NewEngine(policy.EngineConfig{
+	engine, err := policy.NewEngine(&policy.EngineConfig{
 		Loader:         loader,
 		Querier:        fixedQuerier{},
 		Scorer:         fixedScorer{},

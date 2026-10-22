@@ -92,7 +92,10 @@ type Engine struct {
 }
 
 // NewEngine validates dependencies and returns a policy engine.
-func NewEngine(cfg EngineConfig) (*Engine, error) {
+func NewEngine(cfg *EngineConfig) (*Engine, error) {
+	if cfg == nil {
+		return nil, errors.New("policy engine config is required")
+	}
 	if cfg.Loader == nil {
 		return nil, errors.New("policy loader is required")
 	}
@@ -138,7 +141,7 @@ func (e *Engine) HandleWebhook(ctx context.Context, webhook Webhook) AlertsRespo
 	}
 	for _, alert := range webhook.Alerts {
 		outcome := e.processAlert(ctx, webhook.Status, alert)
-		recordAlertOutcome(outcome)
+		recordAlertOutcome(&outcome)
 		if !outcome.matched {
 			continue
 		}
@@ -186,7 +189,7 @@ func (e *Engine) processAlert(ctx context.Context, webhookStatus string, alert I
 		outcome.result = resultDeduped
 		return outcome
 	}
-	return e.scoreAndRepair(ctx, policy, repair, alert, outcome)
+	return e.scoreAndRepair(ctx, policy, repair, alert, &outcome)
 }
 
 func (e *Engine) scoreAndRepair(
@@ -194,14 +197,14 @@ func (e *Engine) scoreAndRepair(
 	policy *Policy,
 	repair Repair,
 	alert IncomingAlert,
-	outcome alertOutcome,
+	outcome *alertOutcome,
 ) alertOutcome {
 	features, err := e.featureVector(ctx, policy, alert)
 	if err != nil {
 		outcome.result = resultFeatureError
 		outcome.err = err
 		e.log.WithError(err).WithFields(outcome.fields()).Warn("policy feature query failed")
-		return outcome
+		return *outcome
 	}
 	verdict, err := e.score(ctx, policy, features)
 	outcome.modelCalled = true
@@ -209,7 +212,7 @@ func (e *Engine) scoreAndRepair(
 		outcome.result = resultModelError
 		outcome.err = err
 		e.log.WithError(err).WithFields(outcome.fields()).Warn("policy model score failed")
-		return outcome
+		return *outcome
 	}
 	outcome.verdict = intPtr(verdict)
 	switch verdict {
@@ -217,12 +220,12 @@ func (e *Engine) scoreAndRepair(
 		outcome.result = resultNoAction
 		e.log.WithFields(outcome.fields()).Info("model says normal, no action")
 	case -1:
-		e.executeRepair(ctx, policy.Namespace, repair, alert, &outcome)
+		e.executeRepair(ctx, policy.Namespace, repair, alert, outcome)
 	default:
 		outcome.result = resultUnexpected
 		e.log.WithFields(outcome.fields()).Warn("model verdict is not actionable")
 	}
-	return outcome
+	return *outcome
 }
 
 func (e *Engine) executeRepair(ctx context.Context, namespace string, repair Repair, alert IncomingAlert, outcome *alertOutcome) {
@@ -246,7 +249,7 @@ func (e *Engine) featureVector(ctx context.Context, policy *Policy, alert Incomi
 	}
 	features := make([]float64, 0, len(policy.Model.FeatureColumns))
 	for _, column := range policy.Model.FeatureColumns {
-		query, err := resolveFeatureQuery(policy.Model, column, scope)
+		query, err := resolveFeatureQuery(&policy.Model, column, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -263,11 +266,15 @@ func (e *Engine) featureVector(ctx context.Context, policy *Policy, alert Incomi
 }
 
 func (e *Engine) score(ctx context.Context, policy *Policy, features []float64) (int, error) {
-	endpoint, err := PredictURL(policy.Model, e.modelNamespace, e.modelPort)
+	endpoint, err := PredictURL(&policy.Model, e.modelNamespace, e.modelPort)
 	if err != nil {
 		return 0, err
 	}
-	return e.scorer.Score(ctx, endpoint, features)
+	verdict, err := e.scorer.Score(ctx, endpoint, features)
+	if err != nil {
+		return 0, fmt.Errorf("score model: %w", err)
+	}
+	return verdict, nil
 }
 
 func (e *Engine) policyFor(namespace, alertName string) *Policy {
@@ -296,7 +303,7 @@ type alertOutcome struct {
 	err             error
 }
 
-func (o alertOutcome) taken() ActionTaken {
+func (o *alertOutcome) taken() ActionTaken {
 	taken := ActionTaken{
 		Policy:  o.policyName,
 		Alert:   o.alertName,
@@ -311,7 +318,7 @@ func (o alertOutcome) taken() ActionTaken {
 	return taken
 }
 
-func (o alertOutcome) fields() logrus.Fields {
+func (o *alertOutcome) fields() logrus.Fields {
 	fields := logrus.Fields{
 		"policy":    o.policyName,
 		"alert":     o.alertName,
@@ -324,14 +331,14 @@ func (o alertOutcome) fields() logrus.Fields {
 	return fields
 }
 
-func (o alertOutcome) policyLabel() string {
+func (o *alertOutcome) policyLabel() string {
 	if o.policyName == "" {
 		return nonePolicyLabel
 	}
 	return o.policyName
 }
 
-func (o alertOutcome) verdictLabel() string {
+func (o *alertOutcome) verdictLabel() string {
 	if o.verdict == nil {
 		return "error"
 	}

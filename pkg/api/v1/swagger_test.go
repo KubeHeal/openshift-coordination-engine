@@ -11,7 +11,7 @@ import (
 
 func TestRegisterSwaggerUI(t *testing.T) {
 	router := mux.NewRouter()
-	req := httptest.NewRequest(http.MethodGet, "/api/docs/index.html", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/docs/index.html", http.NoBody)
 
 	off := httptest.NewRecorder()
 	router.ServeHTTP(off, req)

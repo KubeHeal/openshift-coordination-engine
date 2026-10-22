@@ -15,7 +15,7 @@ import (
 func TestPredictURL_DerivesServiceWithoutEnvRegistration(t *testing.T) {
 	t.Setenv("KSERVE_ANOMALY_DETECTOR_SERVICE", "not-used-predictor")
 
-	url, err := PredictURL(ModelSpec{Name: "anomaly-detector"}, "self-healing-platform", 8080)
+	url, err := PredictURL(&ModelSpec{Name: "anomaly-detector"}, "self-healing-platform", 8080)
 	require.NoError(t, err)
 	require.Equal(t,
 		"http://anomaly-detector-predictor.self-healing-platform.svc.cluster.local:8080/v1/models/anomaly-detector:predict",
@@ -26,7 +26,7 @@ func TestPredictURL_DerivesServiceWithoutEnvRegistration(t *testing.T) {
 }
 
 func TestPredictURL_UsesPolicyOverrides(t *testing.T) {
-	url, err := PredictURL(ModelSpec{
+	url, err := PredictURL(&ModelSpec{
 		Name:      "checkout-detector",
 		Namespace: "checkout-ml",
 		Service:   "checkout-detector-predictor",

@@ -40,9 +40,11 @@ func sanitizeScope(namespace, pod, deployment string) (FeatureScope, error) {
 
 // resolveFeatureQuery returns PromQL for one training column.
 // A policy query wins over the built-in catalog. Unknown columns are not guessed.
-func resolveFeatureQuery(model ModelSpec, column string, scope FeatureScope) (string, error) {
-	if query, ok := model.FeatureQueries[column]; ok && strings.TrimSpace(query) != "" {
-		return applyFeatureTemplate(query, scope), nil
+func resolveFeatureQuery(model *ModelSpec, column string, scope FeatureScope) (string, error) {
+	if model != nil {
+		if query, ok := model.FeatureQueries[column]; ok && strings.TrimSpace(query) != "" {
+			return applyFeatureTemplate(query, scope), nil
+		}
 	}
 	query, ok := catalogQuery(column, scope)
 	if !ok {

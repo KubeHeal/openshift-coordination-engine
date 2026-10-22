@@ -143,7 +143,7 @@ func validatePolicy(policy *Policy, allowed map[string]struct{}) error {
 	if err := validateAlerts(policy.Alerts); err != nil {
 		return err
 	}
-	if err := validateModel(policy.Model); err != nil {
+	if err := validateModel(&policy.Model); err != nil {
 		return err
 	}
 	return validateRepairs(policy, allowed)
@@ -176,14 +176,14 @@ func validateAlerts(alerts []string) error {
 	return nil
 }
 
-func validateModel(model ModelSpec) error {
+func validateModel(model *ModelSpec) error {
 	if err := validateModelLocation(model); err != nil {
 		return err
 	}
 	return validateFeatureColumns(model)
 }
 
-func validateModelLocation(model ModelSpec) error {
+func validateModelLocation(model *ModelSpec) error {
 	if errs := validation.IsDNS1123Subdomain(model.Name); len(errs) > 0 {
 		return fmt.Errorf("model.name is invalid: %s", strings.Join(errs, ", "))
 	}
@@ -198,7 +198,7 @@ func validateModelLocation(model ModelSpec) error {
 	return nil
 }
 
-func validateFeatureColumns(model ModelSpec) error {
+func validateFeatureColumns(model *ModelSpec) error {
 	if len(model.FeatureColumns) == 0 {
 		return errors.New("model.featureColumns must contain at least one column")
 	}
