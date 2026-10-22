@@ -32,7 +32,7 @@ COVERAGE_HTML=$(COVERAGE_DIR)/coverage.html
 # Linting
 GOLANGCI_LINT_VERSION=v1.55.2
 
-.PHONY: all build test clean docker-build docker-push lint coverage help show-version
+.PHONY: all build test clean docker-build docker-push lint coverage help show-version generate-docs
 
 ## help: Display this help message
 help:
@@ -164,6 +164,15 @@ clean:
 	@rm -rf $(BUILD_DIR) $(COVERAGE_DIR)
 	@go clean -cache -testcache
 	@echo "Clean complete"
+
+## generate-docs: Generate the OpenAPI spec into docs/
+# swag resolves -g relative to the first directory in -d.
+generate-docs:
+	go run github.com/swaggo/swag/cmd/swag@v1.16.4 init \
+		-g main.go \
+		-d cmd/coordination-engine,pkg/api/v1,internal/policy,pkg/models \
+		--parseInternal --parseDependency \
+		-o docs --outputTypes go,json,yaml
 
 ## install-tools: Install development tools
 install-tools:
