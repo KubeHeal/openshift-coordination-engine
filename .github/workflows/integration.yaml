@@ -44,7 +44,10 @@ jobs:
             --namespace argocd \
             --version 7.7.11 \
             --set configs.params."server\.insecure"=true \
-            --wait --timeout=5m
+            --set dex.enabled=false \
+            --set notifications.enabled=false \
+            --set applicationSet.enabled=false \
+            --wait --timeout=15m
 
       - name: Run integration tests
         run: |
@@ -89,7 +92,10 @@ jobs:
             --namespace argocd \
             --version 7.7.11 \
             --set configs.params."server\.insecure"=true \
-            --wait --timeout=5m
+            --set dex.enabled=false \
+            --set notifications.enabled=false \
+            --set applicationSet.enabled=false \
+            --wait --timeout=15m
 
       - name: Test ArgoCD integration
         run: |
