@@ -47,6 +47,10 @@ type KubernetesClients struct {
 	Config        *rest.Config
 }
 
+// @title OpenShift Coordination Engine API
+// @version 1.2.0
+// @description Kubernetes-native orchestration for multi-layer coordination in OpenShift clusters.
+// @BasePath /
 func main() {
 	// Record start time for uptime tracking
 	startTime = time.Now()
@@ -269,20 +273,13 @@ func main() {
 		log.Info("✅ KServe proxy endpoints registered: /api/v1/detect, /api/v1/models")
 	}
 
-	// Add simple /health endpoint for backward compatibility with deployments
-	// This provides a lightweight health check for liveness/readiness probes
-	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		response := map[string]string{
-			"status":  "ok",
-			"version": Version,
-		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.WithError(err).Error("Failed to encode simple health response")
-		}
-	}).Methods("GET")
+	router.HandleFunc("/health", simpleHealth(log, Version)).Methods("GET")
 	log.Info("Simple /health endpoint registered for backward compatibility")
+
+	if cfg.EnableSwaggerUI {
+		v1.RegisterSwaggerUI(router)
+		log.Info("Swagger UI enabled at /api/docs/")
+	}
 
 	// Metrics server (separate port)
 	metricsRouter := mux.NewRouter()
@@ -705,4 +702,28 @@ func initIncidentStore(cfg *config.Config, log *logrus.Logger) *storage.Incident
 	}
 
 	return incidentStore
+}
+
+// SimpleHealthResponse is the lightweight liveness response.
+type SimpleHealthResponse struct {
+	Status  string `json:"status" example:"ok"`
+	Version string `json:"version" example:"1.2.0"`
+}
+
+// simpleHealth handles GET /health.
+// @Summary Lightweight health check
+// @Description Liveness and readiness probe that does not check cluster dependencies
+// @Tags health
+// @Produce json
+// @Success 200 {object} SimpleHealthResponse
+// @Router /health [get]
+func simpleHealth(log *logrus.Logger, version string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		response := SimpleHealthResponse{Status: "ok", Version: version}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			log.WithError(err).Error("Failed to encode simple health response")
+		}
+	}
 }

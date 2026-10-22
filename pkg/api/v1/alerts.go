@@ -34,6 +34,15 @@ func (h *AlertsHandler) RegisterRoutes(router *mux.Router) {
 }
 
 // PostAlerts handles an Alertmanager v4 webhook.
+// @Summary Accept an Alertmanager webhook
+// @Description Matches firing alerts to SelfHealingPolicy entries and runs the model-gated repair for each match. Unmatched alerts return 200 with matched_policies 0.
+// @Tags policy
+// @Accept json
+// @Produce json
+// @Param request body AlertmanagerWebhook true "Alertmanager v4 webhook"
+// @Success 200 {object} policy.AlertsResponse
+// @Failure 400 {object} AlertsErrorResponse
+// @Router /api/v1/alerts [post]
 func (h *AlertsHandler) PostAlerts(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "" && !strings.HasPrefix(contentType, "application/json") {
@@ -41,7 +50,7 @@ func (h *AlertsHandler) PostAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxAlertWebhookBytes)
-	var payload alertmanagerWebhook
+	var payload AlertmanagerWebhook
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		h.log.WithError(err).Debug("invalid alertmanager webhook")
 		h.writeError(w, http.StatusBadRequest, "Invalid Alertmanager webhook format")
@@ -66,19 +75,27 @@ func (h *AlertsHandler) writeJSON(w http.ResponseWriter, status int, body any) {
 	}
 }
 
-type alertmanagerWebhook struct {
+// AlertmanagerWebhook is an Alertmanager v4 notification payload.
+type AlertmanagerWebhook struct {
 	Status string              `json:"status"`
-	Alerts []alertmanagerAlert `json:"alerts"`
+	Alerts []AlertmanagerAlert `json:"alerts"`
 }
 
-type alertmanagerAlert struct {
+// AlertmanagerAlert is one alert inside an Alertmanager webhook.
+type AlertmanagerAlert struct {
 	Status      string            `json:"status"`
 	Labels      map[string]string `json:"labels"`
 	StartsAt    time.Time         `json:"startsAt"`
 	Fingerprint string            `json:"fingerprint"`
 }
 
-func (w alertmanagerWebhook) toPolicyWebhook() policy.Webhook {
+// AlertsErrorResponse is returned when the webhook body cannot be parsed.
+type AlertsErrorResponse struct {
+	Status string `json:"status" example:"error"`
+	Error  string `json:"error" example:"Invalid Alertmanager webhook format"`
+}
+
+func (w AlertmanagerWebhook) toPolicyWebhook() policy.Webhook {
 	alerts := make([]policy.IncomingAlert, 0, len(w.Alerts))
 	for _, alert := range w.Alerts {
 		alerts = append(alerts, policy.IncomingAlert{
