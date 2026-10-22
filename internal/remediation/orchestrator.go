@@ -2,7 +2,9 @@ package remediation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/KubeHeal/openshift-coordination-engine/internal/detector"
+	"github.com/KubeHeal/openshift-coordination-engine/internal/storage"
 	"github.com/KubeHeal/openshift-coordination-engine/pkg/models"
 )
 
@@ -18,22 +21,52 @@ type Orchestrator struct {
 	detector   *detector.Detector
 	remediator Remediator
 	workflows  map[string]*models.Workflow
+	store      *storage.WorkflowStore
 	mu         sync.RWMutex
 	log        *logrus.Logger
 }
 
-// NewOrchestrator creates a new remediation orchestrator
+const defaultCheckpointTimeout = time.Minute
+
+// NewOrchestrator creates a new remediation orchestrator.
+// When dataDir is set, workflows are loaded from and written to {dataDir}/workflows.
 func NewOrchestrator(
 	det *detector.Detector,
 	remediator Remediator,
 	log *logrus.Logger,
+	dataDir string,
 ) *Orchestrator {
-	return &Orchestrator{
+	if log == nil {
+		log = logrus.New()
+	}
+	orchestrator := &Orchestrator{
 		detector:   det,
 		remediator: remediator,
 		workflows:  make(map[string]*models.Workflow),
 		log:        log,
 	}
+	if strings.TrimSpace(dataDir) == "" {
+		return orchestrator
+	}
+	store, err := storage.NewWorkflowStore(dataDir, log)
+	if err != nil {
+		log.WithError(err).Error("workflow persistence unavailable; workflows will be in-memory")
+		return orchestrator
+	}
+	orchestrator.store = store
+	loaded, err := store.Load()
+	if err != nil {
+		log.WithError(err).Error("failed to load workflows")
+		return orchestrator
+	}
+	for _, workflow := range loaded {
+		orchestrator.workflows[workflow.ID] = workflow
+	}
+	log.WithFields(logrus.Fields{
+		"dir":   dataDir,
+		"count": len(loaded),
+	}).Info("loaded remediation workflows")
+	return orchestrator
 }
 
 // TriggerRemediation initiates a remediation workflow
@@ -64,13 +97,9 @@ func (o *Orchestrator) TriggerRemediation(ctx context.Context, incidentID string
 		)
 	}
 
-	// Create workflow
+	// Create workflow and persist it before the request returns.
 	workflow := o.createWorkflow(incidentID, issue, deploymentInfo)
-
-	// Store workflow
-	o.mu.Lock()
-	o.workflows[workflow.ID] = workflow
-	o.mu.Unlock()
+	o.saveWorkflow(workflow)
 
 	// Execute remediation in background — context.Background is intentional: the
 	// workflow outlives the HTTP request that triggered it.
@@ -107,20 +136,30 @@ func (o *Orchestrator) ListWorkflows() []*models.Workflow {
 
 // createWorkflow creates a new workflow instance
 func (o *Orchestrator) createWorkflow(incidentID string, issue *models.Issue, deploymentInfo *models.DeploymentInfo) *models.Workflow {
+	layer := layerForResource(issue.ResourceType)
 	workflow := &models.Workflow{
-		ID:               generateWorkflowID(),
-		IncidentID:       incidentID,
-		Status:           models.WorkflowStatusPending,
-		DeploymentMethod: string(deploymentInfo.Method),
-		Namespace:        issue.Namespace,
-		ResourceName:     issue.ResourceName,
-		ResourceKind:     issue.ResourceType,
-		IssueType:        issue.Type,
-		CreatedAt:        time.Now(),
+		ID:                generateWorkflowID(),
+		IncidentID:        incidentID,
+		Status:            models.WorkflowStatusPending,
+		DeploymentMethod:  string(deploymentInfo.Method),
+		Namespace:         issue.Namespace,
+		ResourceName:      issue.ResourceName,
+		ResourceKind:      issue.ResourceType,
+		IssueType:         issue.Type,
+		Severity:          issue.Severity,
+		EstimatedDuration: formatMinutes(defaultCheckpointTimeout),
+		Layers:            []string{layer},
+		Checkpoints: []models.WorkflowCheckpoint{{
+			Layer:     layer,
+			AfterStep: 1,
+			Status:    models.CheckpointPending,
+			Checks:    []string{"pods_running", "endpoints_healthy"},
+		}},
+		CreatedAt: time.Now(),
 	}
 
-	// Add initial step
-	workflow.AddStep(fmt.Sprintf("Detect deployment method for %s/%s", issue.Namespace, issue.ResourceName))
+	step := workflow.AddStep(fmt.Sprintf("Detect deployment method for %s/%s", issue.Namespace, issue.ResourceName))
+	step.Layer = layer
 
 	return workflow
 }
@@ -139,6 +178,9 @@ func (o *Orchestrator) executeWorkflow(ctx context.Context, workflow *models.Wor
 
 	// Add remediation step
 	step := workflow.AddStep(fmt.Sprintf("Execute %s remediation for %s", o.remediator.Name(), issue.Type))
+	if len(workflow.Layers) > 0 {
+		step.Layer = workflow.Layers[0]
+	}
 	workflow.Remediator = o.remediator.Name()
 
 	// Save workflow state
@@ -157,6 +199,7 @@ func (o *Orchestrator) executeWorkflow(ctx context.Context, workflow *models.Wor
 		workflow.ErrorMessage = err.Error()
 		step.Status = "failed"
 		step.ErrorMessage = err.Error()
+		markCheckpoints(workflow, models.CheckpointFailed)
 
 		// Record remediation failure metrics
 		RecordRemediation(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, duration, false)
@@ -167,6 +210,7 @@ func (o *Orchestrator) executeWorkflow(ctx context.Context, workflow *models.Wor
 		workflow.Status = models.WorkflowStatusCompleted
 		step.Status = "completed"
 		step.CompletedAt = &completedTime
+		markCheckpoints(workflow, models.CheckpointPassed)
 
 		// Record remediation success metrics
 		RecordRemediation(o.remediator.Name(), string(deploymentInfo.Method), issue.Type, duration, true)
@@ -215,11 +259,50 @@ func (o *Orchestrator) updateWorkflowStatus(workflow *models.Workflow, status mo
 	workflow.Status = status
 }
 
-// saveWorkflow persists workflow state
+// saveWorkflow persists workflow state in memory and, when configured, on disk.
 func (o *Orchestrator) saveWorkflow(workflow *models.Workflow) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	o.workflows[workflow.ID] = workflow
+	var encoded []byte
+	var marshalErr error
+	if o.store != nil {
+		encoded, marshalErr = json.MarshalIndent(workflow, "", "  ")
+	}
+	store := o.store
+	o.mu.Unlock()
+	if store == nil {
+		return
+	}
+	if marshalErr != nil {
+		o.log.WithError(marshalErr).WithField("workflow_id", workflow.ID).Error("failed to encode workflow")
+		return
+	}
+	if err := store.SaveBytes(workflow.ID, encoded); err != nil {
+		o.log.WithError(err).WithField("workflow_id", workflow.ID).Error("failed to persist workflow")
+	}
+}
+
+func layerForResource(kind string) string {
+	switch strings.ToLower(kind) {
+	case "deployment", "statefulset", "daemonset", "pod":
+		return "application"
+	default:
+		return "platform"
+	}
+}
+
+func formatMinutes(duration time.Duration) string {
+	minutes := int(duration.Round(time.Minute) / time.Minute)
+	if minutes < 1 {
+		minutes = 1
+	}
+	return fmt.Sprintf("%dm", minutes)
+}
+
+func markCheckpoints(workflow *models.Workflow, status string) {
+	for i := range workflow.Checkpoints {
+		workflow.Checkpoints[i].Status = status
+	}
 }
 
 // generateWorkflowID generates a unique workflow ID

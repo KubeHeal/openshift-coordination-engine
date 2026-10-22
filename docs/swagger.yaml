@@ -583,6 +583,19 @@ definitions:
       namespace:
         type: string
     type: object
+  models.WorkflowCheckpoint:
+    properties:
+      after_step:
+        type: integer
+      checks:
+        items:
+          type: string
+        type: array
+      layer:
+        type: string
+      status:
+        type: string
+    type: object
   models.WorkflowStep:
     properties:
       completed_at:
@@ -1149,6 +1162,10 @@ definitions:
     type: object
   v1.IncidentListItem:
     properties:
+      affected_resources:
+        items:
+          type: string
+        type: array
       created_at:
         type: string
       description:
@@ -1157,6 +1174,10 @@ definitions:
         type: string
       issue_type:
         type: string
+      labels:
+        additionalProperties:
+          type: string
+        type: object
       namespace:
         type: string
       resource:
@@ -1478,6 +1499,10 @@ definitions:
     type: object
   v1.WorkflowResponse:
     properties:
+      checkpoints:
+        items:
+          $ref: '#/definitions/models.WorkflowCheckpoint'
+        type: array
       completed_at:
         type: string
       created_at:
@@ -1494,6 +1519,10 @@ definitions:
         type: string
       issue_type:
         type: string
+      layers:
+        items:
+          type: string
+        type: array
       namespace:
         type: string
       remediator:
@@ -1905,10 +1934,18 @@ paths:
         in: query
         name: namespace
         type: string
-      - description: Filter by severity
+      - description: Filter by severity. all matches every severity
         in: query
         name: severity
         type: string
+      - description: Filter by status. all matches every status
+        in: query
+        name: status
+        type: string
+      - description: Maximum rows to return. Defaults to 50
+        in: query
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:

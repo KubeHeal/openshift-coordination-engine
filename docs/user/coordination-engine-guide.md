@@ -204,10 +204,12 @@ Returns a list of incidents with their remediation status.
 
 | Parameter | Effect |
 |---|---|
-| `namespace` | Stored incidents whose `target` equals this value, and workflow rows in that namespace. |
-| `severity` | Stored incidents only: `low`, `medium`, `high`, or `critical`. Workflow rows stay in the list with severity `high`. `severity=all` matches no stored incident. |
+| `namespace` | Rows whose `namespace` or `target` equals this value. |
+| `severity` | Exact match. Empty or `all` matches every severity. |
+| `status` | Exact match on the row status. Empty or `all` matches every status. |
+| `limit` | Maximum rows returned. Defaults to 50. |
 
-`status`, `limit`, and `offset` are ignored. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. Stored rows are capped at 50, then workflow rows are appended. The list mixes `source` `manual` and `source` `workflow`. The body field is `total`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent. Workflow rows use status `remediated`, `failed`, or `in_progress`. Stored rows use `active`, `resolved`, or `cancelled`.
+`offset` is ignored. Filters apply to the combined list. `total` is the match count before `limit`. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. `severity=all` returns every severity. `status=completed` does not match workflow rows. The list mixes `source` `manual` and `source` `workflow`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent. Workflow rows use status `remediated`, `failed`, or `in_progress`, and the workflow severity. Stored rows use `active`, `resolved`, or `cancelled`.
 
 ### Create an incident
 
@@ -250,11 +252,11 @@ Triggers a remediation workflow for a specific incident.
   "workflow_id": "wf-67890abc",
   "status": "pending",
   "deployment_method": "argocd",
-  "estimated_duration": "5m"
+  "estimated_duration": "1m"
 }
 ```
 
-`status` on this response is `pending`. `estimated_duration` is always `"5m"`. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. The workflow is kept in memory. Triggering remediation does not write `workflow_id` onto a stored incident.
+`status` on this response is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes, `"1m"` by default. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. When `DATA_DIR` is set, the workflow is written to `{DATA_DIR}/workflows/<id>.json`. An empty `DATA_DIR` keeps it in memory. If the incident already exists, this call writes `workflow_id` onto that stored incident.
 
 The engine detects the deployment method (ArgoCD, Helm, Operator, or Manual) and routes remediation accordingly:
 
@@ -267,7 +269,7 @@ The engine detects the deployment method (ArgoCD, Helm, Operator, or Manual) and
 
 **Endpoint:** `GET /workflows/{id}`
 
-Returns one in-memory remediation workflow: `id`, `incident_id`, `status`, `deployment_method`, `namespace`, `resource_name`, `resource_kind`, `issue_type`, steps, and timestamps. A missing id is `404`. The body does not include `layers` or `checkpoints`. MCP does not call this route. `layers` and `checkpoints` are on `remediation_plan` from `GET /api/v1/coordination/workflows/{id}`, which MCP does not call.
+Returns one remediation workflow: `id`, `incident_id`, `status`, `deployment_method`, `namespace`, `resource_name`, `resource_kind`, `issue_type`, steps, timestamps, `layers`, and `checkpoints`. `layers` has one entry from the resource kind. `checkpoints` has one entry after the remediation step, with `status` `pending`, then `passed` or `failed`. A missing id is `404`. When `DATA_DIR` is set, the workflow is loaded from `{DATA_DIR}/workflows`. MCP does not call this route. `GET /api/v1/coordination/workflows/{id}` is a different object and also returns `layers` and `checkpoints` on `remediation_plan`. MCP does not call that route either.
 
 `POST /api/v1/anomaly/detect` and `POST /api/v1/pattern/analyze` are not MCP calls and are not routes on this server. The legacy ML client calls those paths on `ML_SERVICE_URL`. On this engine, anomaly analysis is `POST /api/v1/anomalies/analyze`.
 
@@ -331,7 +333,7 @@ When anomaly analysis detects issues at or above the configured severity thresho
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATA_DIR` | (empty) | Directory for persistent incident storage. Empty uses in-memory only. |
+| `DATA_DIR` | (empty) | Directory for persistent incident and workflow storage. Empty uses in-memory only. Workflows are written under `{DATA_DIR}/workflows`. |
 | `INCIDENT_RETENTION_DAYS` | `90` | Days to retain resolved incidents. |
 | `KUBEHEAL_MAX_STORED_INCIDENTS` | `10000` | Maximum incidents stored on disk. |
 
@@ -425,11 +427,11 @@ When anomaly analysis detects issues at or above the configured severity thresho
 
 ### Remediation Workflow Stuck
 
-**Symptom:** `GET /api/v1/workflows/{id}` stays `"status": "in_progress"`. `estimated_duration` in the trigger response is always `"5m"` and is not a measured ETA. The workflow exists only in memory.
+**Symptom:** `GET /api/v1/workflows/{id}` stays `"status": "in_progress"`. `estimated_duration` in the trigger response is the checkpoint timeout (`"1m"` by default), not a measured ETA. With an empty `DATA_DIR`, the workflow exists only in memory.
 
 **Steps to resolve:**
 
-1. Read `steps` and `error_message` on the workflow. `layers` and `checkpoints` are not on this response.
+1. Read `steps`, `error_message`, `layers`, and `checkpoints` on the workflow. A failed run marks the checkpoint `failed`.
 2. For ArgoCD-managed workloads, verify the ArgoCD Application sync status:
    ```bash
    kubectl get applications -n argocd
@@ -452,4 +454,4 @@ When anomaly analysis detects issues at or above the configured severity thresho
 | **Remediation** | An automated corrective action (for example, ArgoCD sync, memory limit increase, pod restart). |
 | **RCA** | Root Cause Analysis. The process of correlating signals to identify the underlying cause of an issue. |
 | **Sink** | An external alert destination (Slack, PagerDuty, Alertmanager). |
-| **Workflow** | A remediation workflow from `POST /api/v1/remediation/trigger` is an in-memory step list. `GET /api/v1/workflows/{id}` does not include `layers` or `checkpoints`. |
+| **Workflow** | A remediation workflow from `POST /api/v1/remediation/trigger`. `GET /api/v1/workflows/{id}` returns its steps, `layers`, and `checkpoints`. With `DATA_DIR` set, it is stored under `{DATA_DIR}/workflows`. |

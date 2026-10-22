@@ -6,7 +6,7 @@ This document defines the **two critical integration boundaries** for the Go Coo
 
 The sections below describe what this server returns today. `docs/API.md` lists every registered route. Fields that are not returned yet are marked with an issue link.
 
-Against KubeHeal/openshift-cluster-health-mcp commit `90564fa` (`pkg/clients/coordination_engine.go`), disk exhaustion, right-sizing, and RCA match the client. Incident list filters, anomaly JSON names, the create-incident response shape, predict `trend`, and `GET /api/v1/capacity/trends` do not.
+Against KubeHeal/openshift-cluster-health-mcp commit `90564fa` (`pkg/clients/coordination_engine.go`), disk exhaustion, right-sizing, and RCA match the client. Anomaly JSON names, the create-incident response shape, predict `trend`, and `GET /api/v1/capacity/trends` do not. Incident list `severity=all`, `status`, and `limit` match. `offset` is still ignored, and `status=completed` does not match workflow rows whose status is `remediated`.
 
 ### Base URL
 - `http://coordination-engine:8080/api/v1`
@@ -95,22 +95,24 @@ Trigger a remediation workflow.
   "workflow_id": "wf-67890abc",
   "status": "pending",
   "deployment_method": "argocd",
-  "estimated_duration": "5m"
+  "estimated_duration": "1m"
 }
 ```
 
-`status` at accept time is `pending`. `estimated_duration` is always `"5m"`. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. The workflow is in-memory and is not written back onto the stored incident. Those gaps are [#124](https://github.com/KubeHeal/openshift-coordination-engine/issues/124). Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
+`status` at accept time is `pending`. `estimated_duration` is the checkpoint timeout in whole minutes. The default is `"1m"`. `dry_run` is not a handler field. If the MCP tool sets it, the workflow still starts. When `DATA_DIR` is set, the workflow is written to `{DATA_DIR}/workflows/<id>.json` before this response returns. An empty `DATA_DIR` keeps it in memory. If `incident_id` exists in the incident store, this call sets `workflow_id` on that incident. An unknown id still returns `202`. Validation errors are plain text, not JSON. MCP does not call `GET /api/v1/workflows/{id}`.
 
 #### `GET /incidents`
 Lists stored incidents and workflow-derived rows.
 
-**Query parameters that work**:
-- `namespace` (optional): stored incidents whose `target` equals this value, and workflow rows in that namespace
-- `severity` (optional): stored incidents only (`low`, `medium`, `high`, `critical`)
+**Query parameters**:
+- `namespace` (optional): rows whose `namespace` or `target` equals this value
+- `severity` (optional): exact match. Empty or `all` matches every severity
+- `status` (optional): exact match on the row status. Empty or `all` matches every status
+- `limit` (optional): maximum rows returned. Defaults to 50
 
-`status`, `limit`, and `offset` are ignored. Stored rows are capped at 50 and workflow rows are then appended. See [#125](https://github.com/KubeHeal/openshift-coordination-engine/issues/125). `severity=all` matches no stored incident: the filter is an exact match on `low`, `medium`, `high`, or `critical`. Workflow rows stay in the list. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. The body field is `total`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent.
+`offset` is ignored. Filters apply to the combined list. `total` is the match count before `limit`. The MCP incident list, `cluster://incidents`, and remediation-history all send `severity=all`, `status`, `limit`, and `offset`. `severity=all` returns every severity. `status=completed` does not match workflow rows, whose status is `remediated`. MCP reads `summary.*`, `priority`, `action_type`, `confidence`, `parameters`, `started_at`, `completed_at`, `duration_seconds`, and `tags`, which are absent.
 
-**Response** (200 OK). A workflow-derived row looks like this (`severity` is always `"high"`, `source` is `"workflow"`):
+**Response** (200 OK). A workflow-derived row looks like this (`source` is `"workflow"`, and `severity` is the workflow severity):
 ```json
 {
   "incidents": [
@@ -131,7 +133,7 @@ Lists stored incidents and workflow-derived rows.
 }
 ```
 
-Stored rows use `source` `"manual"` and include `title`, `description`, `target`, `severity`, `status` (`active`, `resolved`, or `cancelled`), `affected_resources`, and `labels`. They do not include `namespace`. Workflow rows always use severity `high` and status `remediated`, `failed`, or `in_progress`.
+Stored rows use `source` `"manual"` and include `title`, `description`, `target`, `severity`, `status` (`active`, `resolved`, or `cancelled`), `affected_resources`, and `labels`. They do not include `namespace`. Workflow rows use the workflow severity, falling back to the stored incident severity, and status `remediated`, `failed`, or `in_progress`. When `DATA_DIR` is set, workflow rows are loaded from `{DATA_DIR}/workflows`.
 
 `POST /api/v1/incidents` creates stored rows (`201`). The handler reads `affected_resources` (snake_case) and requires `target`. MCP sends `affectedResources`, `source`, `createdBy`, `correlationId`, `externalId`, `confidence`, and `parameters`, which are ignored. MCP does not require `target`, so a create without `target` is `400`. The body is `status`, `incident_id`, `created_at`, `incident`, and `message`. Top-level `status` is `"success"`. `title`, `description`, `severity`, and status `active` are inside `incident`. There is no `priority`. MCP reads those fields at the top level. Create errors are `{"status":"error","error":"..."}`.
 
@@ -160,11 +162,20 @@ Get workflow execution details.
       "description": "Detect deployment method for production/payment-service",
       "status": "pending"
     }
+  ],
+  "layers": ["application"],
+  "checkpoints": [
+    {
+      "layer": "application",
+      "after_step": 1,
+      "status": "passed",
+      "checks": ["pods_running", "endpoints_healthy"]
+    }
   ]
 }
 ```
 
-`layers` and `checkpoints` are not returned ([#126](https://github.com/KubeHeal/openshift-coordination-engine/issues/126)). `404` is plain text `Workflow not found`. Workflows are in-memory. MCP does not call this route. `layers` and `checkpoints` are on `remediation_plan` from `GET /api/v1/coordination/workflows/{id}`, which MCP does not call.
+`layers` has one entry from the resource kind (`application` for `Deployment`, `StatefulSet`, `DaemonSet`, and `Pod`; `platform` otherwise). `checkpoints` has one entry after the remediation step. Its `status` is `pending` until execution finishes, then `passed` or `failed`. `404` is plain text `Workflow not found`. When `DATA_DIR` is set, the workflow is read from `{DATA_DIR}/workflows/<id>.json`. MCP does not call this route. `GET /api/v1/coordination/workflows/{id}` is a different object whose `remediation_plan` also has `layers` and `checkpoints`. MCP does not call that route either.
 
 #### `POST /recommendations`
 Get ML-powered remediation recommendations with predictive analytics. The MCP tool `get-remediation-recommendations` does not call this route. It calls `POST /api/v1/anomalies/analyze`.
