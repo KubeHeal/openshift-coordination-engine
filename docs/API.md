@@ -197,7 +197,7 @@ Starts a remediation workflow.
 }
 ```
 
-`status` at accept time is `pending`. The workflow then runs in the background and can move to `in_progress`, `completed`, or `failed`. `deployment_method` is the detected method (`argocd`, `helm`, `operator`, `manual`) or `unknown` when detection fails. `estimated_duration` is the checkpoint timeout formatted in whole minutes. The default timeout is one minute, so the value is `"1m"`. `dry_run: true` returns this same shape with an empty `workflow_id` after detection. It does not store a workflow, write `workflow_id` on the incident, or start remediation.
+`status` at accept time is `pending`. The workflow then runs in the background and can move to `in_progress`, `completed`, or `failed`. `deployment_method` is the detected method (`argocd`, `helm`, `operator`, `manual`) or `unknown` when detection fails. `estimated_duration` is the checkpoint timeout formatted in whole minutes. The default timeout is one minute, so the value is `"1m"`. `dry_run: true` returns `202` with an empty `workflow_id`, the detected `deployment_method`, `estimated_duration` of `"1m"`, and `planned_actions` describing the steps a real trigger would take. It does not store a workflow, write `workflow_id` on the incident, or start remediation.
 
 When `DATA_DIR` is set, the workflow is written to `{DATA_DIR}/workflows/<id>.json` before the response returns and is reloaded on startup. An empty `DATA_DIR` keeps the workflow in memory. If `incident_id` already exists in the incident store, the handler sets `workflow_id` on that incident. An unknown `incident_id` still returns `202`.
 

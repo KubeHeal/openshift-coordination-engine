@@ -81,6 +81,23 @@ func (ss *StrategySelector) SelectRemediator(deploymentInfo *models.DeploymentIn
 	return nil
 }
 
+// Plan describes the selected remediator's actions without executing them.
+func (ss *StrategySelector) Plan(ctx context.Context, deploymentInfo *models.DeploymentInfo, issue *models.Issue) ([]string, error) {
+	selected := ss.SelectRemediator(deploymentInfo)
+	if selected == nil {
+		return nil, fmt.Errorf("no remediator available for deployment method: %s", deploymentInfo.Method)
+	}
+	planner, ok := selected.(ActionPlanner)
+	if !ok {
+		return []string{fmt.Sprintf("Run %s remediation for %s/%s", selected.Name(), issue.Namespace, issue.ResourceName)}, nil
+	}
+	actions, err := planner.Plan(ctx, deploymentInfo, issue)
+	if err != nil {
+		return nil, fmt.Errorf("plan remediation: %w", err)
+	}
+	return actions, nil
+}
+
 // Remediate executes remediation using the selected strategy
 func (ss *StrategySelector) Remediate(ctx context.Context, deploymentInfo *models.DeploymentInfo, issue *models.Issue) error {
 	remediator := ss.SelectRemediator(deploymentInfo)

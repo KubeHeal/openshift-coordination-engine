@@ -3267,6 +3267,12 @@ const docTemplate = `{
                 "estimated_duration": {
                     "type": "string"
                 },
+                "planned_actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "status": {
                     "type": "string"
                 },

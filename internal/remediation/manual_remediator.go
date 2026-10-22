@@ -69,6 +69,29 @@ func (mr *ManualRemediator) Remediate(ctx context.Context, deploymentInfo *model
 	}
 }
 
+// Plan describes the manual action without calling the Kubernetes API.
+func (mr *ManualRemediator) Plan(_ context.Context, _ *models.DeploymentInfo, issue *models.Issue) ([]string, error) {
+	target := issue.Namespace + "/" + issue.ResourceName
+	switch issue.Type {
+	case "CrashLoopBackOff", "crashloopbackoff", "pod_crash_loop":
+		if isDeploymentKind(issue.ResourceType) {
+			return []string{fmt.Sprintf("Roll back Deployment %s to the previous revision, or restart it when no previous revision exists", target)}, nil
+		}
+		return []string{fmt.Sprintf("Delete Pod %s so its owner recreates it", target)}, nil
+	case "oom_kill", "OOMKilled", "oomkilled":
+		return []string{fmt.Sprintf("Raise the memory limit on the Deployment that owns %s. Delete the Pod only when that Deployment or its memory limit cannot be resolved", target)}, nil
+	default:
+		if isDeploymentKind(issue.ResourceType) {
+			return []string{fmt.Sprintf("Restart Deployment %s", target)}, nil
+		}
+		return []string{fmt.Sprintf("Delete Pod %s", target)}, nil
+	}
+}
+
+func isDeploymentKind(kind string) bool {
+	return kind == "deployment" || kind == "Deployment"
+}
+
 // CanRemediate returns true for manual deployments or unknown methods
 func (mr *ManualRemediator) CanRemediate(deploymentInfo *models.DeploymentInfo) bool {
 	return deploymentInfo.Method == models.DeploymentMethodManual ||

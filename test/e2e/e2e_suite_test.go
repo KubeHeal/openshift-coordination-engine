@@ -98,7 +98,7 @@ func getE2EImage() string {
 // helmInstall runs helm upgrade --install with the given parameters.
 // Using upgrade --install avoids "release: already exists" errors from
 // prior runs that didn't fully clean up.
-func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues map[string]string) error {
+func (s *E2ETestSuite) helmInstall(chart, release, namespace string, setValues map[string]string) error { //nolint:unparam // params kept for reuse across test files
 	args := make([]string, 0, 10+2*len(setValues))
 	args = append(args,
 		"upgrade", "--install", release, chart,
@@ -137,7 +137,7 @@ func (s *E2ETestSuite) helmUninstall(release, namespace string) error { //nolint
 }
 
 // waitForDeployment polls until the named Deployment has the desired ready replicas.
-func (s *E2ETestSuite) waitForDeployment(namespace, name string, timeout time.Duration) error {
+func (s *E2ETestSuite) waitForDeployment(namespace, name string, timeout time.Duration) error { //nolint:unparam // namespace kept for reuse across test files
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		dep, err := s.clientset.AppsV1().Deployments(namespace).Get(s.ctx, name, metav1.GetOptions{})
@@ -160,9 +160,35 @@ func deploymentReady(dep *appsv1.Deployment) bool {
 
 // portForwardAndGet starts a kubectl port-forward, makes an HTTP GET, and returns the result.
 func (s *E2ETestSuite) portForwardAndGet(namespace, podName string, containerPort int, path string) (int, []byte, error) {
-	localPort := 18080 + containerPort%1000
+	return s.portForwardAndDo(namespace, podName, containerPort, func(client *http.Client, baseURL string) (*http.Response, error) {
+		return client.Get(baseURL + path)
+	})
+}
 
-	// Start port-forward in background
+func (s *E2ETestSuite) portForwardAndDo(namespace, podName string, containerPort int, do func(*http.Client, string) (*http.Response, error)) (int, []byte, error) {
+	var status int
+	var body []byte
+	err := s.withPortForward(namespace, podName, containerPort, func(client *http.Client, baseURL string) error {
+		var lastErr error
+		for i := 0; i < 10; i++ {
+			resp, reqErr := do(client, baseURL)
+			if reqErr != nil {
+				lastErr = reqErr
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			body, _ = io.ReadAll(resp.Body)
+			resp.Body.Close()
+			status = resp.StatusCode
+			return nil
+		}
+		return fmt.Errorf("request %s failed after retries: %w", baseURL, lastErr)
+	})
+	return status, body, err
+}
+
+func (s *E2ETestSuite) withPortForward(namespace, podName string, containerPort int, fn func(*http.Client, string) error) error {
+	localPort := 18080 + containerPort%1000
 	pfCmd := exec.CommandContext(s.ctx, "kubectl", "port-forward",
 		fmt.Sprintf("pod/%s", podName),
 		fmt.Sprintf("%d:%d", localPort, containerPort),
@@ -172,7 +198,7 @@ func (s *E2ETestSuite) portForwardAndGet(namespace, podName string, containerPor
 	pfCmd.Stdout = io.Discard
 	pfCmd.Stderr = &stderrBuf
 	if err := pfCmd.Start(); err != nil {
-		return 0, nil, fmt.Errorf("failed to start port-forward: %w", err)
+		return fmt.Errorf("failed to start port-forward: %w", err)
 	}
 	defer func() {
 		_ = pfCmd.Process.Kill()
@@ -181,27 +207,12 @@ func (s *E2ETestSuite) portForwardAndGet(namespace, podName string, containerPor
 
 	// Wait for port-forward to be ready — ROSA needs more time than Kind
 	time.Sleep(5 * time.Second)
-
-	url := fmt.Sprintf("http://localhost:%d%s", localPort, path)
 	client := &http.Client{Timeout: 10 * time.Second}
-
-	var lastErr error
-	for i := 0; i < 10; i++ {
-		resp, err := client.Get(url)
-		if err != nil {
-			lastErr = err
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return resp.StatusCode, body, nil
+	err := fn(client, fmt.Sprintf("http://localhost:%d", localPort))
+	if err != nil && stderrBuf.Len() > 0 {
+		s.T().Logf("port-forward stderr: %s", stderrBuf.String())
 	}
-	pfStderr := stderrBuf.String()
-	if pfStderr != "" {
-		s.T().Logf("port-forward stderr: %s", pfStderr)
-	}
-	return 0, nil, fmt.Errorf("GET %s failed after retries: %w", url, lastErr)
+	return err
 }
 
 // getFirstPod returns the first running pod matching the label selector.

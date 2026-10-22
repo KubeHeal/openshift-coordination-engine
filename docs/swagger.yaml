@@ -1519,6 +1519,10 @@ definitions:
         type: string
       estimated_duration:
         type: string
+      planned_actions:
+        items:
+          type: string
+        type: array
       status:
         type: string
       workflow_id:
