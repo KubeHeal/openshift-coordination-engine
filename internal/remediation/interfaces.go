@@ -18,6 +18,11 @@ type Remediator interface {
 	Name() string
 }
 
+// ActionPlanner describes the actions a remediator would take without performing them.
+type ActionPlanner interface {
+	Plan(ctx context.Context, info *models.DeploymentInfo, issue *models.Issue) ([]string, error)
+}
+
 // RemediationResult contains the outcome of remediation
 //
 //nolint:revive // intentional naming for clarity in external package usage

@@ -112,6 +112,19 @@ func (hr *HelmRemediator) Remediate(ctx context.Context, deploymentInfo *models.
 	return nil
 }
 
+// Plan describes the Helm action without running Helm.
+func (hr *HelmRemediator) Plan(_ context.Context, deploymentInfo *models.DeploymentInfo, issue *models.Issue) ([]string, error) {
+	releaseName := deploymentInfo.GetDetail("release_name")
+	if releaseName == "" {
+		releaseName = issue.ResourceName
+	}
+	namespace := deploymentInfo.GetDetail("release_namespace")
+	if namespace == "" {
+		namespace = issue.Namespace
+	}
+	return []string{fmt.Sprintf("Roll back Helm release %s in %s when it is failed, or upgrade it and reuse its values", releaseName, namespace)}, nil
+}
+
 // CanRemediate returns true if deployment is Helm-managed
 func (hr *HelmRemediator) CanRemediate(deploymentInfo *models.DeploymentInfo) bool {
 	return deploymentInfo.Method == models.DeploymentMethodHelm || deploymentInfo.IsHelmManaged()

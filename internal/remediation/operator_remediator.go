@@ -84,6 +84,11 @@ func (or *OperatorRemediator) Remediate(ctx context.Context, deploymentInfo *mod
 	return nil
 }
 
+// Plan describes the operator action without updating the custom resource.
+func (or *OperatorRemediator) Plan(_ context.Context, _ *models.DeploymentInfo, issue *models.Issue) ([]string, error) {
+	return []string{fmt.Sprintf("Ask the managing operator to reconcile %s/%s", issue.Namespace, issue.ResourceName)}, nil
+}
+
 // CanRemediate returns true if deployment is operator-managed
 func (or *OperatorRemediator) CanRemediate(deploymentInfo *models.DeploymentInfo) bool {
 	return deploymentInfo.Method == models.DeploymentMethodOperator || deploymentInfo.IsOperatorManaged()
