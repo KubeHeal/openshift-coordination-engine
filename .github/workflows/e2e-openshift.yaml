@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.26.10"
+  GO_VERSION: "1.27.3"
   TEST_NAMESPACE: "coordination-engine-e2e"
   HELM_RELEASE: "ce-e2e"
 
@@ -102,7 +102,7 @@ jobs:
       && needs.check-cluster.outputs.cluster_available == 'true'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6

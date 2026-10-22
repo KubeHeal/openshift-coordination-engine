@@ -1,11 +1,15 @@
 module github.com/KubeHeal/openshift-coordination-engine
 
-go 1.26.0
+go 1.27.0
 
-toolchain go1.26.10
+toolchain go1.27.3
 
 require (
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/mux v1.8.1
+	github.com/prometheus/client_golang v1.23.2
+	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.4
@@ -70,19 +74,6 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
-)
-
-require (
-	// Utilities
-	github.com/google/uuid v1.6.0
-	// HTTP routing
-	github.com/gorilla/mux v1.8.1
-
-	// Metrics and monitoring
-	github.com/prometheus/client_golang v1.23.2
-
-	// Logging
-	github.com/sirupsen/logrus v1.9.4
 )
 
 // Uncomment to use local development versions

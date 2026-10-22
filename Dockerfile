@@ -1,7 +1,7 @@
 # Dockerfile for OpenShift Coordination Engine (Go)
 
 # Stage 1: Build the Go binary
-FROM golang:1.26.10 AS builder
+FROM golang:1.27.3 AS builder
 
 WORKDIR /workspace
 
@@ -15,6 +15,7 @@ RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY pkg/ pkg/
+COPY docs/ docs/
 
 # Build the binary with version info
 ARG VERSION=dev

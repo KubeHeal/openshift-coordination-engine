@@ -7,7 +7,7 @@ on:
     branches: [ main, develop, 'release-4.20', 'release-4.21', 'release-4.22' ]
 
 env:
-  GO_VERSION: '1.26.10'
+  GO_VERSION: '1.27.3'
 
 jobs:
   lint:
@@ -15,17 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.10'
+          go-version: '1.27.3'
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.13.2
+          version: v2.15.0
           args: --timeout=5m
 
   generate-docs:
@@ -33,12 +33,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.10'
+          go-version: '1.27.3'
 
       - name: Regenerate the OpenAPI spec
         run: make generate-docs
@@ -51,12 +51,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.10'
+          go-version: '1.27.3'
 
       - name: Download dependencies
         run: go mod download
@@ -80,12 +80,12 @@ jobs:
     needs: [lint, test]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.10'
+          go-version: '1.27.3'
 
       - name: Build binary
         run: make build
@@ -114,12 +114,12 @@ jobs:
       security-events: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26.10'
+          go-version: '1.27.3'
 
       - name: Run govulncheck
         run: |
