@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func TestEngine_SecondApplicationIsConfiguredNotCompiled(t *testing.T) {
@@ -203,6 +204,41 @@ func TestEngine_DedupeBlocksRetryUntilTTL(t *testing.T) {
 	third := engine.HandleWebhook(context.Background(), Webhook{Status: "firing", Alerts: []IncomingAlert{alert}})
 	require.Equal(t, resultSuccess, third.ActionsTaken[0].Result)
 	require.Len(t, scorer.calls, 2)
+}
+
+func TestEngine_AbortsWhenDeploymentChangesAfterPlan(t *testing.T) {
+	client := k8sfake.NewSimpleClientset(deployment("checkout", "checkout-api", "1", "checkout:v1"))
+	scorer := &recordingScorer{verdictFor: func(string) int { return -1 }}
+	engine := testEngine(t, twoApplicationPolicyJSON, client, &scriptQuerier{}, scorer, discardLogger())
+	gets := 0
+	client.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets == 2 {
+			bumpRevision(t, client.Tracker(), deploymentGVR, "checkout", "checkout-api")
+		}
+		return false, nil, nil
+	})
+	alert := IncomingAlert{
+		Status:      "firing",
+		Labels:      map[string]string{"alertname": "CheckoutQueueLag", "namespace": "checkout", "pod": "checkout-api-0"},
+		StartsAt:    time.Date(2026, 10, 22, 16, 0, 0, 0, time.UTC),
+		Fingerprint: "stale-deploy",
+	}
+	aborted := testutil.ToFloat64(repairsExecuted.WithLabelValues("checkout", actionScaleDeployment, resultAborted))
+
+	first := engine.HandleWebhook(context.Background(), Webhook{Status: "firing", Alerts: []IncomingAlert{alert}})
+	require.Equal(t, resultAborted, first.ActionsTaken[0].Result)
+	require.Contains(t, first.ActionsTaken[0].Error, "aborted")
+	require.Equal(t, aborted+1, testutil.ToFloat64(repairsExecuted.WithLabelValues("checkout", actionScaleDeployment, resultAborted)))
+	unchanged, err := client.AppsV1().Deployments("checkout").Get(context.Background(), "checkout-api", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Equal(t, int32(1), *unchanged.Spec.Replicas)
+
+	second := engine.HandleWebhook(context.Background(), Webhook{Status: "firing", Alerts: []IncomingAlert{alert}})
+	require.Equal(t, resultSuccess, second.ActionsTaken[0].Result)
+	scaled, err := client.AppsV1().Deployments("checkout").Get(context.Background(), "checkout-api", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Equal(t, int32(3), *scaled.Spec.Replicas)
 }
 
 func testEngine(t *testing.T, raw string, client *k8sfake.Clientset, querier Querier, scorer Scorer, log *logrus.Logger) *Engine {

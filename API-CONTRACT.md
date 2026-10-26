@@ -302,7 +302,7 @@ For each match the engine queries Prometheus for that policy's `model.featureCol
 
 `service` defaults to `{model.name}-predictor` and `namespace` defaults to `KSERVE_NAMESPACE`. A policy may set `model.service` and `model.namespace`. Feature columns use a built-in PromQL catalog (`cpu_usage`, `memory_usage`, `restart_count`, `response_time`, `error_rate`) unless the policy sets `model.featureQueries`. Query templates may use `$namespace`, `$pod`, and `$deployment`.
 
-Verdict `-1` runs the `repairs[]` entry for that alert. Verdict `1` logs `model says normal, no action` and does not repair. Any other verdict, a query error, or a model error does not repair. Actions always run in the policy namespace.
+Verdict `-1` runs the `repairs[]` entry for that alert. Verdict `1` logs `model says normal, no action` and does not repair. Any other verdict, a query error, or a model error does not repair. Actions always run in the policy namespace. A repair snapshots each write target's UID and resourceVersion, dry-runs the write, then sends the real write with that version. If the target changed, `actions_taken[].result` is `aborted` and the write is not applied. `exec_command` does not use this version check, because `pods/exec` has no dry-run or preconditions.
 
 Standard action types: `restart_pod`, `rollback_deployment`, `scale_deployment`, `delete_resource`, `apply_resource`, `exec_command`, `patch_resource`.
 

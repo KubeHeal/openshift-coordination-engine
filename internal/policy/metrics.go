@@ -38,8 +38,11 @@ func recordAlertOutcome(outcome *alertOutcome) {
 		return
 	}
 	result := "error"
-	if outcome.repairOK {
+	switch {
+	case outcome.repairOK:
 		result = "success"
+	case outcome.result == resultAborted:
+		result = resultAborted
 	}
 	repairsExecuted.WithLabelValues(outcome.policyLabel(), outcome.action, result).Inc()
 }
