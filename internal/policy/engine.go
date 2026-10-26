@@ -23,6 +23,7 @@ const (
 	resultNoAction     = "no_action"
 	resultSuccess      = "success"
 	resultError        = "error"
+	resultAborted      = "aborted"
 	resultUnexpected   = "unexpected_verdict"
 	repairDedupeTTL    = 10 * time.Minute
 	maxDedupeEntries   = 10000
@@ -230,10 +231,22 @@ func (e *Engine) scoreAndRepair(
 
 func (e *Engine) executeRepair(ctx context.Context, namespace string, repair Repair, alert IncomingAlert, outcome *alertOutcome) {
 	outcome.repairAttempted = true
-	if err := e.actions.Run(ctx, namespace, repair); err != nil {
+	plan, err := e.actions.Plan(ctx, namespace, repair)
+	if err != nil {
 		outcome.result = resultError
-		outcome.err = err
-		e.log.WithError(err).WithFields(outcome.fields()).Error("policy repair failed")
+		outcome.err = fmt.Errorf("%s: %w", repair.Action, err)
+		e.log.WithError(outcome.err).WithFields(outcome.fields()).Error("policy repair failed")
+		return
+	}
+	if err := e.actions.Execute(ctx, &plan); err != nil {
+		outcome.err = fmt.Errorf("%s: %w", repair.Action, err)
+		if errors.Is(err, errAborted) {
+			outcome.result = resultAborted
+			e.log.WithError(outcome.err).WithFields(outcome.fields()).Warn("policy repair aborted")
+			return
+		}
+		outcome.result = resultError
+		e.log.WithError(outcome.err).WithFields(outcome.fields()).Error("policy repair failed")
 		return
 	}
 	outcome.repairOK = true
