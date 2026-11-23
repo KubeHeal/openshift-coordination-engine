@@ -1,7 +1,7 @@
 # Dockerfile for OpenShift Coordination Engine (Go)
 
 # Stage 1: Build the Go binary
-FROM golang:1.27.3 AS builder
+FROM golang:1.27.4 AS builder
 
 WORKDIR /workspace
 
